@@ -31,6 +31,5 @@ git -C "$ROOT/src" clean -fd
 echo "4/4 Applying patches..."
 "$ROOT/scripts/apply-patches.sh"
 
-echo "Done. Next steps:"
-echo "  gn gen src/out/Release --args='$(cat "$ROOT/build/args.gn")'"
-echo "  autoninja -C src/out/Release chrome"
+echo "Done. Next step:"
+echo "  scripts/build.sh   # or: .\\scripts\\build.ps1 (builds chrome + mini_installer)"
