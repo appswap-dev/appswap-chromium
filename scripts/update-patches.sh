@@ -93,6 +93,8 @@ gen 0004-portable-scheme-pak.patch \
   chrome/browser/profiles/profile_io_data.cc
 
 gen 0005-app-routing.patch \
+  chrome/browser/app_swap/app_swap_apps_service.cc \
+  chrome/browser/app_swap/app_swap_apps_service.h \
   chrome/browser/app_swap/app_swap_artifact_provider.cc \
   chrome/browser/app_swap/app_swap_artifact_provider.h \
   chrome/browser/app_swap/app_swap_apps_ui.cc \

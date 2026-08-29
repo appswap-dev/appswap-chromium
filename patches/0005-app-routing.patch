@@ -12,16 +12,18 @@ index 2a3958f78d..4e6f3b49ff 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000..cfc7ed5dff
+index 0000000000..8f757efddc
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,35 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
 +
 +source_set("app_swap") {
 +  sources = [
++    "app_swap_apps_service.cc",
++    "app_swap_apps_service.h",
 +    "app_swap_apps_ui.cc",
 +    "app_swap_apps_ui.h",
 +    "app_swap_artifact_provider.cc",
@@ -49,12 +51,293 @@ index 0000000000..cfc7ed5dff
 +    "//url",
 +  ]
 +}
+diff --git a/chrome/browser/app_swap/app_swap_apps_service.cc b/chrome/browser/app_swap/app_swap_apps_service.cc
+new file mode 100644
+index 0000000000..da63ef5b8e
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_apps_service.cc
+@@ -0,0 +1,207 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_apps_service.h"
++
++#include <optional>
++#include <string>
++#include <utility>
++
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/no_destructor.h"
++#include "base/path_service.h"
++#include "base/task/thread_pool.h"
++#include "base/uuid.h"
++#include "base/values.h"
++#include "chrome/common/chrome_paths.h"
++
++namespace {
++
++base::DictValue AppToDict(const AppSwapApp& app) {
++  base::DictValue dict;
++  dict.Set("id", app.id);
++  dict.Set("title", app.title);
++  dict.Set("package", app.package_name);
++  dict.Set("version", app.version);
++  dict.Set("registry", app.registry);
++  if (!app.token.empty()) {
++    dict.Set("token", app.token);
++  }
++  return dict;
++}
++
++std::optional<AppSwapApp> AppFromDict(const base::DictValue& dict) {
++  const std::string* id = dict.FindString("id");
++  const std::string* title = dict.FindString("title");
++  const std::string* package = dict.FindString("package");
++  const std::string* version = dict.FindString("version");
++  if (!id || !title || !package || !version) {
++    return std::nullopt;
++  }
++  AppSwapApp app;
++  app.id = *id;
++  app.title = *title;
++  app.package_name = *package;
++  app.version = *version;
++  if (const std::string* registry = dict.FindString("registry")) {
++    app.registry = *registry;
++  }
++  if (const std::string* token = dict.FindString("token")) {
++    app.token = *token;
++  }
++  return app;
++}
++
++// Reads and parses the config file. Runs on a MayBlock task runner.
++std::vector<AppSwapApp> ReadConfigFile(const base::FilePath& path) {
++  std::vector<AppSwapApp> apps;
++  std::string json;
++  if (!base::ReadFileToString(path, &json)) {
++    return apps;
++  }
++  std::optional<base::DictValue> parsed =
++      base::JSONReader::ReadDict(json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
++  if (!parsed) {
++    return apps;
++  }
++  const base::ListValue* apps_list = parsed->FindList("apps");
++  if (!apps_list) {
++    return apps;
++  }
++  for (size_t i = 0; i < apps_list->size(); ++i) {
++    const base::Value& value = (*apps_list)[i];
++    if (!value.is_dict()) {
++      continue;
++    }
++    if (std::optional<AppSwapApp> app = AppFromDict(value.GetDict())) {
++      apps.push_back(std::move(*app));
++    }
++  }
++  return apps;
++}
++
++}  // namespace
++
++AppSwapAppsService::AppSwapAppsService() = default;
++AppSwapAppsService::~AppSwapAppsService() = default;
++
++// static
++AppSwapAppsService* AppSwapAppsService::GetInstance() {
++  static base::NoDestructor<AppSwapAppsService> instance;
++  return instance.get();
++}
++
++base::FilePath AppSwapAppsService::ConfigPath() {
++  base::FilePath dir;
++  if (!base::PathService::Get(chrome::DIR_USER_DATA, &dir)) {
++    base::GetTempDir(&dir);
++  }
++  return dir.Append(FILE_PATH_LITERAL("AppSwap"))
++      .Append(FILE_PATH_LITERAL("apps.json"));
++}
++
++void AppSwapAppsService::GetApps(
++    base::OnceCallback<void(std::vector<AppSwapApp>)> callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  if (loaded_) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(std::move(callback), apps_));
++    return;
++  }
++
++  pending_load_.push_back(base::BindOnce(
++      [](AppSwapAppsService* self,
++         base::OnceCallback<void(std::vector<AppSwapApp>)> callback) {
++        self->GetApps(std::move(callback));
++      },
++      base::Unretained(this), std::move(callback)));
++
++  if (loading_) {
++    return;
++  }
++  loading_ = true;
++
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&ReadConfigFile, ConfigPath()),
++      base::BindOnce(&AppSwapAppsService::OnConfigLoaded,
++                     base::Unretained(this)));
++}
++
++void AppSwapAppsService::OnConfigLoaded(std::vector<AppSwapApp> apps) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  apps_ = std::move(apps);
++  loaded_ = true;
++  loading_ = false;
++
++  std::vector<base::OnceClosure> pending = std::move(pending_load_);
++  pending_load_.clear();
++  for (base::OnceClosure& callback : pending) {
++    std::move(callback).Run();
++  }
++}
++
++void AppSwapAppsService::AddApp(AppSwapApp app) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  DCHECK(loaded_);
++  if (app.id.empty()) {
++    app.id = base::Uuid::GenerateRandomV4().AsLowercaseString();
++  }
++  apps_.push_back(std::move(app));
++  ScheduleSave();
++}
++
++void AppSwapAppsService::UpdateApp(AppSwapApp app) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  DCHECK(loaded_);
++  for (AppSwapApp& existing : apps_) {
++    if (existing.id == app.id) {
++      existing = std::move(app);
++      ScheduleSave();
++      return;
++    }
++  }
++}
++
++void AppSwapAppsService::RemoveApp(const std::string& id) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  DCHECK(loaded_);
++  for (auto it = apps_.begin(); it != apps_.end(); ++it) {
++    if (it->id == id) {
++      apps_.erase(it);
++      ScheduleSave();
++      return;
++    }
++  }
++}
++
++void AppSwapAppsService::ScheduleSave() {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  base::DictValue root;
++  base::ListValue apps_list;
++  for (const AppSwapApp& app : apps_) {
++    apps_list.Append(AppToDict(app));
++  }
++  root.Set("apps", std::move(apps_list));
++
++  std::string json;
++  if (!base::JSONWriter::Write(root, &json)) {
++    return;
++  }
++
++  const base::FilePath path = ConfigPath();
++  base::ThreadPool::PostTask(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
++      base::BindOnce(
++          [](base::FilePath path, std::string json) {
++            base::CreateDirectory(path.DirName());
++            base::WriteFile(path, json);
++          },
++          std::move(path), std::move(json)));
++}
+diff --git a/chrome/browser/app_swap/app_swap_apps_service.h b/chrome/browser/app_swap/app_swap_apps_service.h
+new file mode 100644
+index 0000000000..1e66bb96c9
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_apps_service.h
+@@ -0,0 +1,62 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
++
++#include <string>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/functional/callback.h"
++#include "base/sequence_checker.h"
++
++// A configured app: an npm package identified by a GUID, with a display title
++// and a version (exact version or dist-tag such as "latest").
++struct AppSwapApp {
++  std::string id;           // GUID, generated on creation.
++  std::string title;
++  std::string package_name;  // e.g. "@myorg/myapp"
++  std::string version;       // exact version ("1.2.3") or dist-tag ("latest")
++  std::string registry;      // e.g. "https://registry.npmjs.org"
++  std::string token;         // optional bearer token for private registries
++};
++
++// Owns the persistent app configuration, stored as JSON in the user data
++// directory. The file is read/written on a background (MayBlock) task runner.
++class AppSwapAppsService {
++ public:
++  AppSwapAppsService();
++  ~AppSwapAppsService();
++
++  AppSwapAppsService(const AppSwapAppsService&) = delete;
++  AppSwapAppsService& operator=(const AppSwapAppsService&) = delete;
++
++  static AppSwapAppsService* GetInstance();
++
++  // Loads the config from disk (on first call) and invokes |callback| with the
++  // apps on the UI thread.
++  void GetApps(base::OnceCallback<void(std::vector<AppSwapApp>)> callback);
++
++  // Mutations. Must only be called after the config has been loaded (i.e.
++  // after a GetApps callback has run). They update the in-memory list and
++  // schedule an asynchronous save.
++  void AddApp(AppSwapApp app);
++  void UpdateApp(AppSwapApp app);
++  void RemoveApp(const std::string& id);
++
++ private:
++  void OnConfigLoaded(std::vector<AppSwapApp> apps);
++  void ScheduleSave();
++
++  base::FilePath ConfigPath();
++
++  std::vector<AppSwapApp> apps_;
++  bool loaded_ = false;
++  bool loading_ = false;
++  std::vector<base::OnceClosure> pending_load_;
++  SEQUENCE_CHECKER(sequence_checker_);
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_apps_ui.cc b/chrome/browser/app_swap/app_swap_apps_ui.cc
 new file mode 100644
-index 0000000000..12c8a05cbd
+index 0000000000..d8fb23f9e0
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_ui.cc
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,257 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -66,19 +349,19 @@ index 0000000000..12c8a05cbd
 +
 +#include "base/functional/bind.h"
 +#include "base/memory/ref_counted_memory.h"
++#include "base/memory/weak_ptr.h"
 +#include "base/values.h"
-+#include "chrome/browser/app_swap/app_swap_tab_state.h"
++#include "chrome/browser/app_swap/app_swap_apps_service.h"
 +#include "chrome/browser/profiles/profile.h"
-+#include "content/public/browser/navigation_controller.h"
-+#include "content/public/browser/web_contents.h"
 +#include "content/public/browser/web_ui.h"
 +#include "content/public/browser/web_ui_data_source.h"
 +#include "content/public/browser/web_ui_message_handler.h"
 +#include "content/public/common/url_constants.h"
 +#include "services/network/public/mojom/content_security_policy.mojom.h"
-+#include "url/gurl.h"
 +
 +namespace {
++
++constexpr char kDefaultRegistry[] = "https://registry.npmjs.org";
 +
 +constexpr char kAppsHtml[] = R"html(<!doctype html>
 +<html>
@@ -86,20 +369,34 @@ index 0000000000..12c8a05cbd
 +<title>AppSwap Apps</title>
 +<meta charset="utf-8">
 +<style>
-+  body { font-family: system-ui, sans-serif; margin: 2rem; }
++  body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 48rem; }
 +  h1 { font-size: 1.25rem; }
++  form { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
++  form input, form button { padding: 0.4rem; font-size: 0.95rem; }
++  form button { width: 8rem; cursor: pointer; }
 +  ul { list-style: none; padding: 0; }
-+  li { margin: 0.5rem 0; }
-+  a { color: #1a73e8; text-decoration: none; font-size: 1.1rem; }
++  li { display: flex; gap: 0.5rem; align-items: center; margin: 0.4rem 0; }
++  li span { flex: 1; }
++  li button { cursor: pointer; }
 +  .empty { color: #777; }
 +</style>
 +</head>
 +<body>
 +  <h1>Apps</h1>
++  <form id="form">
++    <input id="title" placeholder="Title">
++    <input id="package" placeholder="Package (e.g. @myorg/myapp)">
++    <input id="version" placeholder="Version or dist-tag (e.g. latest)">
++    <input id="registry" placeholder="Registry" value="https://registry.npmjs.org">
++    <button id="save" type="button">Add</button>
++  </form>
 +  <ul id="apps"></ul>
 +  <script>
-+    window.setApps = function(apps) {
-+      const ul = document.getElementById('apps');
++    let editingId = null;
++    const field = (id) => document.getElementById(id);
++
++    function render(apps) {
++      const ul = field('apps');
 +      ul.replaceChildren();
 +      if (!apps.length) {
 +        const li = document.createElement('li');
@@ -110,17 +407,54 @@ index 0000000000..12c8a05cbd
 +      }
 +      for (const app of apps) {
 +        const li = document.createElement('li');
-+        const a = document.createElement('a');
-+        a.href = app.url;
-+        a.textContent = app.title || app.url;
-+        a.addEventListener('click', (e) => {
-+          e.preventDefault();
-+          chrome.send('openApp', [app.url]);
-+        });
-+        li.appendChild(a);
++        const span = document.createElement('span');
++        span.textContent = app.title + '  —  ' + app.package + '@' + app.version;
++        const editBtn = document.createElement('button');
++        editBtn.textContent = 'Edit';
++        editBtn.addEventListener('click', () => startEdit(app));
++        const rmBtn = document.createElement('button');
++        rmBtn.textContent = 'Remove';
++        rmBtn.addEventListener('click', () => chrome.send('removeApp', [app.id]));
++        li.appendChild(span);
++        li.appendChild(editBtn);
++        li.appendChild(rmBtn);
 +        ul.appendChild(li);
 +      }
-+    };
++    }
++
++    function startEdit(app) {
++      editingId = app.id;
++      field('title').value = app.title;
++      field('package').value = app.package;
++      field('version').value = app.version;
++      field('registry').value = app.registry || 'https://registry.npmjs.org';
++      field('save').textContent = 'Save';
++    }
++
++    function resetForm() {
++      editingId = null;
++      field('title').value = '';
++      field('package').value = '';
++      field('version').value = '';
++      field('registry').value = 'https://registry.npmjs.org';
++      field('save').textContent = 'Add';
++    }
++
++    field('save').addEventListener('click', () => {
++      const title = field('title').value.trim();
++      const pkg = field('package').value.trim();
++      const version = field('version').value.trim();
++      const registry = field('registry').value.trim() || 'https://registry.npmjs.org';
++      if (!title || !pkg || !version) return;
++      if (editingId) {
++        chrome.send('updateApp', [editingId, title, pkg, version, registry]);
++      } else {
++        chrome.send('addApp', [title, pkg, version, registry]);
++      }
++      resetForm();
++    });
++
++    window.setApps = render;
 +    chrome.send('getApps');
 +  </script>
 +</body>
@@ -134,43 +468,101 @@ index 0000000000..12c8a05cbd
 +        "getApps", base::BindRepeating(&AppSwapAppsHandler::HandleGetApps,
 +                                       base::Unretained(this)));
 +    web_ui()->RegisterMessageCallback(
-+        "openApp", base::BindRepeating(&AppSwapAppsHandler::HandleOpenApp,
-+                                       base::Unretained(this)));
++        "addApp", base::BindRepeating(&AppSwapAppsHandler::HandleAddApp,
++                                      base::Unretained(this)));
++    web_ui()->RegisterMessageCallback(
++        "updateApp", base::BindRepeating(&AppSwapAppsHandler::HandleUpdateApp,
++                                         base::Unretained(this)));
++    web_ui()->RegisterMessageCallback(
++        "removeApp", base::BindRepeating(&AppSwapAppsHandler::HandleRemoveApp,
++                                         base::Unretained(this)));
 +  }
 +
 + private:
-+  void HandleGetApps(const base::ListValue& args) {
-+    AllowJavascript();
-+
-+    base::ListValue apps;
-+    for (const AppSwapRoute& route : AppSwapTabState::GetGlobalRoutes()) {
-+      base::DictValue app;
-+      app.Set("url", route.url_prefix);
-+      app.Set("title", GURL(route.url_prefix).host());
-+      apps.Append(std::move(app));
-+    }
-+    CallJavascriptFunction("setApps", apps);
++  void SendApps() {
++    AppSwapAppsService::GetInstance()->GetApps(base::BindOnce(
++        &AppSwapAppsHandler::OnAppsLoaded, weak_factory_.GetWeakPtr()));
 +  }
 +
-+  void HandleOpenApp(const base::ListValue& args) {
++  void OnAppsLoaded(std::vector<AppSwapApp> apps) {
++    base::ListValue list;
++    for (const AppSwapApp& app : apps) {
++      base::DictValue dict;
++      dict.Set("id", app.id);
++      dict.Set("title", app.title);
++      dict.Set("package", app.package_name);
++      dict.Set("version", app.version);
++      dict.Set("registry", app.registry);
++      list.Append(std::move(dict));
++    }
++    CallJavascriptFunction("setApps", list);
++  }
++
++  void HandleGetApps(const base::ListValue& args) {
++    AllowJavascript();
++    SendApps();
++  }
++
++  void HandleAddApp(const base::ListValue& args) {
++    AllowJavascript();
++    if (args.size() < 4) {
++      return;
++    }
++    const std::string* title = args[0].GetIfString();
++    const std::string* package = args[1].GetIfString();
++    const std::string* version = args[2].GetIfString();
++    const std::string* registry = args[3].GetIfString();
++    if (!title || !package || !version) {
++      return;
++    }
++
++    AppSwapApp app;
++    app.title = *title;
++    app.package_name = *package;
++    app.version = *version;
++    app.registry = registry && !registry->empty() ? *registry : kDefaultRegistry;
++    AppSwapAppsService::GetInstance()->AddApp(std::move(app));
++    SendApps();
++  }
++
++  void HandleUpdateApp(const base::ListValue& args) {
++    AllowJavascript();
++    if (args.size() < 5) {
++      return;
++    }
++    const std::string* id = args[0].GetIfString();
++    const std::string* title = args[1].GetIfString();
++    const std::string* package = args[2].GetIfString();
++    const std::string* version = args[3].GetIfString();
++    const std::string* registry = args[4].GetIfString();
++    if (!id || !title || !package || !version) {
++      return;
++    }
++
++    AppSwapApp app;
++    app.id = *id;
++    app.title = *title;
++    app.package_name = *package;
++    app.version = *version;
++    app.registry = registry && !registry->empty() ? *registry : kDefaultRegistry;
++    AppSwapAppsService::GetInstance()->UpdateApp(std::move(app));
++    SendApps();
++  }
++
++  void HandleRemoveApp(const base::ListValue& args) {
++    AllowJavascript();
 +    if (args.empty()) {
 +      return;
 +    }
-+    const std::string* url = args[0].GetIfString();
-+    if (!url || url->empty()) {
++    const std::string* id = args[0].GetIfString();
++    if (!id) {
 +      return;
 +    }
-+
-+    content::WebContents* web_contents = web_ui()->GetWebContents();
-+    if (!web_contents) {
-+      return;
-+    }
-+
-+    // Navigate this tab to the app; its URL is served by the AppSwap routes.
-+    content::NavigationController::LoadURLParams load_params{GURL(*url)};
-+    load_params.transition_type = ui::PAGE_TRANSITION_AUTO_TOPLEVEL;
-+    web_contents->GetController().LoadURLWithParams(load_params);
++    AppSwapAppsService::GetInstance()->RemoveApp(*id);
++    SendApps();
 +  }
++
++  base::WeakPtrFactory<AppSwapAppsHandler> weak_factory_{this};
 +};
 +
 +}  // namespace
