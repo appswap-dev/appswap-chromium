@@ -12,16 +12,19 @@ index 2a3958f78d..4e6f3b49ff 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000..3ea632e934
+index 0000000000..728d5d2a03
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,29 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
 +
 +source_set("app_swap") {
 +  sources = [
++    "app_swap_artifact_provider.cc",
++    "app_swap_artifact_provider.h",
++    "app_swap_source.h",
 +    "app_swap_tab_state.cc",
 +    "app_swap_tab_state.h",
 +    "app_swap_url_loader_factory.cc",
@@ -30,21 +33,505 @@ index 0000000000..3ea632e934
 +
 +  deps = [
 +    "//base",
++    "//chrome/browser/net",
++    "//chrome/common",
 +    "//content/public/browser",
 +    "//mojo/public/cpp/bindings",
 +    "//mojo/public/cpp/system",
 +    "//net",
 +    "//services/network/public/cpp",
 +    "//services/network/public/mojom",
++    "//third_party/zlib/google:compression_utils",
 +    "//url",
 +  ]
 +}
+diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.cc b/chrome/browser/app_swap/app_swap_artifact_provider.cc
+new file mode 100644
+index 0000000000..e5400be99d
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_artifact_provider.cc
+@@ -0,0 +1,365 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <utility>
++
++#include "base/compiler_specific.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/no_destructor.h"
++#include "base/path_service.h"
++#include "base/strings/string_util.h"
++#include "base/task/thread_pool.h"
++#include "base/values.h"
++#include "chrome/browser/net/system_network_context_manager.h"
++#include "chrome/common/chrome_paths.h"
++#include "net/base/net_errors.h"
++#include "net/http/http_request_headers.h"
++#include "net/traffic_annotation/network_traffic_annotation.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
++#include "services/network/public/cpp/simple_url_loader.h"
++#include "services/network/public/mojom/url_response_head.mojom.h"
++#include "third_party/zlib/google/compression_utils.h"
++#include "url/gurl.h"
++
++namespace {
++
++constexpr net::NetworkTrafficAnnotationTag kArtifactTrafficAnnotation =
++    net::DefineNetworkTrafficAnnotation("appswap_artifact", R"(
++        semantics {
++          sender: "AppSwap Artifact Provider"
++          description:
++            "Downloads the SPA application artifact (npm tarball) that AppSwap "
++            "serves for a configured route."
++          trigger: "A user navigates to an app configured with an npm source."
++          data: "None beyond the request URL and optional registry credentials."
++          destination: OTHER
++        }
++        policy {
++          cookies_allowed: NO
++          setting: "This is an AppSwap feature with no separate setting."
++        })");
++
++std::string Key(const AppSwapSource& source) {
++  return source.package_name + "@" + source.version;
++}
++
++bool IsExactVersion(const std::string& version) {
++  size_t i = 0;
++  if (!version.empty() && (version[0] == 'v' || version[0] == 'V')) {
++    i = 1;
++  }
++  return i < version.size() && version[i] >= '0' && version[i] <= '9';
++}
++
++std::string TarballUrl(const AppSwapSource& source, const std::string& version) {
++  std::string basename = source.package_name;
++  const size_t slash = basename.find_last_of('/');
++  if (slash != std::string::npos) {
++    basename = basename.substr(slash + 1);
++  }
++  return base::StrCat({source.registry, "/", source.package_name, "/-/",
++                       basename, "-", version, ".tgz"});
++}
++
++std::string MetadataUrl(const AppSwapSource& source) {
++  std::string encoded;
++  for (const char c : source.package_name) {
++    if (c == '/') {
++      encoded += "%2F";
++    } else {
++      encoded += c;
++    }
++  }
++  return base::StrCat({source.registry, "/", encoded});
++}
++
++// Extracts a ustar-format tar archive into `dest_dir`. Returns false on error
++// (including any entry that would escape `dest_dir`).
++UNSAFE_BUFFERS(bool ExtractTar(const std::string& tar,
++                               const base::FilePath& dest_dir) {
++  constexpr size_t kBlockSize = 512;
++  size_t offset = 0;
++  while (offset + kBlockSize <= tar.size()) {
++    const char* header = tar.data() + offset;
++
++    // A zeroed header marks the end of the archive.
++    if (header[0] == '\0') {
++      return true;
++    }
++
++    std::string name(header, 100);
++    name = name.substr(0, name.find('\0'));
++    std::string prefix(header + 345, 155);
++    prefix = prefix.substr(0, prefix.find('\0'));
++    if (!prefix.empty()) {
++      name = prefix + "/" + name;
++    }
++    // npm tarballs store everything under a top-level "package/" directory.
++    const size_t first_slash = name.find('/');
++    if (first_slash != std::string::npos) {
++      name = name.substr(first_slash + 1);
++    }
++
++    std::string size_str(header + 124, 12);
++    size_str = size_str.substr(0, size_str.find_first_of(" \0"));
++    uint64_t size = 0;
++    if (!size_str.empty()) {
++      size = strtoull(size_str.c_str(), nullptr, 8);
++    }
++
++    const char typeflag = header[156];
++    offset += kBlockSize;
++
++    const uint64_t padded_size = (size + kBlockSize - 1) / kBlockSize * kBlockSize;
++    if (offset + padded_size > tar.size()) {
++      return false;
++    }
++
++    // Security: reject any entry that could escape the destination.
++    if (name.find("..") != std::string::npos) {
++      return false;
++    }
++
++    // The top-level directory entry itself carries no content to write.
++    if (name.empty()) {
++      offset += padded_size;
++      continue;
++    }
++
++    base::FilePath path = dest_dir.Append(base::FilePath::FromUTF8Unsafe(name));
++
++    if (typeflag == '5') {
++      // Directory.
++      if (!base::CreateDirectory(path)) {
++        return false;
++      }
++    } else if (typeflag == '0' || typeflag == '\0') {
++      // Regular file.
++      if (!base::CreateDirectory(path.DirName()) ||
++          !base::WriteFile(path, tar.substr(offset, size))) {
++        return false;
++      }
++    }
++    // Other types (symlink, hardlink, device) are skipped.
++
++    offset += padded_size;
++  }
++  return false;  // Truncated archive (no end marker).
++})
++
++}  // namespace
++
++AppSwapArtifactProvider::AppSwapArtifactProvider() = default;
++AppSwapArtifactProvider::~AppSwapArtifactProvider() = default;
++
++// static
++AppSwapArtifactProvider* AppSwapArtifactProvider::GetInstance() {
++  static base::NoDestructor<AppSwapArtifactProvider> instance;
++  return instance.get();
++}
++
++void AppSwapArtifactProvider::GetOrDownload(
++    const AppSwapSource& source,
++    base::OnceCallback<void(base::FilePath)> callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if (source.type != AppSwapSourceType::kNpm) {
++    std::move(callback).Run(base::FilePath());
++    return;
++  }
++
++  const std::string key = Key(source);
++
++  auto cache_it = cache_.find(key);
++  if (cache_it != cache_.end()) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(std::move(callback), cache_it->second));
++    return;
++  }
++
++  auto& pending = pending_[key];
++  pending.push_back(std::move(callback));
++  if (pending.size() > 1) {
++    return;  // Already resolving/downloading this source.
++  }
++
++  if (IsExactVersion(source.version)) {
++    DownloadTarball(source, source.version, TarballUrl(source, source.version),
++                    base::BindOnce(&AppSwapArtifactProvider::Finish,
++                                   base::Unretained(this), source));
++  } else {
++    FetchMetadata(
++        source,
++        base::BindOnce(
++            [](AppSwapArtifactProvider* self, const AppSwapSource& source,
++               std::string version, std::string error) {
++              self->loaders_.erase(Key(source));
++              if (!error.empty()) {
++                self->Finish(source, base::FilePath());
++                return;
++              }
++              self->DownloadTarball(
++                  source, version, TarballUrl(source, version),
++                  base::BindOnce(&AppSwapArtifactProvider::Finish,
++                                 base::Unretained(self), source));
++            },
++            base::Unretained(this), source));
++  }
++}
++
++void AppSwapArtifactProvider::FetchMetadata(
++    const AppSwapSource& source,
++    base::OnceCallback<void(std::string /*version*/, std::string /*error*/)>
++        callback) {
++  auto resource_request = std::make_unique<network::ResourceRequest>();
++  resource_request->url = GURL(MetadataUrl(source));
++  resource_request->method = net::HttpRequestHeaders::kGetMethod;
++  resource_request->headers.SetHeader(net::HttpRequestHeaders::kAccept,
++                                      "application/json");
++  if (!source.token.empty()) {
++    resource_request->headers.SetHeader(net::HttpRequestHeaders::kAuthorization,
++                                        base::StrCat({"Bearer ", source.token}));
++  }
++
++  scoped_refptr<network::SharedURLLoaderFactory> factory =
++      SystemNetworkContextManager::GetInstance()->GetSharedURLLoaderFactory();
++
++  auto loader =
++      network::SimpleURLLoader::Create(std::move(resource_request),
++                                       kArtifactTrafficAnnotation);
++  network::SimpleURLLoader* raw_loader = loader.get();
++  loaders_[Key(source)] = std::move(loader);
++
++  raw_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
++      factory.get(),
++      base::BindOnce(
++          [](AppSwapArtifactProvider* self, const AppSwapSource& source,
++             base::OnceCallback<void(std::string, std::string)> callback,
++             std::optional<std::string> body) {
++            self->loaders_.erase(Key(source));
++            if (!body) {
++              std::move(callback).Run(std::string(), "metadata download failed");
++              return;
++            }
++            std::optional<base::Value> parsed =
++                base::JSONReader::Read(*body, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
++            if (!parsed || !parsed->is_dict()) {
++              std::move(callback).Run(std::string(), "invalid metadata JSON");
++              return;
++            }
++            const base::DictValue& root = parsed->GetDict();
++            const base::DictValue* dist_tags = root.FindDict("dist-tags");
++            const std::string* version =
++                dist_tags ? dist_tags->FindString(source.version) : nullptr;
++            if (!version) {
++              std::move(callback).Run(std::string(),
++                                      "dist-tag not found: " + source.version);
++              return;
++            }
++            std::move(callback).Run(*version, std::string());
++          },
++          base::Unretained(this), source, std::move(callback)));
++}
++
++void AppSwapArtifactProvider::DownloadTarball(
++    const AppSwapSource& source,
++    const std::string& version,
++    const std::string& tarball_url,
++    base::OnceCallback<void(base::FilePath)> callback) {
++  // Resolve the cache directory for this exact version.
++  base::FilePath apps_dir;
++  if (!base::PathService::Get(chrome::DIR_USER_DATA, &apps_dir)) {
++    base::GetTempDir(&apps_dir);
++  }
++  const base::FilePath target_dir =
++      apps_dir.AppendASCII("AppSwapApps")
++          .Append(base::FilePath::FromUTF8Unsafe(source.package_name))
++          .Append(base::FilePath::FromUTF8Unsafe(version));
++
++  auto resource_request = std::make_unique<network::ResourceRequest>();
++  resource_request->url = GURL(tarball_url);
++  resource_request->method = net::HttpRequestHeaders::kGetMethod;
++  if (!source.token.empty()) {
++    resource_request->headers.SetHeader(net::HttpRequestHeaders::kAuthorization,
++                                        base::StrCat({"Bearer ", source.token}));
++  }
++
++  scoped_refptr<network::SharedURLLoaderFactory> factory =
++      SystemNetworkContextManager::GetInstance()->GetSharedURLLoaderFactory();
++
++  auto loader =
++      network::SimpleURLLoader::Create(std::move(resource_request),
++                                       kArtifactTrafficAnnotation);
++  network::SimpleURLLoader* raw_loader = loader.get();
++  loaders_[Key(source)] = std::move(loader);
++
++  raw_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
++      factory.get(),
++      base::BindOnce(&AppSwapArtifactProvider::OnTarball, base::Unretained(this),
++                     source, version, target_dir, std::move(callback)));
++}
++
++void AppSwapArtifactProvider::OnTarball(
++    const AppSwapSource& source,
++    const std::string& version,
++    base::FilePath target_dir,
++    base::OnceCallback<void(base::FilePath)> callback,
++    std::optional<std::string> body) {
++  loaders_.erase(Key(source));
++  if (!body) {
++    std::move(callback).Run(base::FilePath());
++    return;
++  }
++
++  // Extract (gunzip + untar) on a MayBlock task runner.
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(
++          [](std::string tgz, base::FilePath dir) {
++            if (base::PathExists(dir)) {
++              return true;  // Already extracted.
++            }
++            std::string tar;
++            if (!compression::GzipUncompress(tgz, &tar) ||
++                !base::CreateDirectory(dir) || !ExtractTar(tar, dir)) {
++              return false;
++            }
++            return true;
++          },
++          std::move(*body), target_dir),
++      base::BindOnce(
++          [](base::OnceCallback<void(base::FilePath)> callback,
++             base::FilePath target_dir, bool success) {
++            std::move(callback).Run(success ? target_dir : base::FilePath());
++          },
++          std::move(callback), target_dir));
++}
++
++void AppSwapArtifactProvider::Finish(const AppSwapSource& source,
++                                     base::FilePath dir) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  const std::string key = Key(source);
++
++  if (!dir.empty()) {
++    cache_[key] = dir;
++  }
++
++  auto it = pending_.find(key);
++  if (it != pending_.end()) {
++    std::vector<base::OnceCallback<void(base::FilePath)>> callbacks =
++        std::move(it->second);
++    pending_.erase(it);
++    for (auto& callback : callbacks) {
++      std::move(callback).Run(dir);
++    }
++  }
++}
+diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.h b/chrome/browser/app_swap/app_swap_artifact_provider.h
+new file mode 100644
+index 0000000000..ef96086027
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_artifact_provider.h
+@@ -0,0 +1,70 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_ARTIFACT_PROVIDER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_ARTIFACT_PROVIDER_H_
++
++#include <map>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/functional/callback.h"
++#include "base/sequence_checker.h"
++#include "chrome/browser/app_swap/app_swap_source.h"
++
++namespace network {
++class SimpleURLLoader;
++}  // namespace network
++
++// Resolves npm app sources to a directory on disk, downloading and unpacking
++// the tarball on first use and caching the result.
++class AppSwapArtifactProvider {
++ public:
++  AppSwapArtifactProvider();
++  ~AppSwapArtifactProvider();
++
++  AppSwapArtifactProvider(const AppSwapArtifactProvider&) = delete;
++  AppSwapArtifactProvider& operator=(const AppSwapArtifactProvider&) = delete;
++
++  static AppSwapArtifactProvider* GetInstance();
++
++  // Asynchronously ensures the artifact for `source` is present and calls
++  // `callback` with its directory (empty on failure). Must be called on the UI
++  // thread; `callback` runs on the UI thread.
++  void GetOrDownload(const AppSwapSource& source,
++                     base::OnceCallback<void(base::FilePath)> callback);
++
++ private:
++  void FetchMetadata(const AppSwapSource& source,
++                     base::OnceCallback<void(std::string /*version*/,
++                                             std::string /*error*/)> callback);
++  void DownloadTarball(const AppSwapSource& source,
++                       const std::string& version,
++                       const std::string& tarball_url,
++                       base::OnceCallback<void(base::FilePath)> callback);
++  void OnTarball(const AppSwapSource& source,
++                 const std::string& version,
++                 base::FilePath target_dir,
++                 base::OnceCallback<void(base::FilePath)> callback,
++                 std::optional<std::string> body);
++  void Finish(const AppSwapSource& source, base::FilePath dir);
++
++  base::FilePath apps_dir_;
++
++  // Dedup: pending callbacks keyed by "package@version".
++  std::map<std::string, std::vector<base::OnceCallback<void(base::FilePath)>>>
++      pending_;
++
++  // Active downloads keyed by "package@version", to keep the loader alive.
++  std::map<std::string, std::unique_ptr<network::SimpleURLLoader>> loaders_;
++
++  // In-memory cache of resolved directories keyed by "package@version".
++  std::map<std::string, base::FilePath> cache_;
++
++  SEQUENCE_CHECKER(sequence_checker_);
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ARTIFACT_PROVIDER_H_
+diff --git a/chrome/browser/app_swap/app_swap_source.h b/chrome/browser/app_swap/app_swap_source.h
+new file mode 100644
+index 0000000000..42261dedf7
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_source.h
+@@ -0,0 +1,28 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
++
++#include <string>
++
++#include "base/files/file_path.h"
++
++enum class AppSwapSourceType { kDirectory, kNpm };
++
++// Where the files for an AppSwap route come from.
++struct AppSwapSource {
++  AppSwapSourceType type = AppSwapSourceType::kDirectory;
++
++  // kDirectory: serve files directly from this directory.
++  base::FilePath dir;
++
++  // kNpm: download and unpack an npm package tarball.
++  std::string package_name;  // e.g. "@myorg/myapp"
++  std::string version;       // exact version ("1.2.3") or dist-tag ("latest")
++  std::string registry;      // e.g. "https://registry.npmjs.org" (no trailing '/')
++  std::string token;         // optional bearer token for private registries
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_tab_state.cc b/chrome/browser/app_swap/app_swap_tab_state.cc
 new file mode 100644
-index 0000000000..6bfcd92bde
+index 0000000000..58d6697661
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_tab_state.cc
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,100 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -58,6 +545,7 @@ index 0000000000..6bfcd92bde
 +
 +#include "base/command_line.h"
 +#include "base/no_destructor.h"
++#include "base/strings/string_split.h"
 +#include "base/strings/string_util.h"
 +
 +AppSwapTabState::AppSwapTabState(content::WebContents* contents)
@@ -84,23 +572,53 @@ index 0000000000..6bfcd92bde
 +
 +namespace {
 +
-+std::vector<AppSwapRoute> ParseGlobalRoutes() {
-+  std::vector<AppSwapRoute> routes;
-+  const std::string value =
-+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-+          "appswap-route");
-+  if (value.empty()) {
-+    return routes;
-+  }
-+  // Format: <url_prefix>|<serve_dir>
++// Parses "--appswap-route=<url_prefix>|<dir>" into a directory route.
++std::optional<AppSwapRoute> ParseDirectoryRoute(const std::string& value) {
 +  const size_t separator = value.find('|');
-+  if (separator == std::string::npos) {
-+    return routes;
++  if (separator == std::string::npos || separator == 0) {
++    return std::nullopt;
 +  }
 +  AppSwapRoute route;
 +  route.url_prefix = value.substr(0, separator);
-+  route.serve_dir = base::FilePath::FromUTF8Unsafe(value.substr(separator + 1));
-+  routes.push_back(std::move(route));
++  route.source.type = AppSwapSourceType::kDirectory;
++  route.source.dir = base::FilePath::FromUTF8Unsafe(value.substr(separator + 1));
++  return route;
++}
++
++// Parses "--appswap-npm-route=<url_prefix>|<package>@<version>|<registry>"
++// into an npm route.
++std::optional<AppSwapRoute> ParseNpmRoute(const std::string& value) {
++  const std::vector<std::string> parts =
++      base::SplitString(value, "|", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
++  if (parts.size() != 3) {
++    return std::nullopt;
++  }
++
++  const size_t at = parts[1].find_last_of('@');
++  if (at == std::string::npos || at == 0) {
++    return std::nullopt;
++  }
++
++  AppSwapRoute route;
++  route.url_prefix = parts[0];
++  route.source.type = AppSwapSourceType::kNpm;
++  route.source.package_name = parts[1].substr(0, at);
++  route.source.version = parts[1].substr(at + 1);
++  route.source.registry = parts[2];
++  return route;
++}
++
++std::vector<AppSwapRoute> ParseGlobalRoutes() {
++  std::vector<AppSwapRoute> routes;
++  const base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
++  if (std::optional<AppSwapRoute> route = ParseDirectoryRoute(
++          command_line->GetSwitchValueASCII("appswap-route"))) {
++    routes.push_back(std::move(*route));
++  }
++  if (std::optional<AppSwapRoute> route = ParseNpmRoute(
++          command_line->GetSwitchValueASCII("appswap-npm-route"))) {
++    routes.push_back(std::move(*route));
++  }
 +  return routes;
 +}
 +
@@ -116,7 +634,7 @@ index 0000000000..6bfcd92bde
 +WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapTabState);
 diff --git a/chrome/browser/app_swap/app_swap_tab_state.h b/chrome/browser/app_swap/app_swap_tab_state.h
 new file mode 100644
-index 0000000000..ff7cd834b8
+index 0000000000..19142062f3
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_tab_state.h
 @@ -0,0 +1,50 @@
@@ -131,15 +649,15 @@ index 0000000000..ff7cd834b8
 +#include <string>
 +#include <vector>
 +
-+#include "base/files/file_path.h"
++#include "chrome/browser/app_swap/app_swap_source.h"
 +#include "content/public/browser/web_contents_user_data.h"
 +#include "url/gurl.h"
 +
 +// A single AppSwap route: requests whose URL starts with `url_prefix` are
-+// served from files under `serve_dir` instead of the network.
++// served from `source` instead of the network.
 +struct AppSwapRoute {
 +  std::string url_prefix;
-+  base::FilePath serve_dir;
++  AppSwapSource source;
 +
 +  // Returns the first route whose prefix matches `url`, or nullopt.
 +  static std::optional<AppSwapRoute> FindForUrl(
@@ -172,10 +690,10 @@ index 0000000000..ff7cd834b8
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_TAB_STATE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000..e2f32a293d
+index 0000000000..b880259fd4
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,324 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -193,7 +711,9 @@ index 0000000000..e2f32a293d
 +#include "base/files/file_util.h"
 +#include "base/functional/bind.h"
 +#include "base/memory/self_deleting.h"
++#include "base/no_destructor.h"
 +#include "base/task/thread_pool.h"
++#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
 +#include "chrome/browser/app_swap/app_swap_tab_state.h"
 +#include "content/public/browser/render_frame_host.h"
 +#include "content/public/browser/web_contents.h"
@@ -211,10 +731,18 @@ index 0000000000..e2f32a293d
 +
 +namespace {
 +
-+// Resolves a request URL path to a file on disk under `route.serve_dir`,
-+// applying SPA fallback for navigations. Returns an empty path when nothing
-+// matches. Runs on a MayBlock task runner (it stats the filesystem).
-+base::FilePath ResolveFilePath(const AppSwapRoute& route,
++// The task runner file serving runs on (file I/O is blocking).
++scoped_refptr<base::SequencedTaskRunner> GetServeTaskRunner() {
++  static base::NoDestructor<scoped_refptr<base::SequencedTaskRunner>> runner(
++      base::ThreadPool::CreateSequencedTaskRunner(
++          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
++  return *runner;
++}
++
++// Resolves a request URL path to a file on disk under `serve_dir`, applying
++// SPA fallback for navigations. Returns an empty path when nothing matches.
++base::FilePath ResolveFilePath(const base::FilePath& serve_dir,
 +                               const std::string& path,
 +                               bool accepts_html) {
 +  std::string_view path_view(path);
@@ -234,7 +762,7 @@ index 0000000000..e2f32a293d
 +  }
 +
 +  base::FilePath full =
-+      route.serve_dir.Append(base::FilePath::FromUTF8Unsafe(relative_str))
++      serve_dir.Append(base::FilePath::FromUTF8Unsafe(relative_str))
 +          .NormalizePathSeparators();
 +
 +  if (base::PathExists(full) && !base::DirectoryExists(full)) {
@@ -244,8 +772,7 @@ index 0000000000..e2f32a293d
 +  // SPA fallback: only for navigations (requests that accept HTML), never for
 +  // missing asset subresources.
 +  if (accepts_html) {
-+    base::FilePath index =
-+        route.serve_dir.Append(FILE_PATH_LITERAL("index.html"));
++    base::FilePath index = serve_dir.Append(FILE_PATH_LITERAL("index.html"));
 +    if (base::PathExists(index)) {
 +      return index;
 +    }
@@ -258,15 +785,15 @@ index 0000000000..e2f32a293d
 +class AppSwapFileLoader : public network::mojom::URLLoader {
 + public:
 +  static void CreateAndStart(
-+      const AppSwapRoute& route,
++      const base::FilePath& serve_dir,
 +      std::string path,
 +      bool accepts_html,
 +      mojo::PendingReceiver<network::mojom::URLLoader> loader,
 +      mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
 +    // Owns itself; deleted once both bindings are closed.
 +    auto* file_loader = new AppSwapFileLoader();
-+    file_loader->Start(route, std::move(path), accepts_html, std::move(loader),
-+                       std::move(client));
++    file_loader->Start(serve_dir, std::move(path), accepts_html,
++                       std::move(loader), std::move(client));
 +  }
 +
 +  AppSwapFileLoader(const AppSwapFileLoader&) = delete;
@@ -283,7 +810,7 @@ index 0000000000..e2f32a293d
 +  AppSwapFileLoader() = default;
 +  ~AppSwapFileLoader() override = default;
 +
-+  void Start(const AppSwapRoute& route,
++  void Start(const base::FilePath& serve_dir,
 +             std::string path,
 +             bool accepts_html,
 +             mojo::PendingReceiver<network::mojom::URLLoader> loader,
@@ -293,7 +820,7 @@ index 0000000000..e2f32a293d
 +        &AppSwapFileLoader::OnMojoDisconnect, base::Unretained(this)));
 +    client_.Bind(std::move(client));
 +
-+    base::FilePath file_path = ResolveFilePath(route, path, accepts_html);
++    base::FilePath file_path = ResolveFilePath(serve_dir, path, accepts_html);
 +    if (file_path.empty()) {
 +      OnClientComplete(net::ERR_FILE_NOT_FOUND);
 +      return;
@@ -375,6 +902,34 @@ index 0000000000..e2f32a293d
 +  std::unique_ptr<mojo::DataPipeProducer> data_producer_;
 +};
 +
++// Posts a file-serving request for `dir` to the serve task runner.
++void ServeFromDir(const base::FilePath& dir,
++                  std::string path,
++                  bool accepts_html,
++                  mojo::PendingReceiver<network::mojom::URLLoader> loader,
++                  mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
++  GetServeTaskRunner()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&AppSwapFileLoader::CreateAndStart, dir, std::move(path),
++                     accepts_html, std::move(loader), std::move(client)));
++}
++
++// Continuation after an npm artifact is resolved (downloaded + extracted).
++void ServeAfterResolve(
++    std::string path,
++    bool accepts_html,
++    mojo::PendingReceiver<network::mojom::URLLoader> loader,
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++    base::FilePath dir) {
++  if (dir.empty()) {
++    mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
++        ->OnComplete(network::URLLoaderCompletionStatus(net::ERR_FAILED));
++    return;
++  }
++  ServeFromDir(dir, std::move(path), accepts_html, std::move(loader),
++               std::move(client));
++}
++
 +}  // namespace
 +
 +// static
@@ -401,10 +956,7 @@ index 0000000000..e2f32a293d
 +    base::WeakPtr<content::WebContents> web_contents,
 +    base::SelfDeletingPassKey pass_key)
 +    : network::SelfDeletingURLLoaderFactory(std::move(receiver), pass_key),
-+      web_contents_(std::move(web_contents)),
-+      task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
-+          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
-+           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})) {
++      web_contents_(std::move(web_contents)) {
 +  target_factory_.Bind(std::move(target_factory));
 +  target_factory_.set_disconnect_handler(base::BindOnce(
 +      &AppSwapProxyingURLLoaderFactory::OnTargetFactoryError,
@@ -447,11 +999,16 @@ index 0000000000..e2f32a293d
 +          accept && accept->find("text/html") != std::string::npos) {
 +        accepts_html = true;
 +      }
-+      task_runner_->PostTask(
-+          FROM_HERE,
-+          base::BindOnce(&AppSwapFileLoader::CreateAndStart, *route,
-+                         std::move(path), accepts_html, std::move(loader),
-+                         std::move(client)));
++
++      if (route->source.type == AppSwapSourceType::kDirectory) {
++        ServeFromDir(route->source.dir, std::move(path), accepts_html,
++                     std::move(loader), std::move(client));
++      } else {
++        AppSwapArtifactProvider::GetInstance()->GetOrDownload(
++            route->source,
++            base::BindOnce(&ServeAfterResolve, std::move(path), accepts_html,
++                           std::move(loader), std::move(client)));
++      }
 +      return;
 +    }
 +  }
@@ -463,10 +1020,10 @@ index 0000000000..e2f32a293d
 +}
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.h b/chrome/browser/app_swap/app_swap_url_loader_factory.h
 new file mode 100644
-index 0000000000..374a61dfd3
+index 0000000000..34e9b9554e
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.h
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,57 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -475,7 +1032,6 @@ index 0000000000..374a61dfd3
 +#define CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 +
 +#include "base/memory/weak_ptr.h"
-+#include "base/task/sequenced_task_runner.h"
 +#include "mojo/public/cpp/bindings/pending_receiver.h"
 +#include "mojo/public/cpp/bindings/pending_remote.h"
 +#include "mojo/public/cpp/bindings/remote.h"
@@ -522,7 +1078,6 @@ index 0000000000..374a61dfd3
 +
 +  mojo::Remote<network::mojom::URLLoaderFactory> target_factory_;
 +  base::WeakPtr<content::WebContents> web_contents_;
-+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
