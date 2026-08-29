@@ -1,5 +1,5 @@
 # Runs scripts/sync-chromium.sh via Git Bash.
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 $bash = @(

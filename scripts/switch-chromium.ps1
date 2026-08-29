@@ -1,6 +1,6 @@
 # Runs scripts/switch-chromium.sh via Git Bash.
 # Usage: .\switch-chromium.ps1 <chromium-revision-hash>
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 $bash = @(

@@ -56,6 +56,18 @@ index dde051181f..c3b87c2495 100644
  #if BUILDFLAG(IS_ANDROID)
    // Handler to rewrite chrome://newtab on Android.
    handler->AddHandlerPair(&chrome::android::HandleAndroidNativePageURL,
+diff --git a/chrome/browser/profiles/profile_io_data.cc b/chrome/browser/profiles/profile_io_data.cc
+index 080e9b0e43..174f4c96b9 100644
+--- a/chrome/browser/profiles/profile_io_data.cc
++++ b/chrome/browser/profiles/profile_io_data.cc
+@@ -45,6 +45,7 @@ bool ProfileIOData::IsHandledProtocol(std::string_view scheme) {
+ #endif
+       content::kChromeUIScheme,
+       content::kChromeUIUntrustedScheme,
++      content::kAppSwapUIScheme,
+       url::kDataScheme,
+ #if BUILDFLAG(IS_CHROMEOS)
+       content::kExternalFileScheme,
 diff --git a/chrome/chrome_paks.gni b/chrome/chrome_paks.gni
 index 6008e03a89..14a290b0d7 100644
 --- a/chrome/chrome_paks.gni

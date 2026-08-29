@@ -90,7 +90,8 @@ gen 0004-portable-scheme-pak.patch \
   content/public/common/url_utils.cc \
   chrome/browser/browser_about_handler.cc \
   chrome/browser/browser_about_handler.h \
-  chrome/browser/chrome_content_browser_client.cc
+  chrome/browser/chrome_content_browser_client.cc \
+  chrome/browser/profiles/profile_io_data.cc
 
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."

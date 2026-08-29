@@ -25,7 +25,7 @@ autoninja -C out/Release chrome mini_installer
 
 if [[ "$PORTABLE" == "portable" ]]; then
   echo "==> packaging portable distribution"
-  python tools/build/win/create_portable_archive.py \
+  python chrome/tools/build/win/create_portable_archive.py \
     --build_dir out/Release \
     --output_dir "$ROOT/dist/AppSwap" \
     --chrome_release chrome/installer/mini_installer/chrome.release \

@@ -4,7 +4,7 @@ param(
   [switch]$Portable
 )
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 $bash = @(
