@@ -1,0 +1,389 @@
+diff --git a/chrome/browser/browser_about_handler.cc b/chrome/browser/browser_about_handler.cc
+index 08949a6941..f1588dbfc1 100644
+--- a/chrome/browser/browser_about_handler.cc
++++ b/chrome/browser/browser_about_handler.cc
+@@ -71,6 +71,20 @@ bool HandleChromeAboutAndChromeSyncRewrite(
+   return false;
+ }
+ 
++bool HandleAppSwapURLRewrite(GURL* url,
++                             content::BrowserContext* browser_context) {
++  // Only handle appswap: URLs; rewrite them to their chrome: equivalent so
++  // the rest of the WebUI machinery is unchanged.
++  if (!url->SchemeIs(content::kAppSwapUIScheme)) {
++    return false;
++  }
++
++  GURL::Replacements replacements;
++  replacements.SetSchemeStr(content::kChromeUIScheme);
++  *url = url->ReplaceComponents(replacements);
++  return true;
++}
++
+ bool HandleNonNavigationAboutURL(const GURL& url,
+                                  content::BrowserContext* context) {
+   if (!IsNonNavigationAboutUrl(url)) {
+diff --git a/chrome/browser/browser_about_handler.h b/chrome/browser/browser_about_handler.h
+index 2d90b68550..191717c94e 100644
+--- a/chrome/browser/browser_about_handler.h
++++ b/chrome/browser/browser_about_handler.h
+@@ -17,6 +17,12 @@ bool HandleChromeAboutAndChromeSyncRewrite(
+     GURL* url,
+     content::BrowserContext* browser_context);
+ 
++// Rewrites appswap://<host> -> chrome://<host>.  Used with
++// content::BrowserURLHandler so the AppSwap scheme works as an alias for the
++// internal WebUI scheme.
++bool HandleAppSwapURLRewrite(GURL* url,
++                             content::BrowserContext* browser_context);
++
+ // Handles special about: URLs that trigger actions instead of navigation.
+ // If |context|, URL blocking policies are checked first; if blocked, the
+ // action is prevented. Returns true if handled (action occurred or was
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index dde051181f..c3b87c2495 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -4981,6 +4981,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
+   handler->AddHandlerPair(&HandleChromeAboutAndChromeSyncRewrite,
+                           BrowserURLHandler::null_handler());
+ 
++  // Handler to rewrite appswap:// URLs to their chrome:// equivalents, so the
++  // AppSwap scheme works as an alias for the internal WebUI scheme.
++  handler->AddHandlerPair(&HandleAppSwapURLRewrite,
++                          BrowserURLHandler::null_handler());
++
+ #if BUILDFLAG(IS_ANDROID)
+   // Handler to rewrite chrome://newtab on Android.
+   handler->AddHandlerPair(&chrome::android::HandleAndroidNativePageURL,
+diff --git a/chrome/chrome_paks.gni b/chrome/chrome_paks.gni
+index 6008e03a89..14a290b0d7 100644
+--- a/chrome/chrome_paks.gni
++++ b/chrome/chrome_paks.gni
+@@ -106,7 +106,7 @@ template("chrome_repack_percent") {
+           [ "//chrome/browser/resources/extensions_zero_state_promo:resources" ]
+     }
+ 
+-    output = "${invoker.output_dir}/chrome_${percent}_percent.pak"
++    output = "${invoker.output_dir}/appswap_${percent}_percent.pak"
+   }
+ }
+ 
+diff --git a/chrome/test/BUILD.gn b/chrome/test/BUILD.gn
+index 283eb14c4e..548972cee3 100644
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -3459,7 +3459,7 @@ if (!is_android) {
+       ]
+ 
+       data_deps += [ "//chrome/browser/web_applications/chrome_pwa_launcher" ]
+-      data += [ "$root_out_dir/chrome_200_percent.pak" ]
++      data += [ "$root_out_dir/appswap_200_percent.pak" ]
+       deps += [
+         "//chrome:other_version",
+         "//chrome/app:chrome_dll_resources",
+diff --git a/chrome/tools/build/win/create_portable_archive.py b/chrome/tools/build/win/create_portable_archive.py
+new file mode 100644
+index 0000000000..9809f86348
+--- /dev/null
++++ b/chrome/tools/build/win/create_portable_archive.py
+@@ -0,0 +1,217 @@
++#!/usr/bin/env python3
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++"""Create a portable (flat, run-from-anywhere) AppSwap distribution.
++
++This script stages a Chromium build into a single directory that can be copied
++and run from anywhere, using chrome.release -- Chromium's own curated list of
++runtime files -- as the source of truth rather than hard-coding a file list.
++
++The versioned install layout described by chrome.release (Application/<version>/
++etc.) is flattened into the same directory layout Chromium uses for developer
++builds, which the browser already knows how to load from.
++"""
++
++import configparser
++import fnmatch
++import optparse
++import os
++import shutil
++import subprocess
++import sys
++import zipfile
++
++
++def _grant_app_container_access(out_dir):
++    """Grant the AppContainer sandbox read/execute access to the portable tree.
++
++    Chromium's AppContainer sandbox spawns child processes under app-container
++    (S-1-15-2) SIDs, which must be able to read the executable and DLLs. The
++    build output directory carries the required ACE, but a plain copy into a
++    fresh directory does not, so grant it explicitly. On non-Windows hosts
++    this is a no-op.
++    """
++    if sys.platform != 'win32':
++        return
++    for sid in ('S-1-15-2-1', 'S-1-15-2-2'):
++        subprocess.run(
++            [
++                'icacls',
++                out_dir,
++                '/grant',
++                '*{}:(OI)(CI)(RX)'.format(sid),
++                '/T',
++                '/C',
++                '/Q',
++            ],
++            check=False,
++        )
++
++
++_LAUNCHER_NAME = 'Launch AppSwap.cmd'
++_LAUNCHER_CONTENT = (
++    '@echo off\r\n'
++    'rem AppSwap portable launcher. Grants the AppContainer sandbox access\r\n'
++    'rem (zip archives do not preserve ACLs) and starts the browser.\r\n'
++    'cd /d "%~dp0"\r\n'
++    'icacls "%cd%" /grant "*S-1-15-2-1:(OI)(CI)(RX)" /T /C /Q >nul 2>&1\r\n'
++    'icacls "%cd%" /grant "*S-1-15-2-2:(OI)(CI)(RX)" /T /C /Q >nul 2>&1\r\n'
++    'start "" "%~dp0appswap.exe"\r\n'
++)
++
++
++def _write_launcher(out_dir):
++    """Write a launcher that fixes the AppContainer ACL and launches AppSwap.
++
++    Needed because a zip distribution drops the ACL that the AppContainer
++    sandbox requires; the launcher re-grants it on first run.
++    """
++    with open(os.path.join(out_dir, _LAUNCHER_NAME), 'w', newline='') as f:
++        f.write(_LAUNCHER_CONTENT)
++
++
++def _insensiglob(pattern):
++    """Case-insensitive glob over a directory tree.
++
++    configparser lowercases option keys (e.g. 'libEGL.dll' -> 'libegl.dll'),
++    so matches must be case-insensitive. Plain glob.glob already is on Windows,
++    but not on a case-sensitive filesystem, so walk the parent directory and
++    match basenames case-insensitively.
++    """
++    parent = os.path.dirname(pattern)
++    basename = os.path.basename(pattern)
++    if not os.path.isdir(parent):
++        return []
++    matches = []
++    for entry in os.listdir(parent):
++        if fnmatch.fnmatch(entry.lower(), basename.lower()):
++            matches.append(os.path.join(parent, entry))
++    return matches
++
++
++def _portable_subdir(dest):
++    """Turn a chrome.release destination into a flat portable subdirectory.
++
++    The config interpolates %(ChromeDir)s and %(VersionDir)s to empty strings,
++    so values look like '\\', '\\Locales', '\\Extensions\\', etc. We strip the
++    separators and normalize 'Locales' to the lowercase directory the browser
++    actually loads at runtime.
++    """
++    dest = dest.replace('\\', '/').strip('/')
++    if dest.lower() == 'locales':
++        dest = 'locales'
++    return dest
++
++
++def _copy_section(config, section, build_dir, out_dir, verbose):
++    if not config.has_section(section):
++        return 0
++    copied = 0
++    for source in config.options(section):
++        if source.endswith('dir'):
++            continue
++        subdir = _portable_subdir(config.get(section, source))
++        dst_dir = os.path.join(out_dir, subdir) if subdir else out_dir
++        src_pattern = os.path.join(build_dir, source.replace('\\', os.sep))
++        src_paths = _insensiglob(src_pattern)
++        if not src_paths:
++            if verbose:
++                print('  (no matches) {}'.format(source))
++            continue
++        if not os.path.isdir(dst_dir):
++            os.makedirs(dst_dir)
++        for src_path in src_paths:
++            dst_path = os.path.join(dst_dir, os.path.basename(src_path))
++            if not os.path.exists(dst_path):
++                shutil.copy2(src_path, dst_path)
++                copied += 1
++    return copied
++
++
++def main():
++    parser = optparse.OptionParser(usage='create_portable_archive.py [options]')
++    parser.add_option('--build_dir', help='Build output dir (e.g. out/Release)')
++    parser.add_option('--output_dir', help='Where to write the portable tree')
++    parser.add_option('--chrome_release', help='Path to chrome.release')
++    parser.add_option(
++        '--enable_hidpi',
++        default='1',
++        help='Whether to include the HiDPI resource pack.',
++    )
++    parser.add_option(
++        '--include_snapshotblob',
++        default='0',
++        help='Whether to include the V8 snapshot blob.',
++    )
++    parser.add_option(
++        '--include_dxc', default='0', help='Whether to include DXC dlls.'
++    )
++    parser.add_option(
++        '--zip',
++        action='store_true',
++        default=False,
++        help='Zip the portable tree after staging it.',
++    )
++    parser.add_option('-v', '--verbose', action='store_true', default=False)
++
++    (options, _) = parser.parse_args()
++    if not options.build_dir or not options.output_dir or not options.chrome_release:
++        parser.error('--build_dir, --output_dir and --chrome_release are required.')
++
++    options.build_dir = os.path.abspath(options.build_dir)
++    options.output_dir = os.path.abspath(options.output_dir)
++    options.chrome_release = os.path.abspath(options.chrome_release)
++
++    # Interpolate %(ChromeDir)s / %(VersionDir)s to empty so the destination
++    # strings collapse to flat relative paths.
++    config = configparser.ConfigParser(
++        defaults={'ChromeDir': '', 'VersionDir': ''}
++    )
++    config.read(options.chrome_release)
++
++    if os.path.isdir(options.output_dir):
++        shutil.rmtree(options.output_dir)
++    os.makedirs(options.output_dir)
++
++    _grant_app_container_access(options.output_dir)
++
++    total = 0
++    sections = ['GENERAL']
++    if options.enable_hidpi == '1':
++        sections.append('HIDPI')
++    if options.include_snapshotblob == '1':
++        sections.append('SNAPSHOTBLOB')
++    if options.include_dxc == '1':
++        sections.append('DXC')
++    # FFMPEG and GOOGLE_CHROME sections are omitted: FFMPEG only applies to
++    # component ffmpeg builds and GOOGLE_CHROME only to Google-branded builds.
++
++    for section in sections:
++        if options.verbose:
++            print('[{}]'.format(section))
++        total += _copy_section(
++            config, section, options.build_dir, options.output_dir, options.verbose
++        )
++
++    _write_launcher(options.output_dir)
++
++    print('Staged {} files -> {}'.format(total, options.output_dir))
++
++    if options.zip:
++        zip_path = options.output_dir + '.zip'
++        if os.path.exists(zip_path):
++            os.remove(zip_path)
++        with zipfile.ZipFile(
++            zip_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9
++        ) as zf:
++            for root, _, files in os.walk(options.output_dir):
++                for name in files:
++                    full = os.path.join(root, name)
++                    rel = os.path.relpath(full, options.output_dir)
++                    zf.write(full, rel)
++        print('Wrote {}'.format(zip_path))
++
++
++if __name__ == '__main__':
++    sys.exit(main())
+diff --git a/content/common/url_schemes.cc b/content/common/url_schemes.cc
+index 225e017909..6696342e52 100644
+--- a/content/common/url_schemes.cc
++++ b/content/common/url_schemes.cc
+@@ -61,6 +61,7 @@ void RegisterContentSchemes(bool should_lock_registry) {
+   url::AddStandardScheme(kChromeDevToolsScheme, url::SCHEME_WITH_HOST);
+   url::AddStandardScheme(kChromeUIScheme, url::SCHEME_WITH_HOST);
+   url::AddStandardScheme(kChromeUIUntrustedScheme, url::SCHEME_WITH_HOST);
++  url::AddStandardScheme(kAppSwapUIScheme, url::SCHEME_WITH_HOST);
+   url::AddStandardScheme(kChromeErrorScheme, url::SCHEME_WITH_HOST);
+   for (auto& scheme : schemes.standard_schemes)
+     url::AddStandardScheme(scheme.c_str(), url::SCHEME_WITH_HOST);
+@@ -71,6 +72,7 @@ void RegisterContentSchemes(bool should_lock_registry) {
+   schemes.secure_schemes.push_back(kChromeDevToolsScheme);
+   schemes.secure_schemes.push_back(kChromeUIScheme);
+   schemes.secure_schemes.push_back(kChromeUIUntrustedScheme);
++  schemes.secure_schemes.push_back(kAppSwapUIScheme);
+   schemes.secure_schemes.push_back(kChromeErrorScheme);
+   for (auto& scheme : schemes.secure_schemes)
+     url::AddSecureScheme(scheme.c_str());
+@@ -91,6 +93,7 @@ void RegisterContentSchemes(bool should_lock_registry) {
+ 
+   schemes.cors_enabled_schemes.push_back(kChromeUIScheme);
+   schemes.cors_enabled_schemes.push_back(kChromeUIUntrustedScheme);
++  schemes.cors_enabled_schemes.push_back(kAppSwapUIScheme);
+   for (auto& scheme : schemes.cors_enabled_schemes)
+     url::AddCorsEnabledScheme(scheme.c_str());
+ 
+@@ -119,6 +122,7 @@ void RegisterContentSchemes(bool should_lock_registry) {
+   // enabled.
+   schemes.service_worker_schemes.push_back(kChromeUIScheme);
+   schemes.service_worker_schemes.push_back(kChromeUIUntrustedScheme);
++  schemes.service_worker_schemes.push_back(kAppSwapUIScheme);
+ 
+   // Prevent future modification of the scheme lists. This is to prevent
+   // accidental creation of data races in the program. Add*Scheme aren't
+diff --git a/content/public/common/url_constants.h b/content/public/common/url_constants.h
+index 75eb817c98..20303c6e43 100644
+--- a/content/public/common/url_constants.h
++++ b/content/public/common/url_constants.h
+@@ -21,6 +21,7 @@ inline constexpr char kChromeErrorScheme[] = "chrome-error";
+ inline constexpr char kChromeUIScheme[] = "chrome";  // Used for WebUIs.
+ inline constexpr char kChromeNativeScheme[] = "chrome-native";
+ inline constexpr char kChromeUIUntrustedScheme[] = "chrome-untrusted";
++inline constexpr char kAppSwapUIScheme[] = "appswap";  // Alias for WebUIs.
+ inline constexpr char kViewSourceScheme[] = "view-source";
+ #if BUILDFLAG(IS_CHROMEOS)
+ inline constexpr char kExternalFileScheme[] = "externalfile";
+diff --git a/content/public/common/url_utils.cc b/content/public/common/url_utils.cc
+index 5812b103a6..66a52ed28d 100644
+--- a/content/public/common/url_utils.cc
++++ b/content/public/common/url_utils.cc
+@@ -31,7 +31,8 @@ namespace {
+ bool IsWebUIScheme(std::string_view scheme) {
+   return scheme == content::kChromeUIScheme ||
+          scheme == content::kChromeUIUntrustedScheme ||
+-         scheme == content::kChromeDevToolsScheme;
++         scheme == content::kChromeDevToolsScheme ||
++         scheme == content::kAppSwapUIScheme;
+ }
+ 
+ }  // namespace
+diff --git a/ui/base/resource/resource_bundle.cc b/ui/base/resource/resource_bundle.cc
+index d1ee681461..4b54525f84 100644
+--- a/ui/base/resource/resource_bundle.cc
++++ b/ui/base/resource/resource_bundle.cc
+@@ -1075,13 +1075,13 @@ void ResourceBundle::LoadChromeResources() {
+   // 2x images. The 1x data pack only has 1x images, thus passes in an accurate
+   // scale factor to gfx::ImageSkia::AddRepresentation.
+   if (IsScaleFactorSupported(k100Percent)) {
+-    AddDataPackFromPath(GetResourcesPakFilePath("chrome_100_percent.pak"),
++    AddDataPackFromPath(GetResourcesPakFilePath("appswap_100_percent.pak"),
+                         k100Percent);
+   }
+ 
+   if (IsScaleFactorSupported(k200Percent)) {
+     AddOptionalDataPackFromPath(
+-        GetResourcesPakFilePath("chrome_200_percent.pak"), k200Percent);
++        GetResourcesPakFilePath("appswap_200_percent.pak"), k200Percent);
+   }
+ }
+ 

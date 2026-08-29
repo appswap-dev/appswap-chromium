@@ -1,0 +1,6 @@
+# AppSwap release build configuration.
+# Generate with: gn gen out/Release (from the src/ directory).
+is_debug = false
+is_component_build = false
+symbol_level = 0
+target_cpu = "x64"

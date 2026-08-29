@@ -1,0 +1,590 @@
+diff --git a/build/win/reorder-imports.py b/build/win/reorder-imports.py
+index 11602df277..2012f96607 100755
+--- a/build/win/reorder-imports.py
++++ b/build/win/reorder-imports.py
+@@ -19,7 +19,7 @@ import pefile
+ 
+ 
+ def reorder_imports(input_dir, output_dir, architecture):
+-    """Swap chrome_elf.dll to be the first import of chrome.exe.
++    """Swap appswap_elf.dll to be the first import of appswap.exe.
+     Also copy over any related files that might be needed
+     (pdbs, manifests etc.).
+     """
+@@ -27,8 +27,8 @@ def reorder_imports(input_dir, output_dir, architecture):
+     # correct executable in the first place, so that this script
+     # only needs to verify that and not write a whole new exe.
+ 
+-    input_image = os.path.join(input_dir, 'chrome.exe')
+-    output_image = os.path.join(output_dir, 'chrome.exe')
++    input_image = os.path.join(input_dir, 'appswap.exe')
++    output_image = os.path.join(output_dir, 'appswap.exe')
+ 
+     # pefile mmap()s the whole executable, and then parses parts of
+     # it into python data structures for ease of processing.
+@@ -51,8 +51,8 @@ def reorder_imports(input_dir, output_dir, architecture):
+ 
+     found_elf = False
+     for i, peimport in enumerate(pe.DIRECTORY_ENTRY_IMPORT):
+-        if peimport.dll.lower() == b'chrome_elf.dll':
+-            assert not found_elf, 'only one chrome_elf.dll import expected'
++        if peimport.dll.lower() == b'appswap_elf.dll':
++            assert not found_elf, 'only one appswap_elf.dll import expected'
+             found_elf = True
+             if i > 0:
+                 swap = pe.DIRECTORY_ENTRY_IMPORT[0]
+@@ -86,11 +86,11 @@ def reorder_imports(input_dir, output_dir, architecture):
+                     swap.struct.FirstThunk,
+                     peimport.struct.FirstThunk,
+                 )
+-    assert found_elf, 'chrome_elf.dll import not found'
++    assert found_elf, 'appswap_elf.dll import not found'
+ 
+     pe.write(filename=output_image)
+ 
+-    for fname in glob.iglob(os.path.join(input_dir, 'chrome.exe.*')):
++    for fname in glob.iglob(os.path.join(input_dir, 'appswap.exe.*')):
+         shutil.copy(fname, os.path.join(output_dir, os.path.basename(fname)))
+     return 0
+ 
+@@ -99,10 +99,10 @@ def main(argv):
+     usage = 'reorder_imports.py -i <input_dir> -o <output_dir> -a <target_arch>'
+     parser = optparse.OptionParser(usage=usage)
+     parser.add_option(
+-        '-i', '--input', help='reorder chrome.exe in DIR', metavar='DIR'
++        '-i', '--input', help='reorder appswap.exe in DIR', metavar='DIR'
+     )
+     parser.add_option(
+-        '-o', '--output', help='write new chrome.exe to DIR', metavar='DIR'
++        '-o', '--output', help='write new appswap.exe to DIR', metavar='DIR'
+     )
+     parser.add_option(
+         '-a', '--arch', help='architecture of build (optional)', default='ia32'
+diff --git a/chrome/BUILD.gn b/chrome/BUILD.gn
+index 6f97b7046d..c09088c115 100644
+--- a/chrome/BUILD.gn
++++ b/chrome/BUILD.gn
+@@ -87,12 +87,12 @@ if (is_win) {
+     # initialexe/ is used so that the we can reorder imports and write back to
+     # the final destination at $root_out_dir/.
+     inputs = [
+-      "$root_out_dir/initialexe/chrome.exe",
+-      "$root_out_dir/initialexe/chrome.exe.pdb",
++      "$root_out_dir/initialexe/appswap.exe",
++      "$root_out_dir/initialexe/appswap.exe.pdb",
+     ]
+     outputs = [
+-      "$root_out_dir/chrome.exe",
+-      "$root_out_dir/chrome.exe.pdb",
++      "$root_out_dir/appswap.exe",
++      "$root_out_dir/appswap.exe.pdb",
+     ]
+     args = [
+       "-i",
+@@ -150,7 +150,7 @@ if (!is_android && !is_mac) {
+   }
+ 
+   if (is_win) {
+-    _chrome_output_name = "initialexe/chrome"
++    _chrome_output_name = "initialexe/appswap"
+   } else {
+     _chrome_output_name = "chrome"
+   }
+@@ -430,7 +430,7 @@ if (is_win) {
+       "app/startup_timestamps.h",
+     ]
+ 
+-    output_name = "chrome"
++    output_name = "appswap"
+ 
+     deps = [
+       ":chrome_dll_manifest",
+@@ -2085,6 +2085,7 @@ if (enable_separate_renderer_binary) {
+       }
+ 
+       if (is_win) {
++        output_name = "appswap_renderer"
+         # On Windows, chrome_renderer is built as a shared library DLL, so match
+         # the compiler and linker configs from :chrome_dll.
+         configs += [ "//build/config/compiler:wexit_time_destructors" ]
+diff --git a/chrome/app/chrome_dll.ver b/chrome/app/chrome_dll.ver
+index 910fca21d1..4181938b20 100644
+--- a/chrome/app/chrome_dll.ver
++++ b/chrome/app/chrome_dll.ver
+@@ -1,2 +1,2 @@
+-INTERNAL_NAME=chrome_dll
+-ORIGINAL_FILENAME=chrome.dll
++INTERNAL_NAME=appswap_dll
++ORIGINAL_FILENAME=appswap.dll
+diff --git a/chrome/app/chrome_exe.ver b/chrome/app/chrome_exe.ver
+index a2d39013f5..56539e28d2 100644
+--- a/chrome/app/chrome_exe.ver
++++ b/chrome/app/chrome_exe.ver
+@@ -1,2 +1,2 @@
+-INTERNAL_NAME=chrome_exe
+-ORIGINAL_FILENAME=chrome.exe
++INTERNAL_NAME=appswap_exe
++ORIGINAL_FILENAME=appswap.exe
+diff --git a/chrome/app/chrome_renderer_dll.ver b/chrome/app/chrome_renderer_dll.ver
+index a6dc6eaf96..5c70492c4f 100644
+--- a/chrome/app/chrome_renderer_dll.ver
++++ b/chrome/app/chrome_renderer_dll.ver
+@@ -1,2 +1,2 @@
+-INTERNAL_NAME=chrome_renderer_dll
+-ORIGINAL_FILENAME=chrome_renderer.dll
++INTERNAL_NAME=appswap_renderer_dll
++ORIGINAL_FILENAME=appswap_renderer.dll
+diff --git a/chrome/app/version_assembly/version_assembly_manifest.template b/chrome/app/version_assembly/version_assembly_manifest.template
+index 9bd1fc58f9..f66dde3db8 100644
+--- a/chrome/app/version_assembly/version_assembly_manifest.template
++++ b/chrome/app/version_assembly/version_assembly_manifest.template
+@@ -4,5 +4,5 @@
+       name='@MAJOR@.@MINOR@.@BUILD@.@PATCH@'
+       version='@MAJOR@.@MINOR@.@BUILD@.@PATCH@'
+       type='win32'/>
+-  <file name='chrome_elf.dll'/>
++  <file name='appswap_elf.dll'/>
+ </assembly>
+diff --git a/chrome/browser/web_applications/chrome_pwa_launcher/BUILD.gn b/chrome/browser/web_applications/chrome_pwa_launcher/BUILD.gn
+index 8a2eca6075..040b155239 100644
+--- a/chrome/browser/web_applications/chrome_pwa_launcher/BUILD.gn
++++ b/chrome/browser/web_applications/chrome_pwa_launcher/BUILD.gn
+@@ -12,6 +12,7 @@ process_version_rc_template("chrome_pwa_launcher_version") {
+ }
+ 
+ executable("chrome_pwa_launcher") {
++  output_name = "appswap_pwa_launcher"
+   sources = [
+     "chrome_pwa_launcher_exe.rc",
+     "chrome_pwa_launcher_main.cc",
+diff --git a/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher.ver b/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher.ver
+index 17c6db2188..06324f9029 100644
+--- a/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher.ver
++++ b/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher.ver
+@@ -1,2 +1,2 @@
+-INTERNAL_NAME=chrome_pwa_launcher
+-ORIGINAL_FILENAME=chrome_pwa_launcher.exe
++INTERNAL_NAME=appswap_pwa_launcher
++ORIGINAL_FILENAME=appswap_pwa_launcher.exe
+diff --git a/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher_util.cc b/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher_util.cc
+index 1c12414f3c..937c2c06b6 100644
+--- a/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher_util.cc
++++ b/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher_util.cc
+@@ -11,7 +11,7 @@
+ namespace {
+ 
+ constexpr base::FilePath::StringViewType kChromePwaLauncherExecutable =
+-    L"chrome_pwa_launcher.exe";
++    L"appswap_pwa_launcher.exe";
+ 
+ }  // namespace
+ 
+diff --git a/chrome/chrome_elf/BUILD.gn b/chrome/chrome_elf/BUILD.gn
+index 0f2c819248..d524efc714 100644
+--- a/chrome/chrome_elf/BUILD.gn
++++ b/chrome/chrome_elf/BUILD.gn
+@@ -49,6 +49,7 @@ static_library("test_stubs") {
+ }
+ 
+ shared_library("chrome_elf") {
++  output_name = "appswap_elf"
+   sources = [
+     "chrome_elf.def",
+     "chrome_elf_main.cc",
+diff --git a/chrome/chrome_elf/chrome_elf.def b/chrome/chrome_elf/chrome_elf.def
+index 7303c69c58..d8b602f7c4 100644
+--- a/chrome/chrome_elf/chrome_elf.def
++++ b/chrome/chrome_elf/chrome_elf.def
+@@ -1,7 +1,7 @@
+ ; Copyright 2013 The Chromium Authors
+ ; Use of this source code is governed by a BSD-style license that can be
+ ; found in the LICENSE file.
+-LIBRARY  "chrome_elf.dll"
++LIBRARY  "appswap_elf.dll"
+ 
+ EXPORTS
+   ; From components/crash/core/app/crash_export_stubs.cc
+diff --git a/chrome/chrome_elf/chrome_elf_constants.cc b/chrome/chrome_elf/chrome_elf_constants.cc
+index 04bc26d85b..02d914e0a3 100644
+--- a/chrome/chrome_elf/chrome_elf_constants.cc
++++ b/chrome/chrome_elf/chrome_elf_constants.cc
+@@ -4,7 +4,7 @@
+ 
+ #include "chrome/chrome_elf/chrome_elf_constants.h"
+ 
+-const wchar_t kWerDll[] = L"chrome_wer.dll";
++const wchar_t kWerDll[] = L"appswap_wer.dll";
+ 
+ namespace elf_sec {
+ 
+diff --git a/chrome/chrome_proxy/BUILD.gn b/chrome/chrome_proxy/BUILD.gn
+index fd19272039..2eed35f6af 100644
+--- a/chrome/chrome_proxy/BUILD.gn
++++ b/chrome/chrome_proxy/BUILD.gn
+@@ -12,6 +12,7 @@ process_version_rc_template("chrome_proxy_version") {
+ }
+ 
+ executable("chrome_proxy") {
++  output_name = "appswap_proxy"
+   deps = [
+     ":chrome_proxy_version",
+     "//base",
+diff --git a/chrome/chrome_proxy/chrome_proxy.ver b/chrome/chrome_proxy/chrome_proxy.ver
+index 32083b145e..b5137bab9d 100644
+--- a/chrome/chrome_proxy/chrome_proxy.ver
++++ b/chrome/chrome_proxy/chrome_proxy.ver
+@@ -1,2 +1,2 @@
+-INTERNAL_NAME=chrome_proxy
+-ORIGINAL_FILENAME=chrome_proxy.exe
++INTERNAL_NAME=appswap_proxy
++ORIGINAL_FILENAME=appswap_proxy.exe
+diff --git a/chrome/chrome_proxy/chrome_proxy_main_win.cc b/chrome/chrome_proxy/chrome_proxy_main_win.cc
+index 776f544e46..6979de2728 100644
+--- a/chrome/chrome_proxy/chrome_proxy_main_win.cc
++++ b/chrome/chrome_proxy/chrome_proxy_main_win.cc
+@@ -15,10 +15,10 @@
+ namespace {
+ 
+ constexpr base::FilePath::CharType kChromeExecutable[] =
+-    FILE_PATH_LITERAL("chrome.exe");
++    FILE_PATH_LITERAL("appswap.exe");
+ 
+ constexpr base::FilePath::CharType kChromeProxyExecutable[] =
+-    FILE_PATH_LITERAL("chrome_proxy.exe");
++    FILE_PATH_LITERAL("appswap_proxy.exe");
+ 
+ }  // namespace
+ 
+diff --git a/chrome/common/chrome_constants.cc b/chrome/common/chrome_constants.cc
+index 1a6b899b4b..b2ca213370 100644
+--- a/chrome/common/chrome_constants.cc
++++ b/chrome/common/chrome_constants.cc
+@@ -32,9 +32,9 @@ const char kChromeVersion[] = CHROME_VERSION_STRING;
+ 
+ #if BUILDFLAG(IS_WIN)
+ const base::FilePath::CharType kBrowserProcessExecutableName[] =
+-    FPL("chrome.exe");
++    FPL("appswap.exe");
+ const base::FilePath::CharType kHelperProcessExecutableName[] =
+-    FPL("chrome.exe");
++    FPL("appswap.exe");
+ #elif BUILDFLAG(IS_MAC)
+ const base::FilePath::CharType kBrowserProcessExecutableName[] =
+     FPL(PRODUCT_FULLNAME_STRING);
+@@ -54,9 +54,9 @@ const base::FilePath::CharType kHelperProcessExecutableName[] = FPL("exe");
+ 
+ #if BUILDFLAG(IS_WIN)
+ const base::FilePath::CharType kBrowserProcessExecutablePath[] =
+-    FPL("chrome.exe");
++    FPL("appswap.exe");
+ const base::FilePath::CharType kHelperProcessExecutablePath[] =
+-    FPL("chrome.exe");
++    FPL("appswap.exe");
+ #elif BUILDFLAG(IS_MAC)
+ const base::FilePath::CharType kBrowserProcessExecutablePath[] =
+     FPL(PRODUCT_FULLNAME_STRING ".app/Contents/MacOS/" PRODUCT_FULLNAME_STRING);
+diff --git a/chrome/common/chrome_constants.h b/chrome/common/chrome_constants.h
+index 464a435a50..523364e7f9 100644
+--- a/chrome/common/chrome_constants.h
++++ b/chrome/common/chrome_constants.h
+@@ -36,11 +36,11 @@ extern const char kMacHelperSuffixAlerts[];
+ 
+ #if BUILDFLAG(IS_WIN)
+ inline constexpr base::FilePath::CharType kBrowserResourcesDll[] =
+-    FILE_PATH_LITERAL("chrome.dll");
++    FILE_PATH_LITERAL("appswap.dll");
+ inline constexpr base::FilePath::CharType kElfDll[] =
+-    FILE_PATH_LITERAL("chrome_elf.dll");
++    FILE_PATH_LITERAL("appswap_elf.dll");
+ inline constexpr base::FilePath::CharType kRendererDll[] =
+-    FILE_PATH_LITERAL("chrome_renderer.dll");
++    FILE_PATH_LITERAL("appswap_renderer.dll");
+ inline constexpr base::FilePath::CharType kStatusTrayWindowClass[] =
+     FILE_PATH_LITERAL("Chrome_StatusTrayWindow");
+ #endif  // BUILDFLAG(IS_WIN)
+diff --git a/chrome/installer/mini_installer/BUILD.gn b/chrome/installer/mini_installer/BUILD.gn
+index ce1f5a5711..9571b75052 100644
+--- a/chrome/installer/mini_installer/BUILD.gn
++++ b/chrome/installer/mini_installer/BUILD.gn
+@@ -149,9 +149,9 @@ action("mini_installer_archive") {
+   release_file = "chrome.release"
+ 
+   inputs = [
+-    "$root_out_dir/chrome.dll",
+-    "$root_out_dir/chrome_elf.dll",
+-    "$root_out_dir/chrome.exe",
++    "$root_out_dir/appswap.dll",
++    "$root_out_dir/appswap_elf.dll",
++    "$root_out_dir/appswap.exe",
+     "$root_out_dir/locales/en-US.pak",
+     "$root_out_dir/setup.exe",
+     "//chrome/tools/build/win/makecab.py",
+diff --git a/chrome/installer/mini_installer/chrome.release b/chrome/installer/mini_installer/chrome.release
+index 173c859014..aade2e27e9 100644
+--- a/chrome/installer/mini_installer/chrome.release
++++ b/chrome/installer/mini_installer/chrome.release
+@@ -6,8 +6,8 @@
+ #
+ # Chrome Application dir entries, sorted alphabetically.
+ #
+-chrome.exe: %(ChromeDir)s\
+-chrome_proxy.exe: %(ChromeDir)s\
++appswap.exe: %(ChromeDir)s\
++appswap_proxy.exe: %(ChromeDir)s\
+ #
+ # Chrome version dir assembly manifest.
+ # The name of this file must match the name of the version dir, so we cannot
+@@ -18,20 +18,20 @@ chrome_proxy.exe: %(ChromeDir)s\
+ #
+ # Chrome version dir entries, sorted alphabetically.
+ #
+-chrome.dll: %(VersionDir)s\
+-chrome_100_percent.pak: %(VersionDir)s\
++appswap.dll: %(VersionDir)s\
++appswap_100_percent.pak: %(VersionDir)s\
+ chrome_child.dll: %(VersionDir)s\
+-chrome_elf.dll: %(VersionDir)s\
+-chrome_pwa_launcher.exe: %(VersionDir)s\
+-chrome_renderer.dll: %(VersionDir)s\
+-chrome_wer.dll: %(VersionDir)s\
++appswap_elf.dll: %(VersionDir)s\
++appswap_pwa_launcher.exe: %(VersionDir)s\
++appswap_renderer.dll: %(VersionDir)s\
++appswap_wer.dll: %(VersionDir)s\
+ d3dcompiler_47.dll: %(VersionDir)s\
+ eventlog_provider.dll: %(VersionDir)s\
+ icudtl.dat: %(VersionDir)s\
+ libEGL.dll: %(VersionDir)s\
+ libGLESv2.dll: %(VersionDir)s\
+ libLiteRtWebGpuAccelerator.dll: %(VersionDir)s\
+-notification_helper.exe: %(VersionDir)s\
++appswap_notification_helper.exe: %(VersionDir)s\
+ optimization_guide_internal.dll: %(VersionDir)s\
+ resources.pak: %(VersionDir)s\
+ vk_swiftshader.dll: %(VersionDir)s\
+@@ -72,7 +72,7 @@ IwaKeyDistribution\iwa-key-distribution.pb: %(VersionDir)s\IwaKeyDistribution\
+ IwaKeyDistribution\manifest.json: %(VersionDir)s\IwaKeyDistribution\
+ 
+ [HIDPI]
+-chrome_200_percent.pak: %(VersionDir)s\
++appswap_200_percent.pak: %(VersionDir)s\
+ 
+ [FFMPEG]
+ ffmpeg.dll: %(VersionDir)s\
+diff --git a/chrome/installer/util/util_constants.h b/chrome/installer/util/util_constants.h
+index 2f0df7216a..64bae980a9 100644
+--- a/chrome/installer/util/util_constants.h
++++ b/chrome/installer/util/util_constants.h
+@@ -347,13 +347,13 @@ inline constexpr char kGoogleUpdateIsMachineEnvVar[] = "GoogleUpdateIsMachine";
+ // TODO(gab): Rename setup.exe itself altogether and use the same binary for
+ // Active Setup.
+ inline constexpr wchar_t kActiveSetupExe[] = L"chrmstp.exe";
+-inline constexpr wchar_t kChromeDll[] = L"chrome.dll";
+-inline constexpr wchar_t kChromeExe[] = L"chrome.exe";
+-inline constexpr wchar_t kChromeNewExe[] = L"new_chrome.exe";
+-inline constexpr wchar_t kChromeOldExe[] = L"old_chrome.exe";
+-inline constexpr wchar_t kChromeProxyExe[] = L"chrome_proxy.exe";
+-inline constexpr wchar_t kChromeProxyNewExe[] = L"new_chrome_proxy.exe";
+-inline constexpr wchar_t kChromeProxyOldExe[] = L"old_chrome_proxy.exe";
++inline constexpr wchar_t kChromeDll[] = L"appswap.dll";
++inline constexpr wchar_t kChromeExe[] = L"appswap.exe";
++inline constexpr wchar_t kChromeNewExe[] = L"new_appswap.exe";
++inline constexpr wchar_t kChromeOldExe[] = L"old_appswap.exe";
++inline constexpr wchar_t kChromeProxyExe[] = L"appswap_proxy.exe";
++inline constexpr wchar_t kChromeProxyNewExe[] = L"new_appswap_proxy.exe";
++inline constexpr wchar_t kChromeProxyOldExe[] = L"old_appswap_proxy.exe";
+ inline constexpr wchar_t kCmdAlternateRenameChromeExe[] = L"rename-chrome-exe";
+ inline constexpr wchar_t kCmdRenameChromeExe[] = L"cmd";
+ inline constexpr wchar_t kCmdOnOsUpgrade[] = L"on-os-upgrade";
+@@ -371,8 +371,9 @@ inline constexpr wchar_t kInstallBinaryDir[] = L"Application";
+ inline constexpr wchar_t kInstallerDir[] = L"Installer";
+ inline constexpr wchar_t kInstallTempDir[] = L"Temp";
+ inline constexpr wchar_t kLnkExt[] = L".lnk";
+-inline constexpr wchar_t kNotificationHelperExe[] = L"notification_helper.exe";
+-inline constexpr wchar_t kWerDll[] = L"chrome_wer.dll";
++inline constexpr wchar_t kNotificationHelperExe[] =
++    L"appswap_notification_helper.exe";
++inline constexpr wchar_t kWerDll[] = L"appswap_wer.dll";
+ 
+ // DowngradeVersion holds the version from which Chrome was downgraded. In case
+ // of multiple downgrades (e.g., 75->74->73), it retains the highest version
+diff --git a/chrome/notification_helper/BUILD.gn b/chrome/notification_helper/BUILD.gn
+index 0244dc319f..38f89a75b3 100644
+--- a/chrome/notification_helper/BUILD.gn
++++ b/chrome/notification_helper/BUILD.gn
+@@ -8,6 +8,7 @@ import("//chrome/process_version_rc_template.gni")
+ import("//testing/test.gni")
+ 
+ executable("notification_helper") {
++  output_name = "appswap_notification_helper"
+   sources = [
+     "notification_helper.cc",
+     "notification_helper.rc",
+diff --git a/chrome/notification_helper/notification_helper_exe.ver b/chrome/notification_helper/notification_helper_exe.ver
+index eeebf42be4..de18978a22 100644
+--- a/chrome/notification_helper/notification_helper_exe.ver
++++ b/chrome/notification_helper/notification_helper_exe.ver
+@@ -1,2 +1,2 @@
+-INTERNAL_NAME=notification_helper_exe
+-ORIGINAL_FILENAME=notification_helper.exe
+\ No newline at end of file
++INTERNAL_NAME=appswap_notification_helper_exe
++ORIGINAL_FILENAME=appswap_notification_helper.exe
+\ No newline at end of file
+diff --git a/chrome/tools/build/win/FILES.cfg b/chrome/tools/build/win/FILES.cfg
+index 25e607f3a5..3067768e37 100644
+--- a/chrome/tools/build/win/FILES.cfg
++++ b/chrome/tools/build/win/FILES.cfg
+@@ -48,12 +48,12 @@ FILES = [
+     'optional': ['official'],
+   },
+   {
+-    'filename': 'chrome.exe',
++    'filename': 'appswap.exe',
+     'buildtype': ['official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+   {
+-    'filename': 'chrome.dll',
++    'filename': 'appswap.dll',
+     'buildtype': ['official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+@@ -64,18 +64,18 @@ FILES = [
+     'optional': ['official'],
+   },
+   {
+-    'filename': 'chrome_elf.dll',
++    'filename': 'appswap_elf.dll',
+     'buildtype': ['official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+   {
+-    'filename': 'chrome_renderer.dll',
++    'filename': 'appswap_renderer.dll',
+     'buildtype': ['official'],
+     'filegroup': ['default', 'symsrc'],
+     'optional': ['dev', 'official'],
+   },
+   {
+-    'filename': 'chrome_wer.dll',
++    'filename': 'appswap_wer.dll',
+     'buildtype': ['official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+@@ -559,12 +559,12 @@ FILES = [
+   },
+   # Notification helper files:
+   {
+-    'filename': 'notification_helper.exe',
++    'filename': 'appswap_notification_helper.exe',
+     'buildtype': ['official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+   {
+-    'filename': 'notification_helper.exe.pdb',
++    'filename': 'appswap_notification_helper.exe.pdb',
+     'buildtype': ['official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+@@ -616,7 +616,7 @@ FILES = [
+     'archive': 'chrome-win32-syms.zip',
+   },
+   {
+-    'filename': 'chrome.dll.pdb',
++    'filename': 'appswap.dll.pdb',
+     'buildtype': ['official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+@@ -627,23 +627,23 @@ FILES = [
+     'archive': 'chrome-win32-syms.zip',
+   },
+   {
+-    'filename': 'chrome_elf.dll.pdb',
++    'filename': 'appswap_elf.dll.pdb',
+     'buildtype': ['official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+   {
+-    'filename': 'chrome_renderer.dll.pdb',
++    'filename': 'appswap_renderer.dll.pdb',
+     'buildtype': ['official'],
+     'archive': 'chrome-win32-syms.zip',
+     'optional': ['dev', 'official'],
+   },
+   {
+-    'filename': 'chrome_wer.dll.pdb',
++    'filename': 'appswap_wer.dll.pdb',
+     'buildtype': ['official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+   {
+-    'filename': 'chrome.exe.pdb',
++    'filename': 'appswap.exe.pdb',
+     'buildtype': ['official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+@@ -776,12 +776,12 @@ FILES = [
+   },
+   # Bookmark apps shortcut target:
+   {
+-    'filename': 'chrome_proxy.exe',
++    'filename': 'appswap_proxy.exe',
+     'buildtype': ['official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+   {
+-    'filename': 'chrome_proxy.exe.pdb',
++    'filename': 'appswap_proxy.exe.pdb',
+     'buildtype': ['official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+@@ -920,12 +920,12 @@ FILES = [
+   },
+   # Progressive Web App launcher executable:
+   {
+-    'filename': 'chrome_pwa_launcher.exe',
++    'filename': 'appswap_pwa_launcher.exe',
+     'buildtype': ['official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+   {
+-    'filename': 'chrome_pwa_launcher.exe.pdb',
++    'filename': 'appswap_pwa_launcher.exe.pdb',
+     'buildtype': ['official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+diff --git a/components/crash/win/BUILD.gn b/components/crash/win/BUILD.gn
+index 5e31703941..fc2e4e6710 100644
+--- a/components/crash/win/BUILD.gn
++++ b/components/crash/win/BUILD.gn
+@@ -15,6 +15,7 @@ process_version_rc_template("chrome_wer_resources") {
+ }
+ 
+ shared_library("chrome_wer") {
++  output_name = "appswap_wer"
+   sources = [
+     "chrome_wer.def",
+     "chrome_wer_main.cc",
+diff --git a/components/crash/win/chrome_wer.def b/components/crash/win/chrome_wer.def
+index 87e8d66b09..ebe96b6a46 100644
+--- a/components/crash/win/chrome_wer.def
++++ b/components/crash/win/chrome_wer.def
+@@ -1,7 +1,7 @@
+ ; Copyright 2022 The Chromium Authors
+ ; Use of this source code is governed by a BSD-style license that can be
+ ; found in the LICENSE file.
+-LIBRARY  "chrome_wer.dll"
++LIBRARY  "appswap_wer.dll"
+ 
+ EXPORTS
+   ; These are required for the WER api.
+diff --git a/components/crash/win/chrome_wer.ver b/components/crash/win/chrome_wer.ver
+index 58ad9b44cf..f33d1ff2db 100644
+--- a/components/crash/win/chrome_wer.ver
++++ b/components/crash/win/chrome_wer.ver
+@@ -1,2 +1,2 @@
+-INTERNAL_NAME=chrome_wer_dll
+-ORIGINAL_FILENAME=chrome_wer.dll
++INTERNAL_NAME=appswap_wer_dll
++ORIGINAL_FILENAME=appswap_wer.dll
