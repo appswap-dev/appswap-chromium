@@ -1,0 +1,561 @@
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 2a3958f78d..4e6f3b49ff 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -916,6 +916,7 @@ source_set("core") {
+     ":icon_manager",
+     ":main_extra_parts",
+     ":memory_details",
++    "//chrome/browser/app_swap",
+     ":net_benchmarking",
+     ":platform_util_internal",
+     ":primitives",
+diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
+new file mode 100644
+index 0000000000..3ea632e934
+--- /dev/null
++++ b/chrome/browser/app_swap/BUILD.gn
+@@ -0,0 +1,23 @@
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++source_set("app_swap") {
++  sources = [
++    "app_swap_tab_state.cc",
++    "app_swap_tab_state.h",
++    "app_swap_url_loader_factory.cc",
++    "app_swap_url_loader_factory.h",
++  ]
++
++  deps = [
++    "//base",
++    "//content/public/browser",
++    "//mojo/public/cpp/bindings",
++    "//mojo/public/cpp/system",
++    "//net",
++    "//services/network/public/cpp",
++    "//services/network/public/mojom",
++    "//url",
++  ]
++}
+diff --git a/chrome/browser/app_swap/app_swap_tab_state.cc b/chrome/browser/app_swap/app_swap_tab_state.cc
+new file mode 100644
+index 0000000000..6bfcd92bde
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_tab_state.cc
+@@ -0,0 +1,69 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_tab_state.h"
++
++#include <optional>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/command_line.h"
++#include "base/no_destructor.h"
++#include "base/strings/string_util.h"
++
++AppSwapTabState::AppSwapTabState(content::WebContents* contents)
++    : content::WebContentsUserData<AppSwapTabState>(*contents) {}
++
++AppSwapTabState::~AppSwapTabState() = default;
++
++void AppSwapTabState::SetRoutes(std::vector<AppSwapRoute> routes) {
++  routes_ = std::move(routes);
++}
++
++// static
++std::optional<AppSwapRoute> AppSwapRoute::FindForUrl(
++    const std::vector<AppSwapRoute>& routes,
++    const GURL& url) {
++  const std::string spec = url.spec();
++  for (const AppSwapRoute& route : routes) {
++    if (base::StartsWith(spec, route.url_prefix)) {
++      return route;
++    }
++  }
++  return std::nullopt;
++}
++
++namespace {
++
++std::vector<AppSwapRoute> ParseGlobalRoutes() {
++  std::vector<AppSwapRoute> routes;
++  const std::string value =
++      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
++          "appswap-route");
++  if (value.empty()) {
++    return routes;
++  }
++  // Format: <url_prefix>|<serve_dir>
++  const size_t separator = value.find('|');
++  if (separator == std::string::npos) {
++    return routes;
++  }
++  AppSwapRoute route;
++  route.url_prefix = value.substr(0, separator);
++  route.serve_dir = base::FilePath::FromUTF8Unsafe(value.substr(separator + 1));
++  routes.push_back(std::move(route));
++  return routes;
++}
++
++}  // namespace
++
++// static
++const std::vector<AppSwapRoute>& AppSwapTabState::GetGlobalRoutes() {
++  static const base::NoDestructor<std::vector<AppSwapRoute>> routes(
++      ParseGlobalRoutes());
++  return *routes;
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapTabState);
+diff --git a/chrome/browser/app_swap/app_swap_tab_state.h b/chrome/browser/app_swap/app_swap_tab_state.h
+new file mode 100644
+index 0000000000..ff7cd834b8
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_tab_state.h
+@@ -0,0 +1,50 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_TAB_STATE_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_TAB_STATE_H_
++
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "content/public/browser/web_contents_user_data.h"
++#include "url/gurl.h"
++
++// A single AppSwap route: requests whose URL starts with `url_prefix` are
++// served from files under `serve_dir` instead of the network.
++struct AppSwapRoute {
++  std::string url_prefix;
++  base::FilePath serve_dir;
++
++  // Returns the first route whose prefix matches `url`, or nullopt.
++  static std::optional<AppSwapRoute> FindForUrl(
++      const std::vector<AppSwapRoute>& routes,
++      const GURL& url);
++};
++
++// Per-tab AppSwap route configuration, stored on the WebContents.
++class AppSwapTabState : public content::WebContentsUserData<AppSwapTabState> {
++ public:
++  ~AppSwapTabState() override;
++
++  void SetRoutes(std::vector<AppSwapRoute> routes);
++  const std::vector<AppSwapRoute>& routes() const { return routes_; }
++
++  // Global routes that apply to every tab. Currently populated from the
++  // `--appswap-route` command-line switch (a stopgap until routes are loaded
++  // from configuration).
++  static const std::vector<AppSwapRoute>& GetGlobalRoutes();
++
++ private:
++  explicit AppSwapTabState(content::WebContents* contents);
++
++  friend WebContentsUserData;
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++
++  std::vector<AppSwapRoute> routes_;
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_TAB_STATE_H_
+diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
+new file mode 100644
+index 0000000000..e2f32a293d
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
+@@ -0,0 +1,285 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_url_loader_factory.h"
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <utility>
++
++#include "base/files/file.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/memory/self_deleting.h"
++#include "base/task/thread_pool.h"
++#include "chrome/browser/app_swap/app_swap_tab_state.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/web_contents.h"
++#include "mojo/public/cpp/system/data_pipe.h"
++#include "mojo/public/cpp/system/data_pipe_producer.h"
++#include "mojo/public/cpp/system/file_data_source.h"
++#include "net/base/mime_util.h"
++#include "net/base/net_errors.h"
++#include "net/http/http_request_headers.h"
++#include "net/http/http_response_headers.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/mojom/url_loader.mojom.h"
++#include "services/network/public/mojom/url_response_head.mojom.h"
++#include "url/gurl.h"
++
++namespace {
++
++// Resolves a request URL path to a file on disk under `route.serve_dir`,
++// applying SPA fallback for navigations. Returns an empty path when nothing
++// matches. Runs on a MayBlock task runner (it stats the filesystem).
++base::FilePath ResolveFilePath(const AppSwapRoute& route,
++                               const std::string& path,
++                               bool accepts_html) {
++  std::string_view path_view(path);
++  if (path_view.empty() || path_view == "/") {
++    path_view = "index.html";
++  }
++
++  // Strip leading separators to make the path relative to serve_dir.
++  const size_t start = path_view.find_first_not_of('/');
++  const std::string_view relative_str =
++      (start == std::string_view::npos) ? std::string_view()
++                                        : path_view.substr(start);
++
++  // Reject any path that could escape the serve directory.
++  if (relative_str.find("..") != std::string_view::npos) {
++    return base::FilePath();
++  }
++
++  base::FilePath full =
++      route.serve_dir.Append(base::FilePath::FromUTF8Unsafe(relative_str))
++          .NormalizePathSeparators();
++
++  if (base::PathExists(full) && !base::DirectoryExists(full)) {
++    return full;
++  }
++
++  // SPA fallback: only for navigations (requests that accept HTML), never for
++  // missing asset subresources.
++  if (accepts_html) {
++    base::FilePath index =
++        route.serve_dir.Append(FILE_PATH_LITERAL("index.html"));
++    if (base::PathExists(index)) {
++      return index;
++    }
++  }
++  return base::FilePath();
++}
++
++// Self-owned URLLoader that streams a single file from disk as the response.
++// Runs on a MayBlock task runner (file I/O is blocking).
++class AppSwapFileLoader : public network::mojom::URLLoader {
++ public:
++  static void CreateAndStart(
++      const AppSwapRoute& route,
++      std::string path,
++      bool accepts_html,
++      mojo::PendingReceiver<network::mojom::URLLoader> loader,
++      mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
++    // Owns itself; deleted once both bindings are closed.
++    auto* file_loader = new AppSwapFileLoader();
++    file_loader->Start(route, std::move(path), accepts_html, std::move(loader),
++                       std::move(client));
++  }
++
++  AppSwapFileLoader(const AppSwapFileLoader&) = delete;
++  AppSwapFileLoader& operator=(const AppSwapFileLoader&) = delete;
++
++  // network::mojom::URLLoader:
++  void FollowRedirect(
++      network::HttpRequestHeadersUpdateParams /*headers_update_params*/,
++      const std::optional<GURL>& /*new_url*/) override {}
++  void SetPriority(net::RequestPriority /*priority*/,
++                   int32_t /*intra_priority_value*/) override {}
++
++ private:
++  AppSwapFileLoader() = default;
++  ~AppSwapFileLoader() override = default;
++
++  void Start(const AppSwapRoute& route,
++             std::string path,
++             bool accepts_html,
++             mojo::PendingReceiver<network::mojom::URLLoader> loader,
++             mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
++    receiver_.Bind(std::move(loader));
++    receiver_.set_disconnect_handler(base::BindOnce(
++        &AppSwapFileLoader::OnMojoDisconnect, base::Unretained(this)));
++    client_.Bind(std::move(client));
++
++    base::FilePath file_path = ResolveFilePath(route, path, accepts_html);
++    if (file_path.empty()) {
++      OnClientComplete(net::ERR_FILE_NOT_FOUND);
++      return;
++    }
++
++    base::File::Info info;
++    if (!base::GetFileInfo(file_path, &info) || info.is_directory) {
++      OnClientComplete(net::ERR_FILE_NOT_FOUND);
++      return;
++    }
++
++    base::File file(file_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
++    if (!file.IsValid()) {
++      OnClientComplete(net::ERR_FILE_NOT_FOUND);
++      return;
++    }
++
++    auto head = network::mojom::URLResponseHead::New();
++    head->response_type = network::mojom::FetchResponseType::kBasic;
++    head->headers =
++        base::MakeRefCounted<net::HttpResponseHeaders>("HTTP/1.1 200 OK");
++    std::string mime_type;
++    if (!net::GetMimeTypeFromFile(file_path, &mime_type)) {
++      mime_type = "application/octet-stream";
++    }
++    head->mime_type = mime_type;
++    head->headers->AddHeader(net::HttpRequestHeaders::kContentType, mime_type);
++    head->content_length = info.size;
++
++    mojo::ScopedDataPipeProducerHandle producer_handle;
++    mojo::ScopedDataPipeConsumerHandle consumer_handle;
++    if (mojo::CreateDataPipe(/*options=*/nullptr, producer_handle,
++                             consumer_handle) != MOJO_RESULT_OK) {
++      OnClientComplete(net::ERR_FAILED);
++      return;
++    }
++
++    client_->OnReceiveResponse(std::move(head), std::move(consumer_handle),
++                               std::nullopt);
++
++    if (info.size == 0) {
++      OnClientComplete(net::OK);
++      return;
++    }
++
++    data_producer_ = std::make_unique<mojo::DataPipeProducer>(
++        std::move(producer_handle));
++    data_producer_->Write(
++        std::make_unique<mojo::FileDataSource>(std::move(file)),
++        base::BindOnce(&AppSwapFileLoader::OnFileWritten,
++                       base::Unretained(this)));
++  }
++
++  void OnFileWritten(MojoResult result) {
++    OnClientComplete(result == MOJO_RESULT_OK ? net::OK : net::ERR_FAILED);
++  }
++
++  void OnClientComplete(net::Error error) {
++    client_->OnComplete(network::URLLoaderCompletionStatus(error));
++    client_.reset();
++    MaybeDeleteSelf();
++  }
++
++  void OnMojoDisconnect() {
++    data_producer_.reset();
++    receiver_.reset();
++    client_.reset();
++    MaybeDeleteSelf();
++  }
++
++  void MaybeDeleteSelf() {
++    if (!receiver_.is_bound() && !client_.is_bound()) {
++      delete this;
++    }
++  }
++
++  mojo::Receiver<network::mojom::URLLoader> receiver_{this};
++  mojo::Remote<network::mojom::URLLoaderClient> client_;
++  std::unique_ptr<mojo::DataPipeProducer> data_producer_;
++};
++
++}  // namespace
++
++// static
++void AppSwapProxyingURLLoaderFactory::MaybeProxyRequest(
++    content::RenderFrameHost* frame,
++    network::URLLoaderFactoryBuilder& builder) {
++  if (!frame) {
++    return;
++  }
++  content::WebContents* web_contents =
++      content::WebContents::FromRenderFrameHost(frame);
++  if (!web_contents) {
++    return;
++  }
++
++  auto [receiver, remote] = builder.Append();
++  base::MakeSelfDeleting<AppSwapProxyingURLLoaderFactory>(
++      std::move(receiver), std::move(remote), web_contents->GetWeakPtr());
++}
++
++AppSwapProxyingURLLoaderFactory::AppSwapProxyingURLLoaderFactory(
++    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
++    mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
++    base::WeakPtr<content::WebContents> web_contents,
++    base::SelfDeletingPassKey pass_key)
++    : network::SelfDeletingURLLoaderFactory(std::move(receiver), pass_key),
++      web_contents_(std::move(web_contents)),
++      task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
++          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})) {
++  target_factory_.Bind(std::move(target_factory));
++  target_factory_.set_disconnect_handler(base::BindOnce(
++      &AppSwapProxyingURLLoaderFactory::OnTargetFactoryError,
++      base::Unretained(this)));
++}
++
++AppSwapProxyingURLLoaderFactory::~AppSwapProxyingURLLoaderFactory() = default;
++
++void AppSwapProxyingURLLoaderFactory::OnTargetFactoryError() {
++  DisconnectReceiversAndDestroy();
++}
++
++void AppSwapProxyingURLLoaderFactory::CreateLoaderAndStart(
++    mojo::PendingReceiver<network::mojom::URLLoader> loader,
++    int32_t request_id,
++    uint32_t options,
++    const network::ResourceRequest& request,
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++    const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
++  // Only static GET/HEAD requests are served from disk; everything else is
++  // forwarded to the network.
++  if (request.method == net::HttpRequestHeaders::kGetMethod ||
++      request.method == net::HttpRequestHeaders::kHeadMethod) {
++    std::optional<AppSwapRoute> route;
++    if (web_contents_) {
++      if (auto* state = AppSwapTabState::FromWebContents(web_contents_.get())) {
++        route = AppSwapRoute::FindForUrl(state->routes(), request.url);
++      }
++    }
++    if (!route) {
++      route = AppSwapRoute::FindForUrl(AppSwapTabState::GetGlobalRoutes(),
++                                       request.url);
++    }
++
++    if (route) {
++      std::string path(request.url.path());
++      bool accepts_html = false;
++      if (const std::optional<std::string> accept =
++              request.headers.GetHeader(net::HttpRequestHeaders::kAccept);
++          accept && accept->find("text/html") != std::string::npos) {
++        accepts_html = true;
++      }
++      task_runner_->PostTask(
++          FROM_HERE,
++          base::BindOnce(&AppSwapFileLoader::CreateAndStart, *route,
++                         std::move(path), accepts_html, std::move(loader),
++                         std::move(client)));
++      return;
++    }
++  }
++
++  // Not handled; forward to the wrapped network factory.
++  target_factory_->CreateLoaderAndStart(std::move(loader), request_id, options,
++                                        request, std::move(client),
++                                        traffic_annotation);
++}
+diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.h b/chrome/browser/app_swap/app_swap_url_loader_factory.h
+new file mode 100644
+index 0000000000..374a61dfd3
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_url_loader_factory.h
+@@ -0,0 +1,59 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
++
++#include "base/memory/weak_ptr.h"
++#include "base/task/sequenced_task_runner.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/pending_remote.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "services/network/public/cpp/self_deleting_url_loader_factory.h"
++#include "services/network/public/cpp/url_loader_factory_builder.h"
++
++namespace content {
++class RenderFrameHost;
++class WebContents;
++}  // namespace content
++
++// A URLLoaderFactory interceptor that serves AppSwap-routed requests from disk
++// and forwards everything else to the wrapped network factory.
++class AppSwapProxyingURLLoaderFactory
++    : public network::SelfDeletingURLLoaderFactory {
++ public:
++  static void MaybeProxyRequest(content::RenderFrameHost* frame,
++                                network::URLLoaderFactoryBuilder& builder);
++
++  AppSwapProxyingURLLoaderFactory(
++      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
++      mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
++      base::WeakPtr<content::WebContents> web_contents,
++      base::SelfDeletingPassKey pass_key);
++  AppSwapProxyingURLLoaderFactory(const AppSwapProxyingURLLoaderFactory&) =
++      delete;
++  AppSwapProxyingURLLoaderFactory& operator=(
++      const AppSwapProxyingURLLoaderFactory&) = delete;
++
++  // network::mojom::URLLoaderFactory:
++  void CreateLoaderAndStart(
++      mojo::PendingReceiver<network::mojom::URLLoader> loader,
++      int32_t request_id,
++      uint32_t options,
++      const network::ResourceRequest& request,
++      mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
++      override;
++
++ private:
++  ~AppSwapProxyingURLLoaderFactory() override;
++
++  void OnTargetFactoryError();
++
++  mojo::Remote<network::mojom::URLLoaderFactory> target_factory_;
++  base::WeakPtr<content::WebContents> web_contents_;
++  scoped_refptr<base::SequencedTaskRunner> task_runner_;
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index dde051181f..a2f0db3c89 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -644,6 +644,7 @@
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+     BUILDFLAG(IS_CHROMEOS)
++#include "chrome/browser/app_swap/app_swap_url_loader_factory.h"
+ #include "chrome/browser/enterprise/network_header_injection/http_header_injection_proxying_url_loader_factory.h"
+ #include "chrome/browser/enterprise/network_header_injection/http_header_injection_utils.h"
+ #include "components/webapps/isolated_web_apps/scheme.h"
+@@ -4981,6 +4982,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
+   handler->AddHandlerPair(&HandleChromeAboutAndChromeSyncRewrite,
+                           BrowserURLHandler::null_handler());
+ 
++  // Handler to rewrite appswap:// URLs to their chrome:// equivalents, so the
++  // AppSwap scheme works as an alias for the internal WebUI scheme.
++  handler->AddHandlerPair(&HandleAppSwapURLRewrite,
++                          BrowserURLHandler::null_handler());
++
+ #if BUILDFLAG(IS_ANDROID)
+   // Handler to rewrite chrome://newtab on Android.
+   handler->AddHandlerPair(&chrome::android::HandleAndroidNativePageURL,
+@@ -6599,6 +6605,8 @@ void ChromeContentBrowserClient::WillCreateURLLoaderFactory(
+       frame, type == URLLoaderFactoryType::kNavigation, request_initiator,
+       isolation_info, factory_builder);
+ 
++  AppSwapProxyingURLLoaderFactory::MaybeProxyRequest(frame, factory_builder);
++
+ #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+   if (disable_secure_dns) {
+     WebContents* web_contents = WebContents::FromRenderFrameHost(frame);

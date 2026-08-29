@@ -90,8 +90,16 @@ gen 0004-portable-scheme-pak.patch \
   content/public/common/url_utils.cc \
   chrome/browser/browser_about_handler.cc \
   chrome/browser/browser_about_handler.h \
-  chrome/browser/chrome_content_browser_client.cc \
   chrome/browser/profiles/profile_io_data.cc
+
+gen 0005-app-routing.patch \
+  chrome/browser/app_swap/app_swap_tab_state.cc \
+  chrome/browser/app_swap/app_swap_tab_state.h \
+  chrome/browser/app_swap/app_swap_url_loader_factory.cc \
+  chrome/browser/app_swap/app_swap_url_loader_factory.h \
+  chrome/browser/app_swap/BUILD.gn \
+  chrome/browser/BUILD.gn \
+  chrome/browser/chrome_content_browser_client.cc
 
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."

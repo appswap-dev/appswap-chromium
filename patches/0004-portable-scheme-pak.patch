@@ -40,22 +40,6 @@ index 2d90b68550..191717c94e 100644
  // Handles special about: URLs that trigger actions instead of navigation.
  // If |context|, URL blocking policies are checked first; if blocked, the
  // action is prevented. Returns true if handled (action occurred or was
-diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index dde051181f..c3b87c2495 100644
---- a/chrome/browser/chrome_content_browser_client.cc
-+++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -4981,6 +4981,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
-   handler->AddHandlerPair(&HandleChromeAboutAndChromeSyncRewrite,
-                           BrowserURLHandler::null_handler());
- 
-+  // Handler to rewrite appswap:// URLs to their chrome:// equivalents, so the
-+  // AppSwap scheme works as an alias for the internal WebUI scheme.
-+  handler->AddHandlerPair(&HandleAppSwapURLRewrite,
-+                          BrowserURLHandler::null_handler());
-+
- #if BUILDFLAG(IS_ANDROID)
-   // Handler to rewrite chrome://newtab on Android.
-   handler->AddHandlerPair(&chrome::android::HandleAndroidNativePageURL,
 diff --git a/chrome/browser/profiles/profile_io_data.cc b/chrome/browser/profiles/profile_io_data.cc
 index 080e9b0e43..174f4c96b9 100644
 --- a/chrome/browser/profiles/profile_io_data.cc
