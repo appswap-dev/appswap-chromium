@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/browser_about_handler.cc b/chrome/browser/browser_about_handler.cc
-index 08949a6941..f1588dbfc1 100644
+index 08949a6941..db3bfc35b8 100644
 --- a/chrome/browser/browser_about_handler.cc
 +++ b/chrome/browser/browser_about_handler.cc
-@@ -71,6 +71,20 @@ bool HandleChromeAboutAndChromeSyncRewrite(
+@@ -71,6 +71,25 @@ bool HandleChromeAboutAndChromeSyncRewrite(
    return false;
  }
  
@@ -16,6 +16,11 @@ index 08949a6941..f1588dbfc1 100644
 +
 +  GURL::Replacements replacements;
 +  replacements.SetSchemeStr(content::kChromeUIScheme);
++  // The apps catalog has its own WebUI; route it there instead of the stock
++  // chrome://apps page.
++  if (url->host() == "apps") {
++    replacements.SetHostStr("appswap-apps");
++  }
 +  *url = url->ReplaceComponents(replacements);
 +  return true;
 +}

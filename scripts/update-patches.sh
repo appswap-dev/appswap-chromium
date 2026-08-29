@@ -95,6 +95,8 @@ gen 0004-portable-scheme-pak.patch \
 gen 0005-app-routing.patch \
   chrome/browser/app_swap/app_swap_artifact_provider.cc \
   chrome/browser/app_swap/app_swap_artifact_provider.h \
+  chrome/browser/app_swap/app_swap_apps_ui.cc \
+  chrome/browser/app_swap/app_swap_apps_ui.h \
   chrome/browser/app_swap/app_swap_source.h \
   chrome/browser/app_swap/app_swap_tab_state.cc \
   chrome/browser/app_swap/app_swap_tab_state.h \
@@ -102,7 +104,9 @@ gen 0005-app-routing.patch \
   chrome/browser/app_swap/app_swap_url_loader_factory.h \
   chrome/browser/app_swap/BUILD.gn \
   chrome/browser/BUILD.gn \
-  chrome/browser/chrome_content_browser_client.cc
+  chrome/browser/chrome_content_browser_client.cc \
+  chrome/browser/ui/webui/BUILD.gn \
+  chrome/browser/ui/webui/chrome_web_ui_configs.cc
 
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."
