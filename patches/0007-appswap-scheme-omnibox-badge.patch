@@ -1,0 +1,260 @@
+diff --git a/chrome/browser/ui/toolbar/BUILD.gn b/chrome/browser/ui/toolbar/BUILD.gn
+index bbbeb90544d75..f781975b120dc 100644
+--- a/chrome/browser/ui/toolbar/BUILD.gn
++++ b/chrome/browser/ui/toolbar/BUILD.gn
+@@ -14,6 +14,7 @@ source_set("toolbar") {
+   public_deps = [ "//components/omnibox/browser:location_bar" ]
+   deps = [
+     "//base",
++    "//chrome/browser/app_swap",
+     "//chrome/browser/autocomplete",
+     "//chrome/browser/contextual_tasks",
+     "//chrome/browser/profiles:profile",
+diff --git a/chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.cc b/chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.cc
+index 4e23238dea745..b5fdd36434471 100644
+--- a/chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.cc
++++ b/chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.cc
+@@ -7,6 +7,7 @@
+ #include "base/check.h"
+ #include "base/feature_list.h"
+ #include "build/build_config.h"
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
+ #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
+ #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
+ #include "chrome/browser/contextual_tasks/contextual_tasks_ui_interface.h"
+@@ -194,7 +195,16 @@ const gfx::VectorIcon* ChromeLocationBarModelDelegate::GetVectorIconOverride()
+     return &vector_icons::kGoogleColorIcon;
+   }
+ 
+-  if (url.SchemeIs(content::kChromeUIScheme)) {
++  // Pages served via a configured AppSwap route (regardless of the route's
++  // own URL scheme) get a distinct "npm package" icon instead of the generic
++  // product icon, so it's visually clear the content is app-swapped in from
++  // npm rather than the real site.
++  if (IsAppSwapRoutedPage(url)) {
++    return &omnibox::kNpmPackageIcon;
++  }
++
++  if (url.SchemeIs(content::kChromeUIScheme) ||
++      url.SchemeIs(content::kAppSwapUIScheme)) {
+     return &(features::IsRoundedIconsEnabled()
+                  ? omnibox::kChromeProductIcon
+                  : omnibox::kProductChromeRefreshOldIcon);
+diff --git a/chrome/browser/ui/views/location_bar/BUILD.gn b/chrome/browser/ui/views/location_bar/BUILD.gn
+index 8ec3b04f08a10..7d65baeb63371 100644
+--- a/chrome/browser/ui/views/location_bar/BUILD.gn
++++ b/chrome/browser/ui/views/location_bar/BUILD.gn
+@@ -73,6 +73,7 @@ source_set("impl") {
+     ":icon_label_bubble",
+     ":location_bar",
+     "//chrome/browser:defaults",
++    "//chrome/browser/app_swap",
+     "//chrome/browser/ui/dialogs",
+     "//chrome/browser/ui/select_file_policy",
+   ]
+diff --git a/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc b/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
+index 2611503829f48..194d23d8c548f 100644
+--- a/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
++++ b/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/ui/views/location_bar/location_icon_state_helper.h"
+ 
+ #include "build/branding_buildflags.h"
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
+ #include "chrome/browser/extensions/extension_ui_util.h"
+ #include "chrome/browser/ui/omnibox/omnibox_controller.h"
+ #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
+@@ -43,6 +44,8 @@ std::u16string GetSecurityChipText(const LocationBarModel* model,
+   }
+ 
+   if (model->GetURL().SchemeIs(content::kChromeUIScheme) ||
++      model->GetURL().SchemeIs(content::kAppSwapUIScheme) ||
++      IsAppSwapRoutedPage(model->GetURL()) ||
+       (contextual_tasks::ShouldShowExpandedSecurityChip() &&
+        model->IsContextualTasksPage())) {
+     return l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
+@@ -87,6 +90,8 @@ bool ShouldShowSecurityChipText(const LocationBarModel* model,
+ 
+   const GURL& url = model->GetURL();
+   if (url.SchemeIs(content::kChromeUIScheme) ||
++      url.SchemeIs(content::kAppSwapUIScheme) ||
++      IsAppSwapRoutedPage(url) ||
+       url.SchemeIs(extensions::kExtensionScheme) ||
+       url.SchemeIs(url::kFileScheme) ||
+       url.SchemeIs(dom_distiller::kDomDistillerScheme) ||
+diff --git a/chrome/browser/ui/views/page_info/BUILD.gn b/chrome/browser/ui/views/page_info/BUILD.gn
+index 2db8d679023ad..7d0633b37c56a 100644
+--- a/chrome/browser/ui/views/page_info/BUILD.gn
++++ b/chrome/browser/ui/views/page_info/BUILD.gn
+@@ -84,6 +84,7 @@ source_set("impl") {
+     "//base",
+     "//chrome/browser:browser_public_dependencies",
+     "//chrome/browser:primitives",
++    "//chrome/browser/app_swap",
+     "//chrome/browser/file_system_access",
+     "//chrome/browser/page_info",
+     "//chrome/browser/safe_browsing",
+diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
+index ce635526633ef..127343dcde219 100644
+--- a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
++++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
+@@ -6,6 +6,9 @@
+ 
+ #include <memory>
+ 
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
+ #include "chrome/browser/page_info/page_info_features.h"
+ #include "chrome/browser/platform_util.h"
+ #include "chrome/browser/ui/browser_window.h"
+@@ -34,6 +37,7 @@
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/controls/label.h"
+ #include "ui/views/layout/box_layout.h"
+ #include "url/gurl.h"
+ 
+@@ -85,6 +89,42 @@ bool ShouldRouteToInternalBubble(const GURL& url,
+   return IsExtensionPageInfoBubble(url, web_contents);
+ }
+ 
++// Builds a small info section for pages served via a configured AppSwap
++// route, showing the npm package name and its version -- the configured
++// dist-tag alongside the concrete version it resolved to, if `app.version`
++// isn't already an exact version.
++std::unique_ptr<views::View> CreateAppSwapPackageInfoView(
++    const AppSwapApp& app) {
++  auto container = std::make_unique<views::View>();
++  container->SetLayoutManager(std::make_unique<views::BoxLayout>(
++      views::BoxLayout::Orientation::kVertical,
++      ChromeLayoutProvider::Get()->GetInsetsMetric(views::INSETS_DIALOG),
++      ChromeLayoutProvider::Get()->GetDistanceMetric(
++          views::DISTANCE_RELATED_CONTROL_VERTICAL)));
++
++  std::u16string version_text = base::UTF8ToUTF16(app.version);
++  if (!AppSwapArtifactProvider::IsExactVersion(app.version)) {
++    if (std::optional<std::string> resolved =
++            AppSwapArtifactProvider::GetInstance()->GetResolvedVersionIfCached(
++                app.ToSource())) {
++      version_text = base::UTF8ToUTF16(*resolved + " (" + app.version + ")");
++    }
++  }
++
++  const std::u16string lines[] = {
++      u"Package: " + base::UTF8ToUTF16(app.package_name),
++      u"Version: " + version_text,
++  };
++  for (const std::u16string& line : lines) {
++    auto* label =
++        container->AddChildView(std::make_unique<views::Label>(line));
++    label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    label->SetMultiLine(true);
++  }
++
++  return container;
++}
++
+ }  // namespace
+ 
+ // The regular PageInfoBubbleView is not supported for internal Chrome pages and
+@@ -139,7 +179,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
+       text = IDS_PAGE_INFO_READER_MODE_PAGE;
+     }
+   } else {
+-    CHECK(url.SchemeIs(content::kChromeUIScheme));
++    CHECK(url.SchemeIs(content::kChromeUIScheme) ||
++          url.SchemeIs(content::kAppSwapUIScheme));
+   }
+ 
+   // Title insets assume there is content (and thus have no bottom padding). Use
+@@ -225,6 +266,12 @@ PageInfoBubbleView::PageInfoBubbleView(
+   page_container_ = AddChildView(
+       std::make_unique<PageSwitcherView>(std::move(main_page_view)));
+ 
++  if (const AppSwapRoute* route = FindAppSwapRouteForUrl(url)) {
++    if (const AppSwapApp* app = FindAppSwapAppById(route->app_id)) {
++      AddChildView(CreateAppSwapPackageInfoView(*app));
++    }
++  }
++
+   if (page_info::IsMerchantTrustFeatureEnabled()) {
+     merchant_trust_coordinator_ =
+         std::make_unique<PageInfoMerchantTrustCoordinator>(web_contents());
+diff --git a/chrome/browser/ui/views/page_info/page_info_main_view.cc b/chrome/browser/ui/views/page_info/page_info_main_view.cc
+index 5bcdfb8d63a66..9cea942a8402d 100644
+--- a/chrome/browser/ui/views/page_info/page_info_main_view.cc
++++ b/chrome/browser/ui/views/page_info/page_info_main_view.cc
+@@ -11,6 +11,7 @@
+ #include "base/i18n/message_formatter.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "build/build_config.h"
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/lookalikes/safety_tip_ui_helper.h"
+ #include "chrome/browser/page_info/page_info_features.h"
+@@ -438,6 +439,18 @@ void PageInfoMainView::SetIdentityInfo(const IdentityInfo& identity_info) {
+ 
+   security_container_view_->RemoveAllChildViews();
+   extended_site_info_section_->SetVisible(false);
++
++  // AppSwap-routed pages are served locally from an npm package rather than
++  // fetched from the network, so the usual HTTP/TLS-based "not secure"
++  // warning doesn't apply to them and would be misleading. Skip it here; the
++  // AppSwap package info section added by PageInfoBubbleView covers what's
++  // actually relevant for these pages instead.
++  if (IsAppSwapRoutedPage(presenter_->site_url())) {
++    details_text_ = security_description->details;
++    PreferredSizeChanged();
++    return;
++  }
++
+   if (identity_info.safe_browsing_status ==
+       PageInfo::SAFE_BROWSING_STATUS_WARNABLE_SUSPICIOUS_SITE) {
+     security_container_view_->AddChildView(
+diff --git a/components/omnibox/browser/BUILD.gn b/components/omnibox/browser/BUILD.gn
+index 295c822aea260..b350aae6da714 100644
+--- a/components/omnibox/browser/BUILD.gn
++++ b/components/omnibox/browser/BUILD.gn
+@@ -78,6 +78,7 @@ aggregate_vector_icons("omnibox_vector_icons") {
+     "notes_spark.icon",
+     "notes_spark_old.icon",
+     "notification_add.icon",
++    "npm_package.icon",
+     "offline_dino.icon",
+     "offline_pin_filled.icon",
+     "offline_pin_old.icon",
+diff --git a/components/omnibox/browser/vector_icons/npm_package.icon b/components/omnibox/browser/vector_icons/npm_package.icon
+new file mode 100644
+index 0000000000000..61f4f6d409dc7
+--- /dev/null
++++ b/components/omnibox/browser/vector_icons/npm_package.icon
+@@ -0,0 +1,15 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++CANVAS_DIMENSIONS, 24,
++STROKE, 1.5,
++MOVE_TO, 4, 7,
++LINE_TO, 20, 7,
++LINE_TO, 20, 20,
++LINE_TO, 4, 20,
++CLOSE,
++MOVE_TO, 4, 11.5,
++LINE_TO, 20, 11.5,
++MOVE_TO, 12, 7,
++LINE_TO, 12, 11.5,
+diff --git a/components/page_info/page_info.cc b/components/page_info/page_info.cc
+index 75b69ab48313d..045107fbb8cf7 100644
+--- a/components/page_info/page_info.cc
++++ b/components/page_info/page_info.cc
+@@ -447,6 +447,7 @@ void PageInfo::OnThirdPartyToggleClicked(bool block_third_party_cookies) {
+ // static
+ bool PageInfo::IsFileOrInternalPage(const GURL& url) {
+   return url.SchemeIs(content::kChromeUIScheme) ||
++         url.SchemeIs(content::kAppSwapUIScheme) ||
+          url.SchemeIs(content::kChromeDevToolsScheme) ||
+          url.SchemeIs(content::kViewSourceScheme) ||
+          url.SchemeIs(url::kFileScheme);

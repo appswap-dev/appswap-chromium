@@ -103,6 +103,8 @@ gen 0005-app-routing.patch \
   chrome/browser/app_swap/app_swap_routes_service.h \
   chrome/browser/app_swap/app_swap_routes_ui.cc \
   chrome/browser/app_swap/app_swap_routes_ui.h \
+  chrome/browser/app_swap/app_swap_route_matcher.cc \
+  chrome/browser/app_swap/app_swap_route_matcher.h \
   chrome/browser/app_swap/app_swap_source.h \
   chrome/browser/app_swap/app_swap_url_loader_factory.cc \
   chrome/browser/app_swap/app_swap_url_loader_factory.h \
@@ -111,6 +113,22 @@ gen 0005-app-routing.patch \
   chrome/browser/chrome_content_browser_client.cc \
   chrome/browser/ui/webui/BUILD.gn \
   chrome/browser/ui/webui/chrome_web_ui_configs.cc
+
+gen 0006-disable-ai-mode.patch \
+  components/omnibox/common/omnibox_feature_configs.cc \
+  testing/variations/fieldtrial_testing_config.json
+
+gen 0007-appswap-scheme-omnibox-badge.patch \
+  chrome/browser/ui/toolbar/BUILD.gn \
+  chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.cc \
+  chrome/browser/ui/views/location_bar/BUILD.gn \
+  chrome/browser/ui/views/location_bar/location_icon_state_helper.cc \
+  chrome/browser/ui/views/page_info/BUILD.gn \
+  chrome/browser/ui/views/page_info/page_info_bubble_view.cc \
+  chrome/browser/ui/views/page_info/page_info_main_view.cc \
+  components/page_info/page_info.cc \
+  components/omnibox/browser/BUILD.gn \
+  components/omnibox/browser/vector_icons/npm_package.icon
 
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."

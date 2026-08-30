@@ -1,0 +1,56 @@
+diff --git a/components/omnibox/common/omnibox_feature_configs.cc b/components/omnibox/common/omnibox_feature_configs.cc
+index fc14abacb1673..8a824ef21f217 100644
+--- a/components/omnibox/common/omnibox_feature_configs.cc
++++ b/components/omnibox/common/omnibox_feature_configs.cc
+@@ -47,9 +47,13 @@ CalcProvider::CalcProvider() {
+           .Get();
+ }
+ 
++// Disabled in AppSwap: the AI Mode entry point triggers a synchronous
++// Reload() while a NavigationRequest for the same frame is still tearing
++// down, tripping the CHECK(is_safe_to_delete_) reentrancy guard in
++// content::NavigationRequest::~NavigationRequest and crashing the browser.
+ BASE_FEATURE(AiMode::kAllowAiModeMatches,
+              "AllowAiModeMatches",
+-             base::FEATURE_ENABLED_BY_DEFAULT);
++             base::FEATURE_DISABLED_BY_DEFAULT);
+ BASE_FEATURE(AiMode::kAiModeEligibility,
+              "kAiModeEligibility",
+              base::FEATURE_DISABLED_BY_DEFAULT);
+diff --git a/testing/variations/fieldtrial_testing_config.json b/testing/variations/fieldtrial_testing_config.json
+index 2b553aa98480b..54612d4372757 100644
+--- a/testing/variations/fieldtrial_testing_config.json
++++ b/testing/variations/fieldtrial_testing_config.json
+@@ -5706,24 +5706,6 @@
+             ]
+         }
+     ],
+-    "ContextualTasksDesktop": [
+-        {
+-            "platforms": [
+-                "chromeos",
+-                "linux",
+-                "mac",
+-                "windows"
+-            ],
+-            "experiments": [
+-                {
+-                    "name": "Enabled",
+-                    "enable_features": [
+-                        "ContextualTasks"
+-                    ]
+-                }
+-            ]
+-        }
+-    ],
+     "ContextualTasksUploadChunking": [
+         {
+             "platforms": [
+@@ -12564,7 +12546,6 @@
+                         "allow-signed-out": "false"
+                     },
+                     "enable_features": [
+-                        "ContextualTasksSidePanel",
+                         "LensSidePanelUnification"
+                     ]
+                 }

@@ -12,10 +12,10 @@ index 2a3958f78ddb6..4e6f3b49ffa24 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..96dbb16bae377
+index 0000000000000..43d8c888adcc1
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,39 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -32,6 +32,8 @@ index 0000000000000..96dbb16bae377
 +    "app_swap_routes_service.h",
 +    "app_swap_routes_ui.cc",
 +    "app_swap_routes_ui.h",
++    "app_swap_route_matcher.cc",
++    "app_swap_route_matcher.h",
 +    "app_swap_source.h",
 +    "app_swap_url_loader_factory.cc",
 +    "app_swap_url_loader_factory.h",
@@ -354,10 +356,10 @@ index 0000000000000..1a76ba1fa4bcf
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_apps_ui.cc b/chrome/browser/app_swap/app_swap_apps_ui.cc
 new file mode 100644
-index 0000000000000..cb415a3baf111
+index 0000000000000..6320d2f07c97d
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_ui.cc
-@@ -0,0 +1,585 @@
+@@ -0,0 +1,590 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -608,8 +610,8 @@ index 0000000000000..cb415a3baf111
 +    <div class="titlebar">
 +      <h1>Apps <span class="count" id="count"></span></h1>
 +      <nav class="tabs">
-+        <a href="chrome://appswap-apps" class="active">Apps</a>
-+        <a href="chrome://appswap-routes">Routes</a>
++        <a href="appswap://apps" class="active">Apps</a>
++        <a href="appswap://routes">Routes</a>
 +      </nav>
 +    </div>
 +    <button class="btn-primary" id="openAdd" type="button">+ Add app</button>
@@ -917,6 +919,11 @@ index 0000000000000..cb415a3baf111
 +
 +AppSwapAppsUI::AppSwapAppsUI(content::WebUI* web_ui)
 +    : content::WebUIController(web_ui) {
++  // Lets this page's renderer navigate directly to appswap:// links (e.g. the
++  // nav tabs), which ChildProcessSecurityPolicy would otherwise block as an
++  // unrequestable scheme even though it's just an alias rewritten to this
++  // same chrome:// page.
++  web_ui->AddRequestableScheme(content::kAppSwapUIScheme);
 +  content::WebUIDataSource* source =
 +      content::WebUIDataSource::CreateAndAdd(Profile::FromWebUI(web_ui),
 +                                             "appswap-apps");
@@ -979,10 +986,10 @@ index 0000000000000..3f7310edb06f2
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_UI_H_
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.cc b/chrome/browser/app_swap/app_swap_artifact_provider.cc
 new file mode 100644
-index 0000000000000..aa647a2b70910
+index 0000000000000..1d252e00f642e
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.cc
-@@ -0,0 +1,360 @@
+@@ -0,0 +1,371 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1036,14 +1043,6 @@ index 0000000000000..aa647a2b70910
 +
 +std::string Key(const AppSwapSource& source) {
 +  return source.package_name + "@" + source.version;
-+}
-+
-+bool IsExactVersion(const std::string& version) {
-+  size_t i = 0;
-+  if (!version.empty() && (version[0] == 'v' || version[0] == 'V')) {
-+    i = 1;
-+  }
-+  return i < version.size() && version[i] >= '0' && version[i] <= '9';
 +}
 +
 +std::string TarballUrl(const AppSwapSource& source, const std::string& version) {
@@ -1151,6 +1150,25 @@ index 0000000000000..aa647a2b70910
 +AppSwapArtifactProvider* AppSwapArtifactProvider::GetInstance() {
 +  static base::NoDestructor<AppSwapArtifactProvider> instance;
 +  return instance.get();
++}
++
++// static
++bool AppSwapArtifactProvider::IsExactVersion(const std::string& version) {
++  size_t i = 0;
++  if (!version.empty() && (version[0] == 'v' || version[0] == 'V')) {
++    i = 1;
++  }
++  return i < version.size() && version[i] >= '0' && version[i] <= '9';
++}
++
++std::optional<std::string> AppSwapArtifactProvider::GetResolvedVersionIfCached(
++    const AppSwapSource& source) const {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  auto it = cache_.find(Key(source));
++  if (it == cache_.end()) {
++    return std::nullopt;
++  }
++  return it->second.BaseName().AsUTF8Unsafe();
 +}
 +
 +void AppSwapArtifactProvider::GetOrDownload(
@@ -1345,10 +1363,10 @@ index 0000000000000..aa647a2b70910
 +}
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.h b/chrome/browser/app_swap/app_swap_artifact_provider.h
 new file mode 100644
-index 0000000000000..ef960860275a7
+index 0000000000000..efb1d6e8a10e3
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.h
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,81 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1358,6 +1376,7 @@ index 0000000000000..ef960860275a7
 +
 +#include <map>
 +#include <memory>
++#include <optional>
 +#include <string>
 +#include <vector>
 +
@@ -1387,6 +1406,16 @@ index 0000000000000..ef960860275a7
 +  // thread; `callback` runs on the UI thread.
 +  void GetOrDownload(const AppSwapSource& source,
 +                     base::OnceCallback<void(base::FilePath)> callback);
++
++  // Returns the concrete version `source` resolved to (e.g. "1.1.0" for a
++  // `source.version` of "latest"), if its artifact has already been
++  // downloaded via GetOrDownload; nullopt otherwise.
++  std::optional<std::string> GetResolvedVersionIfCached(
++      const AppSwapSource& source) const;
++
++  // Returns whether `version` looks like an exact version ("1.2.3",
++  // optionally "v"-prefixed) rather than a dist-tag ("latest", "beta", ...).
++  static bool IsExactVersion(const std::string& version);
 +
 + private:
 +  void FetchMetadata(const AppSwapSource& source,
@@ -1419,6 +1448,111 @@ index 0000000000000..ef960860275a7
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ARTIFACT_PROVIDER_H_
+diff --git a/chrome/browser/app_swap/app_swap_route_matcher.cc b/chrome/browser/app_swap/app_swap_route_matcher.cc
+new file mode 100644
+index 0000000000000..b1aee4726c9ec
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_route_matcher.cc
+@@ -0,0 +1,56 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
++
++#include <string_view>
++
++#include "base/strings/string_util.h"
++#include "url/gurl.h"
++
++bool AppSwapUrlMatchesPattern(const GURL& url, const std::string& url_pattern) {
++  const GURL pattern_url(url_pattern);
++  if (!pattern_url.is_valid() || url.scheme() != pattern_url.scheme() ||
++      url.host() != pattern_url.host() ||
++      url.EffectiveIntPort() != pattern_url.EffectiveIntPort()) {
++    return false;
++  }
++
++  const std::string_view pattern_path = pattern_url.path();
++  if (pattern_path.empty() || pattern_path == "/") {
++    return true;
++  }
++  const std::string_view url_path = url.path();
++  if (!base::StartsWith(url_path, pattern_path)) {
++    return false;
++  }
++  // Require a path-segment boundary so "/docs" doesn't match "/docs-legacy".
++  return url_path.size() == pattern_path.size() || pattern_path.back() == '/' ||
++         url_path[pattern_path.size()] == '/';
++}
++
++const AppSwapRoute* FindAppSwapRouteForUrl(const GURL& url) {
++  for (const AppSwapRoute& route :
++       AppSwapRoutesService::GetInstance()->GetRoutesIfLoaded()) {
++    if (AppSwapUrlMatchesPattern(url, route.url_pattern)) {
++      return &route;
++    }
++  }
++  return nullptr;
++}
++
++const AppSwapApp* FindAppSwapAppById(const std::string& app_id) {
++  for (const AppSwapApp& app :
++       AppSwapAppsService::GetInstance()->GetAppsIfLoaded()) {
++    if (app.id == app_id) {
++      return &app;
++    }
++  }
++  return nullptr;
++}
++
++bool IsAppSwapRoutedPage(const GURL& url) {
++  const AppSwapRoute* route = FindAppSwapRouteForUrl(url);
++  return route && FindAppSwapAppById(route->app_id);
++}
+diff --git a/chrome/browser/app_swap/app_swap_route_matcher.h b/chrome/browser/app_swap/app_swap_route_matcher.h
+new file mode 100644
+index 0000000000000..770d08ea53a41
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_route_matcher.h
+@@ -0,0 +1,37 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_MATCHER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_MATCHER_H_
++
++#include <string>
++
++#include "chrome/browser/app_swap/app_swap_apps_service.h"
++#include "chrome/browser/app_swap/app_swap_routes_service.h"
++
++class GURL;
++
++// Returns whether `url` falls under `url_pattern`: same scheme/host/port, and
++// `url`'s path is equal to or nested under the pattern's path (so
++// "https://my-website.com" matches every path on that origin, while
++// "https://my-website.com/docs" matches "/docs" and "/docs/x" but not
++// "/docs-legacy"). Does not match across origins, e.g. a pattern of
++// "https://my-website.com" never matches "https://my-website.com.evil.com".
++bool AppSwapUrlMatchesPattern(const GURL& url, const std::string& url_pattern);
++
++// Finds the first configured route whose pattern matches `url`, or nullptr.
++// Only consults already-loaded routes; see
++// AppSwapRoutesService::GetRoutesIfLoaded.
++const AppSwapRoute* FindAppSwapRouteForUrl(const GURL& url);
++
++// Finds the app with the given id among already-loaded apps, or nullptr; see
++// AppSwapAppsService::GetAppsIfLoaded.
++const AppSwapApp* FindAppSwapAppById(const std::string& app_id);
++
++// Whether `url` is currently served by a configured AppSwap route (an npm
++// package swapped in for some other origin), regardless of `url`'s own
++// scheme.
++bool IsAppSwapRoutedPage(const GURL& url);
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_MATCHER_H_
 diff --git a/chrome/browser/app_swap/app_swap_routes_service.cc b/chrome/browser/app_swap/app_swap_routes_service.cc
 new file mode 100644
 index 0000000000000..07ae514bd8dc1
@@ -1701,10 +1835,10 @@ index 0000000000000..f065478b13540
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_routes_ui.cc b/chrome/browser/app_swap/app_swap_routes_ui.cc
 new file mode 100644
-index 0000000000000..40ab3feb511e6
+index 0000000000000..4ec3643fc2e42
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_routes_ui.cc
-@@ -0,0 +1,586 @@
+@@ -0,0 +1,591 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1946,8 +2080,8 @@ index 0000000000000..40ab3feb511e6
 +    <div class="titlebar">
 +      <h1>Routes <span class="count" id="count"></span></h1>
 +      <nav class="tabs">
-+        <a href="chrome://appswap-apps">Apps</a>
-+        <a href="chrome://appswap-routes" class="active">Routes</a>
++        <a href="appswap://apps">Apps</a>
++        <a href="appswap://routes" class="active">Routes</a>
 +      </nav>
 +    </div>
 +    <button class="btn-primary" id="openAdd" type="button">+ Add route</button>
@@ -2265,6 +2399,11 @@ index 0000000000000..40ab3feb511e6
 +
 +AppSwapRoutesUI::AppSwapRoutesUI(content::WebUI* web_ui)
 +    : content::WebUIController(web_ui) {
++  // Lets this page's renderer navigate directly to appswap:// links (e.g. the
++  // nav tabs), which ChildProcessSecurityPolicy would otherwise block as an
++  // unrequestable scheme even though it's just an alias rewritten to this
++  // same chrome:// page.
++  web_ui->AddRequestableScheme(content::kAppSwapUIScheme);
 +  content::WebUIDataSource* source =
 +      content::WebUIDataSource::CreateAndAdd(Profile::FromWebUI(web_ui),
 +                                             "appswap-routes");
@@ -2352,10 +2491,10 @@ index 0000000000000..707f425096a7c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000000..4cca7e12f0ec9
+index 0000000000000..1c82d28e6fd0f
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,414 @@
+@@ -0,0 +1,365 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2376,10 +2515,10 @@ index 0000000000000..4cca7e12f0ec9
 +#include "base/memory/self_deleting.h"
 +#include "base/no_destructor.h"
 +#include "base/strings/string_number_conversions.h"
-+#include "base/strings/string_util.h"
 +#include "base/task/thread_pool.h"
 +#include "chrome/browser/app_swap/app_swap_apps_service.h"
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
 +#include "chrome/browser/app_swap/app_swap_routes_service.h"
 +#include "mojo/public/cpp/system/data_pipe.h"
 +#include "mojo/public/cpp/system/data_pipe_producer.h"
@@ -2635,55 +2774,6 @@ index 0000000000000..4cca7e12f0ec9
 +               std::move(client));
 +}
 +
-+// Returns whether `url` falls under `url_pattern`: same scheme/host/port, and
-+// `url`'s path is equal to or nested under the pattern's path (so
-+// "https://my-website.com" matches every path on that origin, while
-+// "https://my-website.com/docs" matches "/docs" and "/docs/x" but not
-+// "/docs-legacy"). Does not match across origins, e.g. a pattern of
-+// "https://my-website.com" never matches "https://my-website.com.evil.com".
-+bool UrlMatchesPattern(const GURL& url, const std::string& url_pattern) {
-+  const GURL pattern_url(url_pattern);
-+  if (!pattern_url.is_valid() || url.scheme() != pattern_url.scheme() ||
-+      url.host() != pattern_url.host() ||
-+      url.EffectiveIntPort() != pattern_url.EffectiveIntPort()) {
-+    return false;
-+  }
-+
-+  const std::string_view pattern_path = pattern_url.path();
-+  if (pattern_path.empty() || pattern_path == "/") {
-+    return true;
-+  }
-+  const std::string_view url_path = url.path();
-+  if (!base::StartsWith(url_path, pattern_path)) {
-+    return false;
-+  }
-+  // Require a path-segment boundary so "/docs" doesn't match "/docs-legacy".
-+  return url_path.size() == pattern_path.size() || pattern_path.back() == '/' ||
-+         url_path[pattern_path.size()] == '/';
-+}
-+
-+// Finds the first configured route whose pattern matches `url`, or nullptr.
-+const AppSwapRoute* FindRouteForUrl(const GURL& url) {
-+  for (const AppSwapRoute& route :
-+       AppSwapRoutesService::GetInstance()->GetRoutesIfLoaded()) {
-+    if (UrlMatchesPattern(url, route.url_pattern)) {
-+      return &route;
-+    }
-+  }
-+  return nullptr;
-+}
-+
-+// Finds the app with the given id, or nullptr.
-+const AppSwapApp* FindAppById(const std::string& app_id) {
-+  for (const AppSwapApp& app :
-+       AppSwapAppsService::GetInstance()->GetAppsIfLoaded()) {
-+    if (app.id == app_id) {
-+      return &app;
-+    }
-+  }
-+  return nullptr;
-+}
-+
 +}  // namespace
 +
 +// static
@@ -2737,8 +2827,8 @@ index 0000000000000..4cca7e12f0ec9
 +  // forwarded to the network.
 +  if (request.method == net::HttpRequestHeaders::kGetMethod ||
 +      request.method == net::HttpRequestHeaders::kHeadMethod) {
-+    if (const AppSwapRoute* route = FindRouteForUrl(request.url)) {
-+      const AppSwapApp* app = FindAppById(route->app_id);
++    if (const AppSwapRoute* route = FindAppSwapRouteForUrl(request.url)) {
++      const AppSwapApp* app = FindAppSwapAppById(route->app_id);
 +      if (!app) {
 +        // The route points at an app that no longer exists (e.g. deleted
 +        // from appswap://apps); fail rather than silently falling through to
