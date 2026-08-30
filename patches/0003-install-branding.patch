@@ -1,5 +1,5 @@
 diff --git a/chrome/common/chrome_content_client.cc b/chrome/common/chrome_content_client.cc
-index 1136dad871..923371e603 100644
+index 1136dad871e5f..923371e603770 100644
 --- a/chrome/common/chrome_content_client.cc
 +++ b/chrome/common/chrome_content_client.cc
 @@ -126,7 +126,7 @@ void ChromeContentClient::AddPlugins(
@@ -12,7 +12,7 @@ index 1136dad871..923371e603 100644
    static constexpr char16_t kPDFPluginDescription[] = u"Built-in PDF viewer";
    static constexpr char kPDFPluginExtension[] = "pdf";
 diff --git a/chrome/install_static/chromium_install_modes.h b/chrome/install_static/chromium_install_modes.h
-index f29a8228fe..32a89606bf 100644
+index f29a8228fe611..32a89606bf510 100644
 --- a/chrome/install_static/chromium_install_modes.h
 +++ b/chrome/install_static/chromium_install_modes.h
 @@ -21,10 +21,10 @@ inline constexpr wchar_t kCompanyPathName[] = L"";
@@ -52,7 +52,7 @@ index f29a8228fe..32a89606bf 100644
              L"{7D2B3E1D-D096-4594-9D8F-A6667F12E0AC}",  // Active Setup
                                                          // GUID.
 diff --git a/chrome/installer/launcher_support/chrome_launcher_support.cc b/chrome/installer/launcher_support/chrome_launcher_support.cc
-index 13154e1cb5..4935e1e7f1 100644
+index 13154e1cb5f67..4935e1e7f1d6e 100644
 --- a/chrome/installer/launcher_support/chrome_launcher_support.cc
 +++ b/chrome/installer/launcher_support/chrome_launcher_support.cc
 @@ -28,11 +28,11 @@ const wchar_t kUpdateClientsRegKey[] = L"Software\\Google\\Update\\Clients";
@@ -70,7 +70,7 @@ index 13154e1cb5..4935e1e7f1 100644
  const wchar_t kVersionStringField[] = L"pv";
  
 diff --git a/chrome/installer/mini_installer/mini_installer_constants.cc b/chrome/installer/mini_installer/mini_installer_constants.cc
-index c2a03ccbb6..0746e572ab 100644
+index c2a03ccbb6460..0746e572abac9 100644
 --- a/chrome/installer/mini_installer/mini_installer_constants.cc
 +++ b/chrome/installer/mini_installer/mini_installer_constants.cc
 @@ -67,12 +67,12 @@ const wchar_t kCleanupRegistryKey[] = L"Software\\Chrome for Testing";
@@ -90,7 +90,7 @@ index c2a03ccbb6..0746e572ab 100644
  
  }  // namespace mini_installer
 diff --git a/chrome/installer/setup/setup_util.cc b/chrome/installer/setup/setup_util.cc
-index d7de103384..9244c48ba9 100644
+index d7de103384061..9244c48ba9c5e 100644
 --- a/chrome/installer/setup/setup_util.cc
 +++ b/chrome/installer/setup/setup_util.cc
 @@ -74,8 +74,8 @@ void RemoveBinariesVersionKey(const InstallerState& installer_state) {
@@ -105,7 +105,7 @@ index d7de103384..9244c48ba9 100644
    installer::DeleteRegistryKey(installer_state.root_key(), path,
                                 KEY_WOW64_32KEY);
 diff --git a/chrome/installer/setup/uninstall.cc b/chrome/installer/setup/uninstall.cc
-index a9ed8fb8c0..7cb1c446f7 100644
+index a9ed8fb8c014c..7cb1c446f785c 100644
 --- a/chrome/installer/setup/uninstall.cc
 +++ b/chrome/installer/setup/uninstall.cc
 @@ -791,7 +791,7 @@ void RemoveChromeLegacyRegistryKeys(const base::FilePath& chrome_exe) {
@@ -118,7 +118,7 @@ index a9ed8fb8c0..7cb1c446f7 100644
  
    HKEY roots[] = {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER};
 diff --git a/chrome/installer/util/logging_installer.cc b/chrome/installer/util/logging_installer.cc
-index 4734595db4..585e1c34f6 100644
+index 4734595db4123..585e1c34f6aad 100644
 --- a/chrome/installer/util/logging_installer.cc
 +++ b/chrome/installer/util/logging_installer.cc
 @@ -126,7 +126,7 @@ base::FilePath GetLogFilePath(const installer::InitialPreferences& prefs) {

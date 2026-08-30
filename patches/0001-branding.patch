@@ -1,5 +1,5 @@
 diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
-index 875bfcfedb..f3c6651f30 100644
+index 875bfcfedb8a8..f3c6651f3084b 100644
 --- a/chrome/app/chromium_strings.grd
 +++ b/chrome/app/chromium_strings.grd
 @@ -278,7 +278,7 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
@@ -3073,7 +3073,7 @@ index 875bfcfedb..f3c6651f30 100644
      </messages>
    </release>
 diff --git a/chrome/app/password_manager_ui_strings.grdp b/chrome/app/password_manager_ui_strings.grdp
-index c3ed41189b..2f23898ea3 100644
+index c3ed41189b590..2f23898ea3379 100644
 --- a/chrome/app/password_manager_ui_strings.grdp
 +++ b/chrome/app/password_manager_ui_strings.grdp
 @@ -892,11 +892,11 @@
@@ -3169,7 +3169,7 @@ index c3ed41189b..2f23898ea3 100644
      </else>
    </if>
 diff --git a/chrome/app/settings_chromium_strings.grdp b/chrome/app/settings_chromium_strings.grdp
-index 237b2a8517..4f80a0d8c7 100644
+index 237b2a8517c3c..4f80a0d8c702c 100644
 --- a/chrome/app/settings_chromium_strings.grdp
 +++ b/chrome/app/settings_chromium_strings.grdp
 @@ -1,10 +1,10 @@
@@ -3758,7 +3758,7 @@ index 237b2a8517..4f80a0d8c7 100644
    <message name="IDS_SETTINGS_DICTATION_SHORTCUT_SUBLABEL" translateable="false" desc="Sublabel for the keyboard shortcut setting in Dictation settings page.">
      Open Dictation with a keyboard shortcut
 diff --git a/chrome/app/theme/chromium/BRANDING b/chrome/app/theme/chromium/BRANDING
-index f8363d5b29..a90115f3d8 100644
+index f8363d5b294fe..a90115f3d832f 100644
 --- a/chrome/app/theme/chromium/BRANDING
 +++ b/chrome/app/theme/chromium/BRANDING
 @@ -1,10 +1,10 @@

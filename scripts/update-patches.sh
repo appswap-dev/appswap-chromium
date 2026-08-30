@@ -99,9 +99,11 @@ gen 0005-app-routing.patch \
   chrome/browser/app_swap/app_swap_artifact_provider.h \
   chrome/browser/app_swap/app_swap_apps_ui.cc \
   chrome/browser/app_swap/app_swap_apps_ui.h \
+  chrome/browser/app_swap/app_swap_routes_service.cc \
+  chrome/browser/app_swap/app_swap_routes_service.h \
+  chrome/browser/app_swap/app_swap_routes_ui.cc \
+  chrome/browser/app_swap/app_swap_routes_ui.h \
   chrome/browser/app_swap/app_swap_source.h \
-  chrome/browser/app_swap/app_swap_tab_state.cc \
-  chrome/browser/app_swap/app_swap_tab_state.h \
   chrome/browser/app_swap/app_swap_url_loader_factory.cc \
   chrome/browser/app_swap/app_swap_url_loader_factory.h \
   chrome/browser/app_swap/BUILD.gn \
