@@ -83,19 +83,29 @@ index 2611503829f48..194d23d8c548f 100644
        url.SchemeIs(url::kFileScheme) ||
        url.SchemeIs(dom_distiller::kDomDistillerScheme) ||
 diff --git a/chrome/browser/ui/views/page_info/BUILD.gn b/chrome/browser/ui/views/page_info/BUILD.gn
-index 2db8d679023ad..7d0633b37c56a 100644
+index 2db8d679023ad..9d487eaee8729 100644
 --- a/chrome/browser/ui/views/page_info/BUILD.gn
 +++ b/chrome/browser/ui/views/page_info/BUILD.gn
-@@ -84,6 +84,7 @@ source_set("impl") {
+@@ -84,7 +84,9 @@ source_set("impl") {
      "//base",
      "//chrome/browser:browser_public_dependencies",
      "//chrome/browser:primitives",
 +    "//chrome/browser/app_swap",
      "//chrome/browser/file_system_access",
++    "//chrome/browser/ui/views/app_swap",
      "//chrome/browser/page_info",
      "//chrome/browser/safe_browsing",
+     "//chrome/browser/safe_browsing/suspicious_site_warnings",
+@@ -106,6 +108,7 @@ source_set("impl") {
+     "//components/dom_distiller/core",
+     "//components/omnibox/browser:vector_icons",
+     "//components/page_info/core",
++    "//components/vector_icons",
+     "//components/privacy_sandbox:features",
+     "//components/safe_browsing/core/browser:suspicious_site_warning_allowlist",
+     "//components/strings:components_branded_strings_grit",
 diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-index ce635526633ef..127343dcde219 100644
+index ce635526633ef..a91b4df3858d1 100644
 --- a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 +++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 @@ -6,6 +6,9 @@
@@ -108,31 +118,49 @@ index ce635526633ef..127343dcde219 100644
  #include "chrome/browser/page_info/page_info_features.h"
  #include "chrome/browser/platform_util.h"
  #include "chrome/browser/ui/browser_window.h"
-@@ -34,6 +37,7 @@
+@@ -13,9 +16,11 @@
+ #include "chrome/browser/ui/page_info/chrome_page_info_delegate.h"
+ #include "chrome/browser/ui/page_info/chrome_page_info_ui_delegate.h"
+ #include "chrome/browser/ui/page_info/page_info_dialog.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.h"
+ #include "chrome/browser/ui/views/bubble_anchor_util_views.h"
+ #include "chrome/browser/ui/views/chrome_layout_provider.h"
+ #include "chrome/browser/ui/views/controls/page_switcher_view.h"
++#include "chrome/browser/ui/views/controls/rich_hover_button.h"
+ #include "chrome/browser/ui/views/page_info/page_info_bubble_specification.h"
+ #include "chrome/browser/ui/views/page_info/page_info_main_view.h"
+ #include "chrome/browser/ui/views/page_info/page_info_merchant_trust_content_view.h"
+@@ -27,13 +32,17 @@
+ #include "components/page_info/core/features.h"
+ #include "components/privacy_sandbox/privacy_sandbox_features.h"
+ #include "components/strings/grit/components_branded_strings.h"
++#include "components/vector_icons/vector_icons.h"
+ #include "components/strings/grit/components_strings.h"
+ #include "components/strings/grit/privacy_sandbox_strings.h"
++#include "content/public/browser/web_contents.h"
+ #include "content/public/common/url_constants.h"
+ #include "extensions/buildflags/buildflags.h"
  #include "ui/base/l10n/l10n_util.h"
  #include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/models/image_model.h"
  #include "ui/views/accessibility/view_accessibility.h"
 +#include "ui/views/controls/label.h"
  #include "ui/views/layout/box_layout.h"
  #include "url/gurl.h"
  
-@@ -85,6 +89,42 @@ bool ShouldRouteToInternalBubble(const GURL& url,
+@@ -85,6 +94,32 @@ bool ShouldRouteToInternalBubble(const GURL& url,
    return IsExtensionPageInfoBubble(url, web_contents);
  }
  
 +// Builds a small info section for pages served via a configured AppSwap
 +// route, showing the npm package name and its version -- the configured
 +// dist-tag alongside the concrete version it resolved to, if `app.version`
-+// isn't already an exact version.
++// isn't already an exact version. Clicking it opens a modal letting the user
++// switch to a different dist-tag or exact version
++// (ShowAppSwapVersionPickerDialog).
 +std::unique_ptr<views::View> CreateAppSwapPackageInfoView(
-+    const AppSwapApp& app) {
-+  auto container = std::make_unique<views::View>();
-+  container->SetLayoutManager(std::make_unique<views::BoxLayout>(
-+      views::BoxLayout::Orientation::kVertical,
-+      ChromeLayoutProvider::Get()->GetInsetsMetric(views::INSETS_DIALOG),
-+      ChromeLayoutProvider::Get()->GetDistanceMetric(
-+          views::DISTANCE_RELATED_CONTROL_VERTICAL)));
-+
++    const AppSwapApp& app,
++    content::WebContents* web_contents) {
 +  std::u16string version_text = base::UTF8ToUTF16(app.version);
 +  if (!AppSwapArtifactProvider::IsExactVersion(app.version)) {
 +    if (std::optional<std::string> resolved =
@@ -142,24 +170,18 @@ index ce635526633ef..127343dcde219 100644
 +    }
 +  }
 +
-+  const std::u16string lines[] = {
++  return std::make_unique<RichHoverButton>(
++      base::BindRepeating(&ShowAppSwapVersionPickerDialog,
++                          base::Unretained(web_contents), app),
++      PageInfoViewFactory::GetImageModel(vector_icons::kExtensionFilledIcon),
 +      u"Package: " + base::UTF8ToUTF16(app.package_name),
-+      u"Version: " + version_text,
-+  };
-+  for (const std::u16string& line : lines) {
-+    auto* label =
-+        container->AddChildView(std::make_unique<views::Label>(line));
-+    label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-+    label->SetMultiLine(true);
-+  }
-+
-+  return container;
++      u"Version: " + version_text, PageInfoViewFactory::GetOpenSubpageIcon());
 +}
 +
  }  // namespace
  
  // The regular PageInfoBubbleView is not supported for internal Chrome pages and
-@@ -139,7 +179,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
+@@ -139,7 +174,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
        text = IDS_PAGE_INFO_READER_MODE_PAGE;
      }
    } else {
@@ -169,13 +191,13 @@ index ce635526633ef..127343dcde219 100644
    }
  
    // Title insets assume there is content (and thus have no bottom padding). Use
-@@ -225,6 +266,12 @@ PageInfoBubbleView::PageInfoBubbleView(
+@@ -225,6 +261,12 @@ PageInfoBubbleView::PageInfoBubbleView(
    page_container_ = AddChildView(
        std::make_unique<PageSwitcherView>(std::move(main_page_view)));
  
 +  if (const AppSwapRoute* route = FindAppSwapRouteForUrl(url)) {
 +    if (const AppSwapApp* app = FindAppSwapAppById(route->app_id)) {
-+      AddChildView(CreateAppSwapPackageInfoView(*app));
++      AddChildView(CreateAppSwapPackageInfoView(*app, web_contents()));
 +    }
 +  }
 +

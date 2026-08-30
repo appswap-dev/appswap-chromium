@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/browser_about_handler.cc b/chrome/browser/browser_about_handler.cc
-index 08949a69415df..e829d033b6457 100644
+index 08949a69415df..a89b525cb645e 100644
 --- a/chrome/browser/browser_about_handler.cc
 +++ b/chrome/browser/browser_about_handler.cc
-@@ -71,6 +71,27 @@ bool HandleChromeAboutAndChromeSyncRewrite(
+@@ -71,6 +71,29 @@ bool HandleChromeAboutAndChromeSyncRewrite(
    return false;
  }
  
@@ -22,6 +22,8 @@ index 08949a69415df..e829d033b6457 100644
 +    replacements.SetHostStr("appswap-apps");
 +  } else if (url->host() == "routes") {
 +    replacements.SetHostStr("appswap-routes");
++  } else if (url->host() == "profiles") {
++    replacements.SetHostStr("appswap-profiles");
 +  }
 +  *url = url->ReplaceComponents(replacements);
 +  return true;

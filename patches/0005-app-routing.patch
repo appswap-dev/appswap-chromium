@@ -12,10 +12,10 @@ index 2a3958f78ddb6..4e6f3b49ffa24 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..7e7bbfba70e91
+index 0000000000000..8e2180a766f2b
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,46 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -28,6 +28,10 @@ index 0000000000000..7e7bbfba70e91
 +    "app_swap_apps_ui.h",
 +    "app_swap_artifact_provider.cc",
 +    "app_swap_artifact_provider.h",
++    "app_swap_profiles_service.cc",
++    "app_swap_profiles_service.h",
++    "app_swap_profiles_ui.cc",
++    "app_swap_profiles_ui.h",
 +    "app_swap_routes_service.cc",
 +    "app_swap_routes_service.h",
 +    "app_swap_routes_ui.cc",
@@ -35,6 +39,8 @@ index 0000000000000..7e7bbfba70e91
 +    "app_swap_route_matcher.cc",
 +    "app_swap_route_matcher.h",
 +    "app_swap_source.h",
++    "app_swap_version_utils.cc",
++    "app_swap_version_utils.h",
 +    "app_swap_url_loader_factory.cc",
 +    "app_swap_url_loader_factory.h",
 +  ]
@@ -357,10 +363,10 @@ index 0000000000000..1a76ba1fa4bcf
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_apps_ui.cc b/chrome/browser/app_swap/app_swap_apps_ui.cc
 new file mode 100644
-index 0000000000000..298cbb4c4c021
+index 0000000000000..655d25f1fc663
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_ui.cc
-@@ -0,0 +1,595 @@
+@@ -0,0 +1,596 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -616,6 +622,7 @@ index 0000000000000..298cbb4c4c021
 +      <nav class="tabs">
 +        <a href="appswap://apps" class="active">Apps</a>
 +        <a href="appswap://routes">Routes</a>
++        <a href="appswap://profiles">Profiles</a>
 +      </nav>
 +    </div>
 +    <button class="btn-primary" id="openAdd" type="button">+ Add app</button>
@@ -992,10 +999,10 @@ index 0000000000000..3f7310edb06f2
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_UI_H_
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.cc b/chrome/browser/app_swap/app_swap_artifact_provider.cc
 new file mode 100644
-index 0000000000000..1d252e00f642e
+index 0000000000000..184e809ab7c3e
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.cc
-@@ -0,0 +1,371 @@
+@@ -0,0 +1,445 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1220,6 +1227,80 @@ index 0000000000000..1d252e00f642e
 +  }
 +}
 +
++AppSwapPackageMetadata::AppSwapPackageMetadata() = default;
++AppSwapPackageMetadata::AppSwapPackageMetadata(
++    const AppSwapPackageMetadata&) = default;
++AppSwapPackageMetadata& AppSwapPackageMetadata::operator=(
++    const AppSwapPackageMetadata&) = default;
++AppSwapPackageMetadata::~AppSwapPackageMetadata() = default;
++
++void AppSwapArtifactProvider::FetchPackageMetadata(
++    const AppSwapSource& source,
++    base::OnceCallback<void(std::optional<AppSwapPackageMetadata>)>
++        callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  auto resource_request = std::make_unique<network::ResourceRequest>();
++  resource_request->url = GURL(MetadataUrl(source));
++  resource_request->method = net::HttpRequestHeaders::kGetMethod;
++  resource_request->headers.SetHeader(net::HttpRequestHeaders::kAccept,
++                                      "application/json");
++  if (!source.token.empty()) {
++    resource_request->headers.SetHeader(net::HttpRequestHeaders::kAuthorization,
++                                        base::StrCat({"Bearer ", source.token}));
++  }
++
++  scoped_refptr<network::SharedURLLoaderFactory> factory =
++      SystemNetworkContextManager::GetInstance()->GetSharedURLLoaderFactory();
++
++  auto loader =
++      network::SimpleURLLoader::Create(std::move(resource_request),
++                                       kArtifactTrafficAnnotation);
++  network::SimpleURLLoader* raw_loader = loader.get();
++  const std::string key = Key(source);
++  metadata_query_loaders_[key] = std::move(loader);
++
++  raw_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
++      factory.get(),
++      base::BindOnce(
++          [](AppSwapArtifactProvider* self, std::string key,
++             base::OnceCallback<void(std::optional<AppSwapPackageMetadata>)>
++                 callback,
++             std::optional<std::string> body) {
++            self->metadata_query_loaders_.erase(key);
++            if (!body) {
++              std::move(callback).Run(std::nullopt);
++              return;
++            }
++            std::optional<base::Value> parsed = base::JSONReader::Read(
++                *body, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
++            if (!parsed || !parsed->is_dict()) {
++              std::move(callback).Run(std::nullopt);
++              return;
++            }
++            const base::DictValue& root = parsed->GetDict();
++            AppSwapPackageMetadata metadata;
++            if (const base::DictValue* dist_tags = root.FindDict("dist-tags")) {
++              for (const auto [tag, version] : *dist_tags) {
++                if (version.is_string()) {
++                  metadata.dist_tags[tag] = version.GetString();
++                }
++              }
++            }
++            if (const base::DictValue* versions = root.FindDict("versions")) {
++              for (const auto [version, unused] : *versions) {
++                metadata.versions.push_back(version);
++              }
++            }
++            if (metadata.versions.empty() && metadata.dist_tags.empty()) {
++              std::move(callback).Run(std::nullopt);
++              return;
++            }
++            std::move(callback).Run(std::move(metadata));
++          },
++          base::Unretained(this), key, std::move(callback)));
++}
++
 +void AppSwapArtifactProvider::FetchMetadata(
 +    const AppSwapSource& source,
 +    base::OnceCallback<void(std::string /*version*/, std::string /*error*/)>
@@ -1369,10 +1450,10 @@ index 0000000000000..1d252e00f642e
 +}
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.h b/chrome/browser/app_swap/app_swap_artifact_provider.h
 new file mode 100644
-index 0000000000000..efb1d6e8a10e3
+index 0000000000000..500abaf92b29e
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.h
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,109 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1394,6 +1475,19 @@ index 0000000000000..efb1d6e8a10e3
 +namespace network {
 +class SimpleURLLoader;
 +}  // namespace network
++
++// The full set of published dist-tags and versions for a package, used by the
++// version-picker UI to let the user choose among ALL available tags/versions
++// rather than just what a single AppSwapSource currently resolves to.
++struct AppSwapPackageMetadata {
++  AppSwapPackageMetadata();
++  AppSwapPackageMetadata(const AppSwapPackageMetadata&);
++  AppSwapPackageMetadata& operator=(const AppSwapPackageMetadata&);
++  ~AppSwapPackageMetadata();
++
++  std::vector<std::string> versions;              // All published versions.
++  std::map<std::string, std::string> dist_tags;   // tag -> version.
++};
 +
 +// Resolves npm app sources to a directory on disk, downloading and unpacking
 +// the tarball on first use and caching the result.
@@ -1423,6 +1517,14 @@ index 0000000000000..efb1d6e8a10e3
 +  // optionally "v"-prefixed) rather than a dist-tag ("latest", "beta", ...).
 +  static bool IsExactVersion(const std::string& version);
 +
++  // Fetches the full list of published dist-tags and versions for `source`'s
++  // package, ignoring `source.version` entirely -- used by the version-picker
++  // UI. Calls `callback` with nullopt on any network/parse error.
++  void FetchPackageMetadata(
++      const AppSwapSource& source,
++      base::OnceCallback<void(std::optional<AppSwapPackageMetadata>)>
++          callback);
++
 + private:
 +  void FetchMetadata(const AppSwapSource& source,
 +                     base::OnceCallback<void(std::string /*version*/,
@@ -1446,6 +1548,13 @@ index 0000000000000..efb1d6e8a10e3
 +
 +  // Active downloads keyed by "package@version", to keep the loader alive.
 +  std::map<std::string, std::unique_ptr<network::SimpleURLLoader>> loaders_;
++
++  // Active FetchPackageMetadata() requests, kept separate from `loaders_` --
++  // sharing one map would let an unrelated in-flight request silently
++  // cancel (or be cancelled by) a real GetOrDownload() for the same
++  // "package@version" key.
++  std::map<std::string, std::unique_ptr<network::SimpleURLLoader>>
++      metadata_query_loaders_;
 +
 +  // In-memory cache of resolved directories keyed by "package@version".
 +  std::map<std::string, base::FilePath> cache_;
@@ -1841,10 +1950,10 @@ index 0000000000000..f065478b13540
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_routes_ui.cc b/chrome/browser/app_swap/app_swap_routes_ui.cc
 new file mode 100644
-index 0000000000000..88e057e9b2118
+index 0000000000000..a4b99164cb33d
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_routes_ui.cc
-@@ -0,0 +1,596 @@
+@@ -0,0 +1,597 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2091,6 +2200,7 @@ index 0000000000000..88e057e9b2118
 +      <nav class="tabs">
 +        <a href="appswap://apps">Apps</a>
 +        <a href="appswap://routes" class="active">Routes</a>
++        <a href="appswap://profiles">Profiles</a>
 +      </nav>
 +    </div>
 +    <button class="btn-primary" id="openAdd" type="button">+ Add route</button>
@@ -2931,18 +3041,53 @@ index 0000000000000..e8b682b075fc2
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index dde051181fa13..a2f0db3c89a1d 100644
+index dde051181fa13..23b70734712fd 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -644,6 +644,7 @@
+@@ -644,6 +644,8 @@
  
  #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
      BUILDFLAG(IS_CHROMEOS)
++#include "chrome/browser/app_swap/app_swap_profiles_service.h"
 +#include "chrome/browser/app_swap/app_swap_url_loader_factory.h"
  #include "chrome/browser/enterprise/network_header_injection/http_header_injection_proxying_url_loader_factory.h"
  #include "chrome/browser/enterprise/network_header_injection/http_header_injection_utils.h"
  #include "components/webapps/isolated_web_apps/scheme.h"
-@@ -4981,6 +4982,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
+@@ -1802,6 +1804,33 @@ ChromeContentBrowserClient::GetStoragePartitionConfigForSite(
+   }
+ #endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE) && !BUILDFLAG(IS_ANDROID)
+ 
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_CHROMEOS)
++  // AppSwap Profiles are a global browsing identity, not scoped to AppSwap
++  // apps specifically: once a profile is active, ALL http/https navigation
++  // in this browser profile uses its storage partition, so e.g. a new tab to
++  // an unrelated site like google.com "sticks" to whatever identity you
++  // activated from an AppSwap app, rather than only isolating traffic to
++  // AppSwap-routed pages themselves.
++  //
++  // Warm up the config service as early as possible: this function can run
++  // before AppSwapProxyingURLLoaderFactory::MaybeProxyRequest (which does its
++  // own warm-up for the Apps/Routes services it needs), since the
++  // SiteInstance/partition for a navigation is chosen before its
++  // URLLoaderFactory is created.
++  AppSwapProfilesService::GetInstance()->GetProfiles(base::DoNothing());
++
++  if (site.SchemeIsHTTPOrHTTPS()) {
++    if (std::optional<std::string> profile_id =
++            AppSwapProfilesService::GetInstance()->GetActiveProfileIdIfLoaded()) {
++      return content::StoragePartitionConfig::Create(
++          browser_context, kAppSwapProfilePartitionDomain,
++          /*partition_name=*/*profile_id, /*in_memory=*/false);
++    }
++  }
++#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
++        // BUILDFLAG(IS_CHROMEOS)
++
+   return default_storage_partition_config;
+ }
+ 
+@@ -4981,6 +5010,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
    handler->AddHandlerPair(&HandleChromeAboutAndChromeSyncRewrite,
                            BrowserURLHandler::null_handler());
  
@@ -2954,7 +3099,7 @@ index dde051181fa13..a2f0db3c89a1d 100644
  #if BUILDFLAG(IS_ANDROID)
    // Handler to rewrite chrome://newtab on Android.
    handler->AddHandlerPair(&chrome::android::HandleAndroidNativePageURL,
-@@ -6599,6 +6605,8 @@ void ChromeContentBrowserClient::WillCreateURLLoaderFactory(
+@@ -6599,6 +6633,8 @@ void ChromeContentBrowserClient::WillCreateURLLoaderFactory(
        frame, type == URLLoaderFactoryType::kNavigation, request_initiator,
        isolation_info, factory_builder);
  
@@ -2976,24 +3121,26 @@ index 17a9289e00ac8..34d5cf1c69907 100644
      "//chrome/browser/contextual_tasks:ui",
      "//chrome/browser/glic",
 diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-index 7a947c092bfaf..f28e3d13a6f9d 100644
+index 7a947c092bfaf..591110e20254c 100644
 --- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-@@ -13,6 +13,8 @@
+@@ -13,6 +13,9 @@
  #include "chrome/browser/optimization_guide/optimization_guide_internals_ui.h"
  #include "chrome/browser/ui/webui/about/about_ui.h"
  #include "chrome/browser/ui/webui/accessibility/accessibility_ui.h"
 +#include "chrome/browser/app_swap/app_swap_apps_ui.h"
++#include "chrome/browser/app_swap/app_swap_profiles_ui.h"
 +#include "chrome/browser/app_swap/app_swap_routes_ui.h"
  #include "chrome/browser/ui/webui/actor_internals/actor_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/autofill_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/password_manager_internals_ui.h"
-@@ -252,6 +254,8 @@ void RegisterChromeWebUIConfigs() {
+@@ -252,6 +255,9 @@ void RegisterChromeWebUIConfigs() {
  
    auto& map = content::WebUIConfigMap::GetInstance();
    map.AddWebUIConfig(std::make_unique<AccessibilityUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapAppsUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapRoutesUIConfig>());
++  map.AddWebUIConfig(std::make_unique<AppSwapProfilesUIConfig>());
    map.AddWebUIConfig(std::make_unique<AutofillInternalsUIConfig>());
    map.AddWebUIConfig(std::make_unique<BluetoothInternalsUIConfig>());
    map.AddWebUIConfig(

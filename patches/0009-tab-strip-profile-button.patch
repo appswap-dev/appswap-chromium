@@ -1,0 +1,584 @@
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 50920511caf57..e76e206133d56 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -792,6 +792,7 @@ static_library("ui") {
+     "//chrome/browser/ui/toolbar",
+     "//chrome/browser/ui/toolbar:impl",
+     "//chrome/browser/ui/translate",
++    "//chrome/browser/ui/views/app_swap",
+     "//chrome/browser/ui/views/eye_dropper",
+     "//chrome/browser/ui/views/file_system_access",
+     "//chrome/browser/ui/views/file_system_access:impl",
+diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
+new file mode 100644
+index 0000000000000..003e072d17693
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/BUILD.gn
+@@ -0,0 +1,33 @@
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++source_set("app_swap") {
++  sources = [
++    "app_swap_profile_switch_util.cc",
++    "app_swap_profile_switch_util.h",
++    "app_swap_profile_tab_strip_button.cc",
++    "app_swap_profile_tab_strip_button.h",
++    "app_swap_version_picker_dialog.cc",
++    "app_swap_version_picker_dialog.h",
++  ]
++
++  deps = [
++    "//base",
++    "//chrome/browser/app_swap",
++    "//chrome/browser/ui/browser_window",
++    "//chrome/browser/ui/page_info",
++    "//chrome/browser/ui/tabs",
++    "//chrome/browser/ui/views/controls:controls",
++    "//components/constrained_window",
++    "//components/tabs:impl",
++    "//content/public/browser",
++    "//ui/accessibility:ax_base",
++    "//ui/base",
++    "//ui/color",
++    "//ui/gfx",
++    "//ui/menus",
++    "//ui/views",
++    "//url",
++  ]
++}
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc
+new file mode 100644
+index 0000000000000..b9960e3537a24
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc
+@@ -0,0 +1,65 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h"
++
++#include <memory>
++#include <string>
++#include <utility>
++
++#include "chrome/browser/app_swap/app_swap_profiles_service.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/page_info/chrome_page_info_delegate.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/site_instance.h"
++#include "content/public/browser/storage_partition_config.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/common/referrer.h"
++#include "ui/base/page_transition_types.h"
++
++void SwitchActiveAppSwapProfile(const std::string& new_profile_id,
++                                content::WebContents* web_contents) {
++  AppSwapProfilesService::GetInstance()->SetActiveProfile(new_profile_id);
++
++  BrowserWindowInterface* browser =
++      ChromePageInfoDelegate::DefaultGetBrowserCallback().Run(web_contents);
++  if (!browser) {
++    return;
++  }
++  TabStripModel* tab_strip_model = browser->GetTabStripModel();
++  if (tab_strip_model->GetIndexOfWebContents(web_contents) ==
++      TabStripModel::kNoTab) {
++    return;
++  }
++
++  content::BrowserContext* browser_context = web_contents->GetBrowserContext();
++  content::StoragePartitionConfig partition_config =
++      content::StoragePartitionConfig::Create(
++          browser_context, kAppSwapProfilePartitionDomain,
++          /*partition_name=*/new_profile_id, /*in_memory=*/false);
++  scoped_refptr<content::SiteInstance> site_instance =
++      content::SiteInstance::CreateForFixedStoragePartition(
++          browser_context, web_contents->GetLastCommittedURL(),
++          partition_config);
++
++  content::WebContents::CreateParams create_params(browser_context,
++                                                    site_instance);
++  std::unique_ptr<content::WebContents> new_contents =
++      content::WebContents::Create(create_params);
++  content::WebContents* raw_new_contents = new_contents.get();
++
++  // Replaces `web_contents` at its current tab-strip index in one call,
++  // preserving position/active state, and hands back the old contents by
++  // unique_ptr.
++  std::unique_ptr<content::WebContents> old_contents =
++      tab_strip_model->DiscardWebContents(web_contents,
++                                          std::move(new_contents));
++
++  raw_new_contents->GetController().LoadURL(
++      old_contents->GetLastCommittedURL(), content::Referrer(),
++      ui::PAGE_TRANSITION_RELOAD, std::string());
++
++  old_contents.reset();  // Synchronous destroy -- see header comment.
++}
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h
+new file mode 100644
+index 0000000000000..ec577ad5edf3e
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h
+@@ -0,0 +1,28 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_SWITCH_UTIL_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_SWITCH_UTIL_H_
++
++#include <string>
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++// Persists `new_profile_id` as the active profile for its app, then rebuilds
++// `web_contents`'s tab with a SiteInstance fixed to that profile's storage
++// partition, reloading the current URL in place. No-op if `web_contents`
++// isn't currently in a tab strip.
++//
++// Safe to call synchronously from a click handler even though it destroys
++// `web_contents`: this is native Views UI code, not code running inside
++// `web_contents`'s renderer, and PageInfoBubbleViewBase::WebContentsDestroyed()
++// only ever calls the asynchronous Widget::Close() -- matching the fully
++// synchronous discard-and-destroy pattern already used by
++// TabLifecycleUnit::FinishDiscard for memory-saver tab discarding.
++void SwitchActiveAppSwapProfile(const std::string& new_profile_id,
++                                content::WebContents* web_contents);
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_SWITCH_UTIL_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc
+new file mode 100644
+index 0000000000000..a8fefad55292a
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc
+@@ -0,0 +1,262 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h"
++
++#include <iterator>
++#include <optional>
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/hash/hash.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_process_host.h"
++#include "content/public/browser/storage_partition.h"
++#include "content/public/browser/storage_partition_config.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/mojom/menu_source_type.mojom.h"
++#include "ui/base/models/menu_separator_types.h"
++#include "ui/base/window_open_disposition.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
++#include "ui/gfx/color_utils.h"
++#include "ui/gfx/geometry/insets.h"
++#include "ui/views/background.h"
++#include "ui/views/border.h"
++#include "ui/views/controls/menu/menu_item_view.h"
++#include "ui/views/controls/menu/menu_model_adapter.h"
++#include "ui/views/controls/menu/menu_runner.h"
++#include "url/gurl.h"
++
++namespace {
++
++// Command ids for the profile-picker menu. Purely local to this menu's own
++// ExecuteCommand -- not part of chrome's global command-id space.
++constexpr int kCreateProfileCommandId = 1;
++constexpr int kProfileCommandBase = 2;
++
++// Modest rounding for a "rounded rectangle" chip, not a full pill/stadium.
++constexpr float kBadgeCornerRadius = 6.0f;
++
++// Curated hues (degrees) for the badge palette, deliberately NOT a raw
++// hash-to-hue mapping across the full color wheel. Two reasons:
++//  - Yellow/yellow-green hues (~50-100 degrees) read as a washed-out,
++//    "dirty" pastel rather than a clear color once lightened for light-theme
++//    backgrounds, so they're excluded entirely.
++//  - An arbitrary hue can land anywhere on the red-green confusion axis that
++//    dominates the most common (red-green) forms of color blindness. This
++//    palette instead spans hues that stay visually distinct from each other
++//    even under red-green confusion: blue, teal, a blue-leaning green,
++//    purple, magenta, orange, indigo, and a pink-leaning red.
++constexpr double kBadgeHues[] = {
++    210.0,  // blue
++    175.0,  // teal
++    150.0,  // blue-leaning green (not yellow-green)
++    265.0,  // purple
++    330.0,  // magenta / pink
++    25.0,   // orange
++    245.0,  // indigo
++    355.0,  // pink-leaning red
++};
++
++// Deterministically maps a profile name to one of `kBadgeHues` via a stable
++// (cross-run, cross-platform) hash, so e.g. "Alice" always lands on the same
++// hue -- distinct names usually land on visibly different colors, and the
++// same name always looks the same.
++double HueForProfileName(const std::string& name) {
++  return kBadgeHues[base::PersistentHash(name) % std::size(kBadgeHues)];
++}
++
++SkColor ComputeBadgeBackgroundColor(const std::string& name, bool dark_theme) {
++  color_utils::HSL hsl;
++  hsl.h = HueForProfileName(name) / 360.0;
++  // Clearly-colored (not washed-out) chips on light backgrounds, muted-dark
++  // chips on dark backgrounds -- same hue either way, just a tone appropriate
++  // to the theme.
++  hsl.s = dark_theme ? 0.40 : 0.62;
++  hsl.l = dark_theme ? 0.28 : 0.80;
++  return color_utils::HSLToSkColor(hsl, SK_AlphaOPAQUE);
++}
++
++// Picks a text color guaranteed to meet WCAG AA contrast (>= 4.5:1) against
++// `background`: BlendForMinContrast always succeeds by blending toward
++// whichever of black/white contrasts more, so this can't produce an
++// inaccessible pairing regardless of the hash-picked hue.
++SkColor ComputeBadgeTextColor(SkColor background) {
++  return color_utils::BlendForMinContrast(SK_ColorBLACK, background).color;
++}
++
++}  // namespace
++
++AppSwapProfileTabStripButton::AppSwapProfileTabStripButton(
++    BrowserWindowInterface* browser)
++    : views::MenuButton(base::BindRepeating(
++          &AppSwapProfileTabStripButton::ButtonPressed,
++          base::Unretained(this))),
++      browser_(browser) {
++  SetVisible(false);
++  browser_->GetTabStripModel()->AddObserver(this);
++  UpdateForActiveTab();
++}
++
++AppSwapProfileTabStripButton::~AppSwapProfileTabStripButton() {
++  browser_->GetTabStripModel()->RemoveObserver(this);
++}
++
++void AppSwapProfileTabStripButton::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  if (selection.active_tab_changed()) {
++    UpdateForActiveTab();
++  }
++}
++
++void AppSwapProfileTabStripButton::OnTabChangedAt(tabs::TabInterface* tab,
++                                                   TabChangeType change_type) {
++  UpdateForActiveTab();
++}
++
++void AppSwapProfileTabStripButton::UpdateForActiveTab() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++
++  // The badge reflects what Profile *this tab* is actually running under --
++  // read directly from its real, already-assigned storage partition, not
++  // from AppSwapProfilesService's global "default for new navigations"
++  // pointer. A tab's partition is fixed at creation/switch time
++  // (SiteInstance::CreateForFixedStoragePartition) and stays that way no
++  // matter what gets activated elsewhere afterwards, so reading the global
++  // pointer here would show the wrong name on every tab except the one most
++  // recently switched (this was a real bug: switching Gmail to a different
++  // Profile in one tab silently relabeled every other open tab too).
++  if (web_contents) {
++    content::StoragePartition* partition = web_contents->GetPrimaryMainFrame()
++                                                ->GetProcess()
++                                                ->GetStoragePartition();
++    const content::StoragePartitionConfig& config = partition->GetConfig();
++    if (config.partition_domain() == kAppSwapProfilePartitionDomain) {
++      const std::string profile_id = config.partition_name();
++      for (const AppSwapProfile& profile :
++           AppSwapProfilesService::GetInstance()->GetProfilesIfLoaded()) {
++        if (profile.id == profile_id) {
++          SetText(base::UTF8ToUTF16(profile.name));
++          ApplyBadgeStyle(profile.name);
++          SetVisible(true);
++          return;
++        }
++      }
++      // The partition belongs to a Profile that's since been removed -- fall
++      // through to the "no Profile assigned" placeholder below.
++    }
++  }
++
++  // This tab isn't running under any Profile's partition. Profiles are a
++  // general browser identity feature for any website (e.g. switching which
++  // Gmail account you're signed into), not something specific to AppSwap's
++  // npm apps, so offer this as a discovery entry point on every ordinary web
++  // page -- stays hidden only on non-web pages (chrome://, file://, etc.),
++  // where there's no "site identity" for a Profile to apply to.
++  if (!web_contents ||
++      !web_contents->GetLastCommittedURL().SchemeIsHTTPOrHTTPS()) {
++    SetVisible(false);
++    return;
++  }
++  SetText(u"Profile");
++  ApplyBadgeStyle("Profile");
++  SetVisible(true);
++}
++
++void AppSwapProfileTabStripButton::ApplyBadgeStyle(
++    const std::string& profile_name) {
++  bool dark_theme = false;
++  if (const ui::ColorProvider* color_provider = GetColorProvider()) {
++    dark_theme =
++        color_utils::IsDark(color_provider->GetColor(ui::kColorWindowBackground));
++  }
++
++  const SkColor background_color =
++      ComputeBadgeBackgroundColor(profile_name, dark_theme);
++  const SkColor text_color = ComputeBadgeTextColor(background_color);
++
++  SetBackground(
++      views::CreateRoundedRectBackground(background_color, kBadgeCornerRadius));
++  SetEnabledTextColors(text_color);
++  SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(4, 10)));
++}
++
++void AppSwapProfileTabStripButton::OnThemeChanged() {
++  views::MenuButton::OnThemeChanged();
++  UpdateForActiveTab();
++}
++
++void AppSwapProfileTabStripButton::ButtonPressed() {
++  // Tear down any previous menu before rebuilding: menu_runner_ owns a
++  // MenuItemView tree built from menu_model_adapter_/menu_model_, so it must
++  // be destroyed first -- destroying menu_model_/menu_model_adapter_ first
++  // (as a plain top-to-bottom reassignment below would do) leaves that old
++  // tree referencing already-freed objects, which crashes (dangling raw_ptr
++  // detected) once menu_runner_ is finally reset.
++  menu_runner_.reset();
++  menu_model_adapter_.reset();
++  menu_model_.reset();
++
++  // List every configured profile, not just the current page's app -- the
++  // active profile is a global identity, so switching can pick any of them
++  // regardless of what site the button happens to be showing on right now.
++  menu_profiles_ = AppSwapProfilesService::GetInstance()->GetProfilesIfLoaded();
++
++  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
++  for (size_t i = 0; i < menu_profiles_.size(); ++i) {
++    const AppSwapProfile& profile = menu_profiles_[i];
++    std::u16string label = base::UTF8ToUTF16(profile.name);
++    if (const AppSwapApp* app = FindAppSwapAppById(profile.app_id)) {
++      label += u" (" + base::UTF8ToUTF16(app->title) + u")";
++    }
++    menu_model_->AddItem(kProfileCommandBase + static_cast<int>(i), label);
++  }
++  menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
++  menu_model_->AddItem(kCreateProfileCommandId, u"Create new profile");
++
++  menu_model_adapter_ = std::make_unique<views::MenuModelAdapter>(
++      menu_model_.get());
++  std::unique_ptr<views::MenuItemView> root = menu_model_adapter_->CreateMenu();
++  menu_runner_ = std::make_unique<views::MenuRunner>(
++      std::move(root), views::MenuRunner::HAS_MNEMONICS);
++  menu_runner_->RunMenuAt(GetWidget(), nullptr, GetAnchorBoundsInScreen(),
++                          views::MenuAnchorPosition::kTopLeft,
++                          ui::mojom::MenuSourceType::kNone);
++}
++
++void AppSwapProfileTabStripButton::ExecuteCommand(int command_id,
++                                                   int event_flags) {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  if (!web_contents) {
++    return;
++  }
++
++  if (command_id == kCreateProfileCommandId) {
++    browser_->OpenGURL(GURL("appswap://profiles"),
++                       WindowOpenDisposition::NEW_FOREGROUND_TAB);
++    return;
++  }
++
++  const size_t index = static_cast<size_t>(command_id - kProfileCommandBase);
++  if (index >= menu_profiles_.size()) {
++    return;
++  }
++  SwitchActiveAppSwapProfile(menu_profiles_[index].id, web_contents);
++  UpdateForActiveTab();
++}
++
++BEGIN_METADATA(AppSwapProfileTabStripButton)
++END_METADATA
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h
+new file mode 100644
+index 0000000000000..bcb538af9c767
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h
+@@ -0,0 +1,94 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_TAB_STRIP_BUTTON_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_TAB_STRIP_BUTTON_H_
++
++#include <memory>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/app_swap/app_swap_profiles_service.h"
++#include "chrome/browser/ui/tabs/tab_change_type.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/menus/simple_menu_model.h"
++#include "ui/views/controls/button/menu_button.h"
++
++class BrowserWindowInterface;
++class TabStripModel;
++
++namespace tabs {
++class TabInterface;
++}  // namespace tabs
++
++namespace views {
++class MenuModelAdapter;
++class MenuRunner;
++}  // namespace views
++
++// A tab-strip-leading button showing the AppSwap Profile that's currently
++// the browser's active identity -- a general per-browser identity feature
++// for any website (e.g. switching which Gmail account you're signed into),
++// not scoped to any one app, route, or tab. Shows the active profile's name
++// once one is set; before that, shows a neutral "Profile" placeholder on any
++// ordinary web page so the switcher is discoverable everywhere, not just on
++// AppSwap's npm apps. Clicking it opens a menu listing every configured
++// Profile (across all apps) plus a "Create new profile" action; picking one
++// reloads the current tab under that profile's storage partition, and going
++// forward every new http/https navigation in this browser uses that same
++// partition too, until switched again.
++class AppSwapProfileTabStripButton : public views::MenuButton,
++                                     public TabStripModelObserver,
++                                     public ui::SimpleMenuModel::Delegate {
++  METADATA_HEADER(AppSwapProfileTabStripButton, views::MenuButton)
++
++ public:
++  explicit AppSwapProfileTabStripButton(BrowserWindowInterface* browser);
++  AppSwapProfileTabStripButton(const AppSwapProfileTabStripButton&) = delete;
++  AppSwapProfileTabStripButton& operator=(const AppSwapProfileTabStripButton&) =
++      delete;
++  ~AppSwapProfileTabStripButton() override;
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      TabChangeType change_type) override;
++
++  // ui::SimpleMenuModel::Delegate:
++  void ExecuteCommand(int command_id, int event_flags) override;
++
++  // views::View:
++  void OnThemeChanged() override;
++
++ private:
++  // Recomputes visibility and label text from the global active profile.
++  void UpdateForActiveTab();
++
++  // Gives the button a colored badge/chip appearance keyed off a hash of
++  // |profile_name|, so the same name always gets the same hue (e.g. "Alice"
++  // is always greenish). The background tone adapts to the current light/dark
++  // theme, and the text color is chosen to guarantee WCAG AA contrast
++  // (>= 4.5:1) against whatever background results.
++  void ApplyBadgeStyle(const std::string& profile_name);
++
++  // Builds and runs the profile-picker menu.
++  void ButtonPressed();
++
++  raw_ptr<BrowserWindowInterface> browser_;
++
++  // The profiles menu currently shown -- kept in sync with the menu so
++  // ExecuteCommand's command ids resolve against the same list the user
++  // picked from.
++  std::vector<AppSwapProfile> menu_profiles_;
++
++  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
++  std::unique_ptr<views::MenuModelAdapter> menu_model_adapter_;
++  std::unique_ptr<views::MenuRunner> menu_runner_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_TAB_STRIP_BUTTON_H_
+diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
+index 76e408d422544..5e508b483eb16 100644
+--- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
+@@ -24,6 +24,7 @@
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/tabs/tab_strip_prefs.h"
+ #include "chrome/browser/ui/ui_features.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/tab_search_bubble_host.h"
+ #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
+@@ -166,6 +167,16 @@ HorizontalTabStripRegionViewOld::HorizontalTabStripRegionViewOld(
+ 
+   BrowserWindowInterface* const browser = browser_view->browser();
+ 
++  if (browser &&
++      (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
++    app_swap_profile_button_ = AddChildView(
++        std::make_unique<AppSwapProfileTabStripButton>(browser));
++    app_swap_profile_button_->SetProperty(
++        views::kMarginsKey, gfx::Insets::TLBR(0, 8, 0, 8));
++    app_swap_profile_button_->SetProperty(views::kCrossAxisAlignmentKey,
++                                          views::LayoutAlignment::kCenter);
++  }
++
+   if (browser &&
+       (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
+     combo_button_ = AddChildView(std::make_unique<TabStripComboButton>(
+@@ -327,6 +338,10 @@ bool HorizontalTabStripRegionViewOld::IsPositionInWindowCaption(
+ views::View::Views HorizontalTabStripRegionViewOld::GetChildrenInZOrder() {
+   views::View::Views children;
+ 
++  if (app_swap_profile_button_) {
++    children.emplace_back(app_swap_profile_button_.get());
++  }
++
+   if (tab_strip_) {
+     children.emplace_back(tab_strip_.get());
+   }
+diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+index 3860b6181381b..1acf3d13dfd2f 100644
+--- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+@@ -17,6 +17,7 @@
+ #include "ui/base/pointer/touch_ui_controller.h"
+ #include "ui/views/accessible_pane_view.h"
+ 
++class AppSwapProfileTabStripButton;
+ class BrowserView;
+ 
+ namespace views {
+@@ -123,6 +124,7 @@ class HorizontalTabStripRegionViewOld : public TabStripRegionView {
+   bool tab_strip_set_ = false;
+ 
+   raw_ptr<BrowserView> browser_view_ = nullptr;
++  raw_ptr<AppSwapProfileTabStripButton> app_swap_profile_button_ = nullptr;
+   raw_ptr<TabStripActionContainer> tab_strip_action_container_ = nullptr;
+   raw_ptr<views::View> tab_strip_container_ = nullptr;
+   raw_ptr<views::View> reserved_grab_handle_space_ = nullptr;

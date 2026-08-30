@@ -32,6 +32,26 @@ gen() {
   fi
 }
 
+# Same as gen(), but for files inside third_party/devtools-frontend/src,
+# which is its own nested git checkout (pulled via DEPS) rather than part of
+# src/'s own git index -- a plain `git diff` from src/ never sees changes
+# there, so these need their own repo root and their own apply step (see
+# apply-patches.sh's matching *devtools-frontend* special case).
+DEVTOOLS_DIR="$ROOT/src/third_party/devtools-frontend/src"
+
+gen_devtools() {
+  local name="$1"
+  local out="$ROOT/patches/$name"
+  shift
+  if git -C "$DEVTOOLS_DIR" diff --quiet HEAD -- "$@"; then
+    rm -f "$out"
+    echo "  (no changes) $name"
+  else
+    git -C "$DEVTOOLS_DIR" diff --binary HEAD -- "$@" > "$out"
+    echo "  wrote $name"
+  fi
+}
+
 echo "Generating patches..."
 
 gen 0001-branding.patch \
@@ -145,6 +165,39 @@ gen 0007-appswap-scheme-omnibox-badge.patch \
   components/omnibox/browser/BUILD.gn \
   components/omnibox/browser/vector_icons/npm_package.icon
 
+gen 0008-app-profiles.patch \
+  chrome/browser/app_swap/app_swap_profiles_service.cc \
+  chrome/browser/app_swap/app_swap_profiles_service.h \
+  chrome/browser/app_swap/app_swap_profiles_ui.cc \
+  chrome/browser/app_swap/app_swap_profiles_ui.h
+
+gen 0009-tab-strip-profile-button.patch \
+  chrome/browser/ui/views/app_swap/BUILD.gn \
+  chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc \
+  chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h \
+  chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc \
+  chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h \
+  chrome/browser/ui/BUILD.gn \
+  chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc \
+  chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+
+gen_devtools 0010-devtools-disable-paste-guard.patch \
+  front_end/panels/console/ConsoleView.ts \
+  front_end/panels/console/ConsolePinPane.ts \
+  front_end/panels/console/ConsolePrompt.ts
+
+# Changes to app_swap_artifact_provider.{cc,h}, page_info_bubble_view.cc, and
+# the views/app_swap and page_info BUILD.gn files that this feature also
+# touches are already covered by 0005/0007/0009 above -- re-running gen()
+# for those picks up these additions automatically. Only genuinely new files
+# belong here.
+gen 0011-npm-version-picker.patch \
+  chrome/browser/app_swap/app_swap_version_utils.cc \
+  chrome/browser/app_swap/app_swap_version_utils.h \
+  chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc \
+  chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.h \
+  chrome/browser/ui/views/controls/rich_hover_button.cc
+
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."
 for f in $(git status --porcelain --untracked-files=no | cut -c4-); do
@@ -153,5 +206,12 @@ for f in $(git status --porcelain --untracked-files=no | cut -c4-); do
   esac
   if ! grep -qF "$f" "$ROOT"/patches/*.patch; then
     echo "warning: '$f' is changed but not present in any patch" >&2
+  fi
+done
+
+# Same check, for the nested devtools-frontend checkout.
+for f in $(git -C "$DEVTOOLS_DIR" status --porcelain --untracked-files=no | cut -c4-); do
+  if ! grep -qF "$f" "$ROOT"/patches/*.patch; then
+    echo "warning: devtools-frontend '$f' is changed but not present in any patch" >&2
   fi
 done

@@ -1,0 +1,534 @@
+diff --git a/chrome/browser/app_swap/app_swap_version_utils.cc b/chrome/browser/app_swap/app_swap_version_utils.cc
+new file mode 100644
+index 0000000000000..082a7872e7231
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_version_utils.cc
+@@ -0,0 +1,59 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_version_utils.h"
++
++#include <algorithm>
++#include <vector>
++
++#include "base/strings/string_number_conversions.h"
++
++namespace app_swap {
++
++namespace {
++
++// Splits a version string like "1.2.3" into {1, 2, 3}. Returns an empty
++// vector if any component isn't a plain integer.
++std::vector<int> SplitVersion(const std::string& version) {
++  std::vector<int> parts;
++  size_t start = 0;
++  while (start <= version.size()) {
++    const size_t dot = version.find('.', start);
++    const std::string part = version.substr(
++        start, dot == std::string::npos ? std::string::npos : dot - start);
++    int n = 0;
++    if (!base::StringToInt(part, &n)) {
++      return {};
++    }
++    parts.push_back(n);
++    if (dot == std::string::npos) {
++      break;
++    }
++    start = dot + 1;
++  }
++  return parts;
++}
++
++}  // namespace
++
++bool IsNewerVersion(const std::string& candidate, const std::string& current) {
++  if (candidate == current) {
++    return false;
++  }
++  const std::vector<int> a = SplitVersion(candidate);
++  const std::vector<int> b = SplitVersion(current);
++  if (a.empty() || b.empty()) {
++    return candidate > current;
++  }
++  for (size_t i = 0; i < std::max(a.size(), b.size()); ++i) {
++    const int av = i < a.size() ? a[i] : 0;
++    const int bv = i < b.size() ? b[i] : 0;
++    if (av != bv) {
++      return av > bv;
++    }
++  }
++  return false;
++}
++
++}  // namespace app_swap
+diff --git a/chrome/browser/app_swap/app_swap_version_utils.h b/chrome/browser/app_swap/app_swap_version_utils.h
+new file mode 100644
+index 0000000000000..c1d2484f38aec
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_version_utils.h
+@@ -0,0 +1,20 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_UTILS_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_UTILS_H_
++
++#include <string>
++
++namespace app_swap {
++
++// Not a full semver comparison (no pre-release/build-metadata handling) --
++// just enough to compare the plain "X.Y.Z"-style versions actually served by
++// this codebase's npm registry integration. Falls back to a string compare
++// if either version doesn't parse as dot-separated integers.
++bool IsNewerVersion(const std::string& candidate, const std::string& current);
++
++}  // namespace app_swap
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_UTILS_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc
+new file mode 100644
+index 0000000000000..2e6213665362a
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc
+@@ -0,0 +1,388 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.h"
++
++#include <algorithm>
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/raw_ref.h"
++#include "base/memory/weak_ptr.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
++#include "chrome/browser/app_swap/app_swap_version_utils.h"
++#include "chrome/browser/ui/views/controls/hover_button.h"
++#include "components/constrained_window/constrained_window_views.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_contents_user_data.h"
++#include "ui/accessibility/ax_enums.mojom-shared.h"
++#include "ui/base/interaction/element_identifier.h"
++#include "ui/base/models/dialog_model.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
++#include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/bubble/bubble_dialog_model_host.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/controls/scroll_view.h"
++#include "ui/views/layout/box_layout.h"
++#include "ui/views/layout/layout_provider.h"
++#include "ui/views/widget/widget.h"
++
++DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kAppSwapVersionPickerOkButtonId);
++
++namespace {
++
++// One selectable row: `primary_text` on the left (a dist-tag name or an exact
++// version), `secondary_text` on the right (the version a dist-tag currently
++// resolves to, or the dist-tags pointing at a version -- read-only either
++// way, just a hint).
++class AppSwapVersionPickerRowView : public HoverButton {
++  METADATA_HEADER(AppSwapVersionPickerRowView, HoverButton)
++
++ public:
++  class Delegate {
++   public:
++    virtual ~Delegate() = default;
++    virtual void OnRowClicked(AppSwapVersionPickerRowView* row) = 0;
++  };
++
++  AppSwapVersionPickerRowView(std::string value,
++                              const std::u16string& primary_text,
++                              const std::u16string& secondary_text,
++                              Delegate& delegate)
++      : HoverButton(base::BindRepeating(&AppSwapVersionPickerRowView::OnClicked,
++                                        base::Unretained(this)),
++                    BuildParams(primary_text, secondary_text)),
++        value_(std::move(value)),
++        primary_text_(primary_text),
++        delegate_(delegate) {
++    GetViewAccessibility().SetRole(ax::mojom::Role::kMenuItemRadio);
++    GetViewAccessibility().SetCheckedState(ax::mojom::CheckedState::kFalse);
++  }
++  ~AppSwapVersionPickerRowView() override = default;
++
++  const std::string& value() const { return value_; }
++
++  void SetSelected(bool selected) {
++    if (is_selected_ == selected) {
++      return;
++    }
++    is_selected_ = selected;
++    title()->SetText(selected ? u"✓  " + primary_text_ : primary_text_);
++    GetViewAccessibility().SetCheckedState(
++        selected ? ax::mojom::CheckedState::kTrue
++                 : ax::mojom::CheckedState::kFalse);
++  }
++
++ private:
++  static HoverButton::Params BuildParams(const std::u16string& primary_text,
++                                         const std::u16string& secondary_text) {
++    HoverButton::Params params;
++    params.title = primary_text;
++    if (!secondary_text.empty()) {
++      auto secondary_label = std::make_unique<views::Label>(secondary_text);
++      secondary_label->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
++      secondary_label->SetEnabledColor(ui::kColorSecondaryForeground);
++      // HoverButton::Params::secondary_view is given its own non-opaque
++      // layer (see hover_button.cc) so it isn't obscured by ink-drop
++      // painting; that trips Label::PaintText()'s subpixel-rendering DCHECK
++      // unless the label opts out explicitly.
++      secondary_label->SetSkipSubpixelRenderingOpacityCheck(true);
++      params.secondary_view = std::move(secondary_label);
++    }
++    return params;
++  }
++
++  void OnClicked() { delegate_->OnRowClicked(this); }
++
++  const std::string value_;
++  const std::u16string primary_text_;
++  const raw_ref<Delegate> delegate_;
++  bool is_selected_ = false;
++};
++
++BEGIN_METADATA(AppSwapVersionPickerRowView)
++END_METADATA
++
++// Scrollable "Tags" then "Versions" list, single-selection across both.
++class AppSwapVersionPickerSelectionView
++    : public views::ScrollView,
++      public AppSwapVersionPickerRowView::Delegate {
++  METADATA_HEADER(AppSwapVersionPickerSelectionView, views::ScrollView)
++
++ public:
++  class Delegate {
++   public:
++    virtual ~Delegate() = default;
++    virtual void OnSelected(const std::string& value) = 0;
++  };
++
++  AppSwapVersionPickerSelectionView(const AppSwapApp& app,
++                                    const AppSwapPackageMetadata& metadata,
++                                    Delegate& delegate)
++      : delegate_(delegate) {
++    // Invert dist-tags: version -> the tag names pointing at it, for the
++    // read-only hint shown next to each version row.
++    std::map<std::string, std::vector<std::string>> tags_by_version;
++    std::vector<std::string> tag_names;
++    for (const auto& [tag, version] : metadata.dist_tags) {
++      tags_by_version[version].push_back(tag);
++      tag_names.push_back(tag);
++    }
++    // "latest" first, then alphabetical.
++    std::sort(tag_names.begin(), tag_names.end(),
++             [](const std::string& a, const std::string& b) {
++               if (a == "latest" || b == "latest") {
++                 return a == "latest";
++               }
++               return a < b;
++             });
++
++    std::vector<std::string> versions = metadata.versions;
++    std::sort(versions.begin(), versions.end(),
++             [](const std::string& a, const std::string& b) {
++               return app_swap::IsNewerVersion(a, b);
++             });
++
++    views::View* contents = SetContents(std::make_unique<views::View>());
++    contents->SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kVertical, gfx::Insets(),
++        views::LayoutProvider::Get()->GetDistanceMetric(
++            views::DISTANCE_RELATED_CONTROL_VERTICAL)));
++    contents->GetViewAccessibility().SetRole(ax::mojom::Role::kList);
++
++    auto add_header = [&](const std::u16string& text) {
++      auto* header = contents->AddChildView(std::make_unique<views::Label>(text));
++      header->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++      header->SetEnabledColor(ui::kColorSecondaryForeground);
++    };
++
++    if (!tag_names.empty()) {
++      add_header(u"Tags");
++      for (const std::string& tag : tag_names) {
++        auto* row = contents->AddChildView(
++            std::make_unique<AppSwapVersionPickerRowView>(
++                tag, base::UTF8ToUTF16(tag),
++                base::UTF8ToUTF16(metadata.dist_tags.at(tag)), *this));
++        if (tag == app.version) {
++          selected_row_ = row;
++        }
++      }
++    }
++
++    if (!versions.empty()) {
++      add_header(u"Versions");
++      for (const std::string& version : versions) {
++        std::u16string hint;
++        if (auto it = tags_by_version.find(version);
++            it != tags_by_version.end()) {
++          std::vector<std::string> sorted_tags = it->second;
++          std::sort(sorted_tags.begin(), sorted_tags.end());
++          hint = base::UTF8ToUTF16(base::JoinString(sorted_tags, ", "));
++        }
++        auto* row = contents->AddChildView(
++            std::make_unique<AppSwapVersionPickerRowView>(
++                version, base::UTF8ToUTF16(version), hint, *this));
++        if (!selected_row_ && version == app.version) {
++          selected_row_ = row;
++        }
++      }
++    }
++
++    if (selected_row_) {
++      selected_row_->SetSelected(true);
++    }
++
++    if (!contents->children().empty()) {
++      // The last child is always an actual row (never a section header),
++      // since a header is only ever added immediately before its rows.
++      const int row_height =
++          contents->children().back()->GetPreferredSize().height();
++      ClipHeightTo(row_height, 6 * row_height);
++    }
++  }
++  ~AppSwapVersionPickerSelectionView() override = default;
++
++  std::optional<std::string> GetSelectedValue() const {
++    return selected_row_ ? std::optional<std::string>(selected_row_->value())
++                        : std::nullopt;
++  }
++
++ private:
++  void OnRowClicked(AppSwapVersionPickerRowView* row) override {
++    if (selected_row_ == row) {
++      return;
++    }
++    if (selected_row_) {
++      selected_row_->SetSelected(false);
++    }
++    selected_row_ = row;
++    selected_row_->SetSelected(true);
++    delegate_->OnSelected(selected_row_->value());
++  }
++
++  raw_ptr<AppSwapVersionPickerRowView> selected_row_ = nullptr;
++  const raw_ref<Delegate> delegate_;
++};
++
++BEGIN_METADATA(AppSwapVersionPickerSelectionView)
++END_METADATA
++
++class AppSwapVersionPickerDelegate
++    : public ui::DialogModelDelegate,
++      public AppSwapVersionPickerSelectionView::Delegate {
++ public:
++  explicit AppSwapVersionPickerDelegate(
++      base::OnceCallback<void(std::string)> callback)
++      : callback_(std::move(callback)) {}
++  ~AppSwapVersionPickerDelegate() override = default;
++
++  // AppSwapVersionPickerSelectionView::Delegate:
++  void OnSelected(const std::string& value) override {
++    selected_value_ = value;
++    ui::DialogModel::Button* ok_button =
++        dialog_model()->GetButtonByUniqueId(kAppSwapVersionPickerOkButtonId);
++    dialog_model()->SetButtonEnabled(ok_button, true);
++  }
++
++  void OnAccept() {
++    CHECK(selected_value_);
++    CHECK(callback_);
++    std::move(callback_).Run(*selected_value_);
++  }
++
++ private:
++  std::optional<std::string> selected_value_;
++  base::OnceCallback<void(std::string)> callback_;
++};
++
++std::unique_ptr<ui::DialogModel> CreateAppSwapVersionPickerDialog(
++    const AppSwapApp& app,
++    const AppSwapPackageMetadata& metadata,
++    base::OnceCallback<void(std::string)> callback) {
++  auto delegate =
++      std::make_unique<AppSwapVersionPickerDelegate>(std::move(callback));
++  auto* delegate_ptr = delegate.get();
++
++  auto selection_view = std::make_unique<AppSwapVersionPickerSelectionView>(
++      app, metadata, *delegate_ptr);
++  auto* selection_view_ptr = selection_view.get();
++
++  auto dialog_model =
++      ui::DialogModel::Builder(std::move(delegate))
++          .SetInternalName("AppSwapVersionPickerDialog")
++          .SetTitle(u"Switch version: " + base::UTF8ToUTF16(app.package_name))
++          .AddCustomField(
++              std::make_unique<views::BubbleDialogModelHost::CustomView>(
++                  std::move(selection_view),
++                  views::BubbleDialogModelHost::FieldType::kControl))
++          .AddCancelButton(base::DoNothing())
++          .AddOkButton(base::BindOnce(&AppSwapVersionPickerDelegate::OnAccept,
++                                      base::Unretained(delegate_ptr)),
++                      ui::DialogModel::Button::Params()
++                          .SetEnabled(false)
++                          .SetId(kAppSwapVersionPickerOkButtonId)
++                          .SetLabel(u"Switch"))
++          .Build();
++
++  // Reflect the pre-selected row (the app's currently configured dist-tag or
++  // exact version, highlighted by AppSwapVersionPickerSelectionView above)
++  // into the OK button's enabled state. Done only now, after Build(), since
++  // DialogModelDelegate::dialog_model() isn't valid until the model exists.
++  if (std::optional<std::string> initial =
++          selection_view_ptr->GetSelectedValue()) {
++    delegate_ptr->OnSelected(*initial);
++  }
++
++  return dialog_model;
++}
++
++// content::WebContents has no public GetWeakPtr(); this gives ShowAppSwap-
++// VersionPickerDialog's callback chain a safe way to reference the tab
++// across the async metadata-fetch and download gaps without caching a raw
++// WebContents pointer that could be closed out from under it.
++class WebContentsWeakHandle
++    : public content::WebContentsUserData<WebContentsWeakHandle> {
++ public:
++  ~WebContentsWeakHandle() override = default;
++
++  base::WeakPtr<WebContentsWeakHandle> GetWeakPtr() {
++    return weak_factory_.GetWeakPtr();
++  }
++
++ private:
++  friend class content::WebContentsUserData<WebContentsWeakHandle>;
++  explicit WebContentsWeakHandle(content::WebContents* web_contents)
++      : content::WebContentsUserData<WebContentsWeakHandle>(*web_contents) {}
++
++  base::WeakPtrFactory<WebContentsWeakHandle> weak_factory_{this};
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(WebContentsWeakHandle);
++
++void OnVersionSelected(base::WeakPtr<WebContentsWeakHandle> handle,
++                       AppSwapApp app,
++                       std::string new_version) {
++  if (!handle) {
++    return;
++  }
++  app.version = std::move(new_version);
++  AppSwapAppsService::GetInstance()->UpdateApp(app);
++
++  AppSwapArtifactProvider::GetInstance()->GetOrDownload(
++      app.ToSource(),
++      base::BindOnce(
++          [](base::WeakPtr<WebContentsWeakHandle> handle,
++             base::FilePath dir) {
++            if (dir.empty() || !handle) {
++              return;
++            }
++            handle->GetWebContents().GetController().Reload(
++                content::ReloadType::NORMAL, /*check_for_repost=*/false);
++          },
++          handle));
++}
++
++void OnPackageMetadataFetched(
++    base::WeakPtr<WebContentsWeakHandle> handle,
++    AppSwapApp app,
++    std::optional<AppSwapPackageMetadata> metadata) {
++  if (!handle || !metadata) {
++    return;
++  }
++  content::WebContents& web_contents = handle->GetWebContents();
++
++  auto dialog_model = CreateAppSwapVersionPickerDialog(
++      app, *metadata,
++      base::BindOnce(&OnVersionSelected, handle, app));
++
++  auto dialog = views::BubbleDialogModelHost::CreateModal(
++      std::move(dialog_model), ui::mojom::ModalType::kChild);
++  constrained_window::ShowWebModalDialogViews(dialog.release(), &web_contents);
++}
++
++}  // namespace
++
++void ShowAppSwapVersionPickerDialog(content::WebContents* web_contents,
++                                    const AppSwapApp& app) {
++  WebContentsWeakHandle* handle =
++      WebContentsWeakHandle::GetOrCreateForWebContents(web_contents);
++  AppSwapArtifactProvider::GetInstance()->FetchPackageMetadata(
++      app.ToSource(),
++      base::BindOnce(&OnPackageMetadataFetched, handle->GetWeakPtr(), app));
++}
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.h b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.h
+new file mode 100644
+index 0000000000000..af2bca3f536a6
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.h
+@@ -0,0 +1,24 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_VERSION_PICKER_DIALOG_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_VERSION_PICKER_DIALOG_H_
++
++#include "chrome/browser/app_swap/app_swap_apps_service.h"
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++// Fetches the full list of published dist-tags and versions for `app`'s npm
++// package from its registry, then shows a tab-modal picker (modal to
++// `web_contents`) letting the user switch `app` to a different dist-tag or
++// exact version. Dist-tags are listed first (with the version they currently
++// resolve to as a hint); all published versions follow (with any dist-tags
++// currently pointing at them as read-only labels). On selection, persists
++// the change via AppSwapAppsService::UpdateApp() and reloads `web_contents`.
++void ShowAppSwapVersionPickerDialog(content::WebContents* web_contents,
++                                    const AppSwapApp& app);
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_VERSION_PICKER_DIALOG_H_
+diff --git a/chrome/browser/ui/views/controls/rich_hover_button.cc b/chrome/browser/ui/views/controls/rich_hover_button.cc
+index aa91770c8b9b8..bb04fb0715676 100644
+--- a/chrome/browser/ui/views/controls/rich_hover_button.cc
++++ b/chrome/browser/ui/views/controls/rich_hover_button.cc
+@@ -170,6 +170,14 @@ void RichHoverButton::SetSubtitleText(std::u16string_view subtitle_text) {
+       subtitle_->SetMultiLine(subtitle_multiline_);
+       subtitle_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+       subtitle_->SetAutoColorReadabilityEnabled(false);
++      // The subtitle row can end up painted underneath an ink-drop layer
++      // (e.g. the leading/action icon views created by CreateIconView() set
++      // SetFillsBoundsOpaquely(false) on themselves), which trips
++      // Label::PaintText()'s subpixel-rendering-on-opaque-background DCHECK.
++      // Every prior caller of SetSubtitleText() avoided this by only ever
++      // passing an empty or single-space placeholder string; skip the check
++      // outright so real subtitle text doesn't crash DCHECK-enabled builds.
++      subtitle_->SetSkipSubpixelRenderingOpacityCheck(true);
+       base::Extend(subtitle_row_views_, AddFillerViews(children().size()));
+     }
+     subtitle_->SetText(subtitle_text);

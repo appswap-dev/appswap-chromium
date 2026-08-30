@@ -1,0 +1,39 @@
+diff --git a/front_end/panels/console/ConsolePinPane.ts b/front_end/panels/console/ConsolePinPane.ts
+index 705f6f40..4ca4d5aa 100644
+--- a/front_end/panels/console/ConsolePinPane.ts
++++ b/front_end/panels/console/ConsolePinPane.ts
+@@ -299,7 +299,7 @@ export class ConsolePinPresenter extends UI.Widget.Widget {
+     this.#view = view;
+ 
+     this.#selfXssWarningDisabledSetting = Common.Settings.Settings.instance().createSetting(
+-        'disable-self-xss-warning', false, Common.Settings.SettingStorageType.SYNCED);
++        'disable-self-xss-warning', true, Common.Settings.SettingStorageType.SYNCED);
+ 
+     this.#pinEditor = {
+       workingCopy: () => this.#editor?.state.doc.toString() ?? '',
+diff --git a/front_end/panels/console/ConsolePrompt.ts b/front_end/panels/console/ConsolePrompt.ts
+index a7e2857d..3daad162 100644
+--- a/front_end/panels/console/ConsolePrompt.ts
++++ b/front_end/panels/console/ConsolePrompt.ts
+@@ -385,7 +385,7 @@ export class ConsolePrompt extends Common.ObjectWrapper.eventMixin<EventTypes, t
+         scrollIntoView: true,
+       });
+       Common.Settings.Settings.instance()
+-          .createSetting('disable-self-xss-warning', false, Common.Settings.SettingStorageType.SYNCED)
++          .createSetting('disable-self-xss-warning', true, Common.Settings.SettingStorageType.SYNCED)
+           .set(true);
+       this.#selfXssWarningShown = false;
+       Host.userMetrics.actionTaken(Host.UserMetrics.Action.SelfXssAllowPastingInConsole);
+diff --git a/front_end/panels/console/ConsoleView.ts b/front_end/panels/console/ConsoleView.ts
+index 94203451..056ae301 100644
+--- a/front_end/panels/console/ConsoleView.ts
++++ b/front_end/panels/console/ConsoleView.ts
+@@ -490,7 +490,7 @@ export class ConsoleView extends UI.Widget.VBox implements
+     this.consoleHistoryAutocompleteSetting = Common.Settings.Settings.instance().resolve(
+         Settings.ConsoleSettings.consoleHistoryAutocompleteSettingDescriptor);
+     this.selfXssWarningDisabledSetting = Common.Settings.Settings.instance().createSetting(
+-        'disable-self-xss-warning', false, Common.Settings.SettingStorageType.SYNCED);
++        'disable-self-xss-warning', true, Common.Settings.SettingStorageType.SYNCED);
+ 
+     const settingsPane = this.contentsElement.createChild('div', 'console-settings-pane');
+     UI.ARIAUtils.setLabel(settingsPane, i18nString(UIStrings.consoleSettings));
