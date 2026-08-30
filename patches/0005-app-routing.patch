@@ -12,10 +12,10 @@ index 2a3958f78ddb6..4e6f3b49ffa24 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..43d8c888adcc1
+index 0000000000000..7e7bbfba70e91
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,40 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -41,6 +41,7 @@ index 0000000000000..43d8c888adcc1
 +
 +  deps = [
 +    "//base",
++    "//chrome/app/theme:theme_resources",
 +    "//chrome/browser/net",
 +    "//chrome/browser/profiles",
 +    "//chrome/common",
@@ -356,10 +357,10 @@ index 0000000000000..1a76ba1fa4bcf
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_apps_ui.cc b/chrome/browser/app_swap/app_swap_apps_ui.cc
 new file mode 100644
-index 0000000000000..6320d2f07c97d
+index 0000000000000..298cbb4c4c021
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_ui.cc
-@@ -0,0 +1,590 @@
+@@ -0,0 +1,595 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -375,6 +376,7 @@ index 0000000000000..6320d2f07c97d
 +#include "base/values.h"
 +#include "chrome/browser/app_swap/app_swap_apps_service.h"
 +#include "chrome/browser/profiles/profile.h"
++#include "chrome/grit/theme_resources.h"
 +#include "content/public/browser/web_ui.h"
 +#include "content/public/browser/web_ui_data_source.h"
 +#include "content/public/browser/web_ui_message_handler.h"
@@ -389,6 +391,8 @@ index 0000000000000..6320d2f07c97d
 +<html>
 +<head>
 +<title>AppSwap Apps</title>
++<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
++<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 +<meta charset="utf-8">
 +<style>
 +  :root {
@@ -931,6 +935,8 @@ index 0000000000000..6320d2f07c97d
 +  source->OverrideContentSecurityPolicy(
 +      network::mojom::CSPDirectiveName::ScriptSrc,
 +      "script-src chrome://resources 'self' 'unsafe-inline';");
++  source->AddResourcePath("favicon-16.png", IDR_PRODUCT_LOGO_16);
++  source->AddResourcePath("favicon-32.png", IDR_PRODUCT_LOGO_32);
 +  // Serve the single HTML document for the root URL (both "" and "/" paths).
 +  source->SetRequestFilter(
 +      base::BindRepeating(
@@ -1835,10 +1841,10 @@ index 0000000000000..f065478b13540
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_routes_ui.cc b/chrome/browser/app_swap/app_swap_routes_ui.cc
 new file mode 100644
-index 0000000000000..4ec3643fc2e42
+index 0000000000000..88e057e9b2118
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_routes_ui.cc
-@@ -0,0 +1,591 @@
+@@ -0,0 +1,596 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1857,6 +1863,7 @@ index 0000000000000..4ec3643fc2e42
 +#include "chrome/browser/app_swap/app_swap_apps_service.h"
 +#include "chrome/browser/app_swap/app_swap_routes_service.h"
 +#include "chrome/browser/profiles/profile.h"
++#include "chrome/grit/theme_resources.h"
 +#include "content/public/browser/web_ui.h"
 +#include "content/public/browser/web_ui_data_source.h"
 +#include "content/public/browser/web_ui_message_handler.h"
@@ -1869,6 +1876,8 @@ index 0000000000000..4ec3643fc2e42
 +<html>
 +<head>
 +<title>AppSwap Routes</title>
++<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
++<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 +<meta charset="utf-8">
 +<style>
 +  :root {
@@ -2411,6 +2420,8 @@ index 0000000000000..4ec3643fc2e42
 +  source->OverrideContentSecurityPolicy(
 +      network::mojom::CSPDirectiveName::ScriptSrc,
 +      "script-src chrome://resources 'self' 'unsafe-inline';");
++  source->AddResourcePath("favicon-16.png", IDR_PRODUCT_LOGO_16);
++  source->AddResourcePath("favicon-32.png", IDR_PRODUCT_LOGO_32);
 +  // Serve the single HTML document for the root URL (both "" and "/" paths).
 +  source->SetRequestFilter(
 +      base::BindRepeating(

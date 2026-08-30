@@ -14,15 +14,20 @@ git add -N -A 2>/dev/null || true
 
 # gen <patch-file> <pathspec...> -> writes patches/<patch-file> from the diff
 # restricted to the given paths.
+#
+# Diffs against HEAD explicitly, not the index: `apply-patches.sh` uses
+# `git apply --3way`, which stages successfully-merged files as a side
+# effect, so a plain `git diff` (working tree vs. index) can go blind to
+# real changes right after reapplying patches.
 gen() {
   local name="$1"
   local out="$ROOT/patches/$name"
   shift
-  if git diff --quiet -- "$@"; then
+  if git diff --quiet HEAD -- "$@"; then
     rm -f "$out"
     echo "  (no changes) $name"
   else
-    git diff --binary -- "$@" > "$out"
+    git diff --binary HEAD -- "$@" > "$out"
     echo "  wrote $name"
   fi
 }
@@ -33,6 +38,10 @@ gen 0001-branding.patch \
   chrome/app/chromium_strings.grd \
   chrome/app/password_manager_ui_strings.grdp \
   chrome/app/settings_chromium_strings.grdp \
+  components/components_chromium_strings.grd \
+  'components/strings/components_chromium_strings_*.xtb' \
+  extensions/strings/extensions_chromium_strings.grdp \
+  'extensions/strings/extensions_strings_*.xtb' \
   chrome/app/theme/chromium/BRANDING \
   chrome/app/theme/chromium/product_logo_128.png \
   chrome/app/theme/chromium/product_logo_16.png \
@@ -41,7 +50,13 @@ gen 0001-branding.patch \
   chrome/app/theme/chromium/product_logo_256.png \
   chrome/app/theme/chromium/product_logo_48.png \
   chrome/app/theme/chromium/product_logo_64.png \
-  chrome/app/theme/chromium/win/chromium.ico
+  chrome/app/theme/chromium/win/chromium.ico \
+  chrome/app/theme/default_100_percent/chromium/product_logo_16.png \
+  chrome/app/theme/default_100_percent/chromium/product_logo_32.png \
+  chrome/app/theme/default_100_percent/chromium/linux/product_logo_16.png \
+  chrome/app/theme/default_100_percent/chromium/linux/product_logo_32.png \
+  chrome/app/theme/default_200_percent/chromium/product_logo_16.png \
+  chrome/app/theme/default_200_percent/chromium/product_logo_32.png
 
 gen 0002-binary-rename.patch \
   build/win/reorder-imports.py \
