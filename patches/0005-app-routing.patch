@@ -2731,10 +2731,10 @@ index 0000000000000..707f425096a7c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000000..9da0f8720aa0a
+index 0000000000000..88ff587393019
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,406 @@
+@@ -0,0 +1,428 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2760,6 +2760,7 @@ index 0000000000000..9da0f8720aa0a
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
 +#include "chrome/browser/app_swap/app_swap_routes_service.h"
++#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_update_checker.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
 +#include "content/public/browser/render_frame_host.h"
@@ -3013,6 +3014,7 @@ index 0000000000000..9da0f8720aa0a
 +void ServeAfterResolve(
 +    GURL url,
 +    bool accepts_html,
++    content::GlobalRenderFrameHostId frame_id,
 +    mojo::PendingReceiver<network::mojom::URLLoader> loader,
 +    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
 +    base::FilePath dir) {
@@ -3020,6 +3022,26 @@ index 0000000000000..9da0f8720aa0a
 +    mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
 +        ->OnComplete(network::URLLoaderCompletionStatus(net::ERR_FAILED));
 +    return;
++  }
++  // Record the exact version this navigation actually resolved to, so the
++  // chip/Page Info/checker for *this* tab reflect it rather than whatever
++  // AppSwapArtifactProvider's shared per-tag cache happens to hold right
++  // now (which another tab's own navigation could have moved on since).
++  // Only for the navigation itself, not subresources -- a page's own
++  // scripts/styles/images resolve the same source and would just overwrite
++  // this with the same value repeatedly.
++  if (accepts_html) {
++    if (content::RenderFrameHost* frame =
++            content::RenderFrameHost::FromID(frame_id)) {
++      if (content::WebContents* web_contents =
++              content::WebContents::FromRenderFrameHost(frame)) {
++        if (AppSwapUpdateAvailableTabHelper* helper =
++                AppSwapUpdateAvailableTabHelper::FromWebContents(
++                    web_contents)) {
++          helper->SetCommittedVersion(dir.BaseName().AsUTF8Unsafe());
++        }
++      }
++    }
 +  }
 +  ServeFromDir(dir, std::move(url), accepts_html, std::move(loader),
 +               std::move(client));
@@ -3122,9 +3144,9 @@ index 0000000000000..9da0f8720aa0a
 +      // script/style/image it references. This is also what makes the
 +      // Reload button's "Update" click just a plain reload: any refresh is a
 +      // navigation, so it already re-resolves the tag here.
-+      auto resolve_callback = base::BindOnce(&ServeAfterResolve, request.url,
-+                                             accepts_html, std::move(loader),
-+                                             std::move(client));
++      auto resolve_callback = base::BindOnce(
++          &ServeAfterResolve, request.url, accepts_html, frame_id_,
++          std::move(loader), std::move(client));
 +      if (accepts_html) {
 +        AppSwapArtifactProvider::GetInstance()->EnsureFreshThenGetOrDownload(
 +            source, std::move(resolve_callback));

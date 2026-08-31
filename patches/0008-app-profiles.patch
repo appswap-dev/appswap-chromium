@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/app_swap/app_swap_profiles_service.cc b/chrome/browser/app_swap/app_swap_profiles_service.cc
 new file mode 100644
-index 0000000000000..46140c7073acf
+index 0000000000000..6dca71a78b67a
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profiles_service.cc
-@@ -0,0 +1,237 @@
+@@ -0,0 +1,248 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -155,9 +155,16 @@ index 0000000000000..46140c7073acf
 +    if (profile.id == profile_id) {
 +      active_profile_id_ = profile_id;
 +      ScheduleSave();
++      change_callbacks_.Notify();
 +      return;
 +    }
 +  }
++}
++
++base::CallbackListSubscription AppSwapProfilesService::AddChangeCallback(
++    base::RepeatingClosure callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  return change_callbacks_.Add(std::move(callback));
 +}
 +
 +void AppSwapProfilesService::OnConfigLoaded(
@@ -174,6 +181,7 @@ index 0000000000000..46140c7073acf
 +  for (base::OnceClosure& callback : pending) {
 +    std::move(callback).Run();
 +  }
++  change_callbacks_.Notify();
 +}
 +
 +void AppSwapProfilesService::AddProfile(AppSwapProfile profile) {
@@ -184,6 +192,7 @@ index 0000000000000..46140c7073acf
 +  }
 +  profiles_.push_back(std::move(profile));
 +  ScheduleSave();
++  change_callbacks_.Notify();
 +}
 +
 +void AppSwapProfilesService::UpdateProfile(AppSwapProfile profile) {
@@ -193,6 +202,7 @@ index 0000000000000..46140c7073acf
 +    if (existing.id == profile.id) {
 +      existing = std::move(profile);
 +      ScheduleSave();
++      change_callbacks_.Notify();
 +      return;
 +    }
 +  }
@@ -208,6 +218,7 @@ index 0000000000000..46140c7073acf
 +        active_profile_id_.reset();
 +      }
 +      ScheduleSave();
++      change_callbacks_.Notify();
 +      return;
 +    }
 +  }
@@ -243,10 +254,10 @@ index 0000000000000..46140c7073acf
 +}
 diff --git a/chrome/browser/app_swap/app_swap_profiles_service.h b/chrome/browser/app_swap/app_swap_profiles_service.h
 new file mode 100644
-index 0000000000000..f5787f39a1337
+index 0000000000000..75c7717cbb467
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profiles_service.h
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,102 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -259,6 +270,7 @@ index 0000000000000..f5787f39a1337
 +#include <utility>
 +#include <vector>
 +
++#include "base/callback_list.h"
 +#include "base/files/file_path.h"
 +#include "base/functional/callback.h"
 +#include "base/sequence_checker.h"
@@ -322,6 +334,14 @@ index 0000000000000..f5787f39a1337
 +  // Marks |profile_id| as the one global active profile. No-op if not found.
 +  void SetActiveProfile(const std::string& profile_id);
 +
++  // Registers `callback` to run whenever the profile list or the active
++  // profile changes (add/update/remove/switch, or the initial load
++  // completing) -- e.g. AppSwapProfileTabStripButton uses this to pick up a
++  // rename made elsewhere (appswap://profiles) without needing its own tab
++  // to change. Returns a subscription that unregisters on destruction.
++  base::CallbackListSubscription AddChangeCallback(
++      base::RepeatingClosure callback);
++
 + private:
 +  void OnConfigLoaded(
 +      std::pair<std::vector<AppSwapProfile>, std::optional<std::string>>
@@ -335,6 +355,7 @@ index 0000000000000..f5787f39a1337
 +  bool loaded_ = false;
 +  bool loading_ = false;
 +  std::vector<base::OnceClosure> pending_load_;
++  base::RepeatingClosureList change_callbacks_;
 +  SEQUENCE_CHECKER(sequence_checker_);
 +};
 +

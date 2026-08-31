@@ -159,10 +159,10 @@ index 0000000000000..ec577ad5edf3e
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_SWITCH_UTIL_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc
 new file mode 100644
-index 0000000000000..ef1b2436cfe97
+index 0000000000000..22a5c9c5cec83
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc
-@@ -0,0 +1,258 @@
+@@ -0,0 +1,263 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -268,6 +268,11 @@ index 0000000000000..ef1b2436cfe97
 +      browser_(browser) {
 +  SetVisible(false);
 +  browser_->GetTabStripModel()->AddObserver(this);
++  profiles_change_subscription_ =
++      AppSwapProfilesService::GetInstance()->AddChangeCallback(
++          base::BindRepeating(
++              &AppSwapProfileTabStripButton::UpdateForActiveTab,
++              base::Unretained(this)));
 +  UpdateForActiveTab();
 +}
 +
@@ -423,10 +428,10 @@ index 0000000000000..ef1b2436cfe97
 +END_METADATA
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h
 new file mode 100644
-index 0000000000000..bcb538af9c767
+index 0000000000000..852a232574e1d
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,100 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -437,6 +442,7 @@ index 0000000000000..bcb538af9c767
 +#include <memory>
 +#include <vector>
 +
++#include "base/callback_list.h"
 +#include "base/memory/raw_ptr.h"
 +#include "chrome/browser/app_swap/app_swap_profiles_service.h"
 +#include "chrome/browser/ui/tabs/tab_change_type.h"
@@ -509,6 +515,11 @@ index 0000000000000..bcb538af9c767
 +  void ButtonPressed();
 +
 +  raw_ptr<BrowserWindowInterface> browser_;
++
++  // Refreshes the badge when the profile list changes anywhere -- e.g. a
++  // rename made via appswap://profiles, which otherwise wouldn't reach this
++  // button until the active tab itself happened to change.
++  base::CallbackListSubscription profiles_change_subscription_;
 +
 +  // The profiles menu currently shown -- kept in sync with the menu so
 +  // ExecuteCommand's command ids resolve against the same list the user
