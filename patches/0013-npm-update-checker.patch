@@ -456,20 +456,17 @@ index e8138bc8e72bf..6b08075a17654 100644
    autofill::prefs::RegisterLocalStatePrefs(registry);
    breadcrumbs::RegisterPrefs(registry);
    browser_shutdown::RegisterPrefs(registry);
-diff --git a/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.cc b/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.cc
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.cc b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.cc
 new file mode 100644
-index 0000000000000..66ead0cfbb4eb
+index 0000000000000..bd6ddc52ad330
 --- /dev/null
-+++ b/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.cc
-@@ -0,0 +1,193 @@
++++ b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.cc
+@@ -0,0 +1,136 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
-+#include "chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h"
-+
-+#include <memory>
-+#include <utility>
++#include "chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h"
 +
 +#include "base/functional/bind.h"
 +#include "base/strings/utf_string_conversions.h"
@@ -480,160 +477,47 @@ index 0000000000000..66ead0cfbb4eb
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
-+#include "components/vector_icons/vector_icons.h"
 +#include "content/public/browser/navigation_controller.h"
 +#include "content/public/browser/web_contents.h"
-+#include "ui/base/l10n/l10n_util.h"
-+#include "ui/base/metadata/metadata_impl_macros.h"
-+#include "ui/base/models/dialog_model.h"
-+#include "ui/base/models/image_model.h"
-+#include "ui/color/color_id.h"
-+#include "ui/views/bubble/bubble_dialog_model_host.h"
-+#include "ui/views/widget/widget.h"
 +
-+namespace {
-+constexpr int kBadgeIconSize = 16;
-+}  // namespace
-+
-+AppSwapUpdateBadgeView::AppSwapUpdateBadgeView(BrowserWindowInterface* browser)
-+    : views::ImageButton(base::BindRepeating(
-+          &AppSwapUpdateBadgeView::ButtonPressed, base::Unretained(this))),
-+      browser_(browser) {
-+  SetVisible(false);
-+  SetTooltipText(u"Update available");
++AppSwapReloadButtonController::AppSwapReloadButtonController(
++    BrowserWindowInterface* browser)
++    : browser_(browser) {
 +  browser_->GetTabStripModel()->AddObserver(this);
 +  SubscribeToActiveTabAndRefresh();
 +}
 +
-+AppSwapUpdateBadgeView::~AppSwapUpdateBadgeView() {
++AppSwapReloadButtonController::~AppSwapReloadButtonController() {
 +  browser_->GetTabStripModel()->RemoveObserver(this);
 +}
 +
-+void AppSwapUpdateBadgeView::OnTabStripModelChanged(
-+    TabStripModel* tab_strip_model,
-+    const TabStripModelChange& change,
-+    const TabStripSelectionChange& selection) {
-+  if (selection.active_tab_changed()) {
-+    SubscribeToActiveTabAndRefresh();
-+  }
++bool AppSwapReloadButtonController::HasPendingUpdate() const {
++  return !available_version_.empty();
 +}
 +
-+void AppSwapUpdateBadgeView::OnTabChangedAt(tabs::TabInterface* tab,
-+                                            TabChangeType change_type) {
-+  // The active tab's own content/URL may have changed (e.g. navigated to a
-+  // different AppSwap app) without a tab-strip selection change, so its
-+  // helper's app_id/available_version may now be stale relative to what we
-+  // subscribed to -- re-subscribing here (rather than just refreshing) is
-+  // what actually re-reads the current values, even though it's the same
-+  // WebContents/helper as before.
-+  SubscribeToActiveTabAndRefresh();
++std::u16string AppSwapReloadButtonController::GetPendingUpdateTooltip() const {
++  return u"Update to v" + base::UTF8ToUTF16(available_version_);
 +}
 +
-+void AppSwapUpdateBadgeView::SubscribeToActiveTabAndRefresh() {
++void AppSwapReloadButtonController::PerformUpdate() {
 +  content::WebContents* web_contents =
 +      browser_->GetTabStripModel()->GetActiveWebContents();
 +  AppSwapUpdateAvailableTabHelper* helper =
 +      web_contents
 +          ? AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents)
 +          : nullptr;
-+  if (!helper) {
-+    tab_update_subscription_ = base::CallbackListSubscription();
-+    SetVisible(false);
-+    return;
-+  }
-+
-+  tab_update_subscription_ = helper->AddChangeCallback(base::BindRepeating(
-+      &AppSwapUpdateBadgeView::RefreshDisplay, base::Unretained(this)));
-+  RefreshDisplay();
-+}
-+
-+void AppSwapUpdateBadgeView::RefreshDisplay() {
-+  content::WebContents* web_contents =
-+      browser_->GetTabStripModel()->GetActiveWebContents();
-+  AppSwapUpdateAvailableTabHelper* helper =
-+      web_contents
-+          ? AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents)
-+          : nullptr;
-+  if (!helper || !helper->app_id() || !helper->available_version()) {
-+    SetVisible(false);
-+    // LocationBarView doesn't use a LayoutManager -- it computes decoration
-+    // bounds in a hand-written Layout(PassKey) override -- so SetVisible()'s
-+    // own LayoutManager-only relayout shortcut (views::View::SetVisible(),
-+    // ui/views/view.cc) never fires for it. Any visibility change made
-+    // outside of a tab-strip/navigation event (which independently trigger
-+    // a relayout for other reasons) needs to force one explicitly, or the
-+    // internal visible_ flag flips with nothing ever re-running Layout() to
-+    // notice.
-+    PreferredSizeChanged();
-+    return;
-+  }
-+
-+  app_id_ = *helper->app_id();
-+  available_version_ = *helper->available_version();
-+  SetTooltipText(u"Update available: v" +
-+                base::UTF8ToUTF16(available_version_));
-+  SetVisible(true);
-+  PreferredSizeChanged();
-+}
-+
-+void AppSwapUpdateBadgeView::OnThemeChanged() {
-+  views::ImageButton::OnThemeChanged();
-+  SetImageModel(
-+      views::Button::STATE_NORMAL,
-+      ui::ImageModel::FromVectorIcon(vector_icons::kDownloadIcon,
-+                                     ui::kColorAccent, kBadgeIconSize));
-+}
-+
-+void AppSwapUpdateBadgeView::ButtonPressed() {
-+  const AppSwapApp* app = FindAppSwapAppById(app_id_);
-+  content::WebContents* web_contents =
-+      browser_->GetTabStripModel()->GetActiveWebContents();
-+  if (!app || !web_contents) {
-+    return;
-+  }
-+
-+  AppSwapSource current_source = app->ToSource();
-+  current_source.version = GetEffectiveAppSwapVersion(*app, web_contents);
-+  std::string current_version =
-+      AppSwapArtifactProvider::GetInstance()
-+          ->GetResolvedVersionIfCached(current_source)
-+          .value_or(current_source.version);
-+
-+  ui::DialogModel::Builder dialog_builder;
-+  dialog_builder.SetTitle(u"Update available")
-+      .AddParagraph(ui::DialogModelLabel(base::UTF8ToUTF16(
-+          app->package_name + ": v" + available_version_ +
-+          " is available (currently running v" + current_version + ")")))
-+      .AddOkButton(base::BindOnce(&AppSwapUpdateBadgeView::AcceptUpdate,
-+                                  base::Unretained(this)),
-+                  ui::DialogModel::Button::Params().SetLabel(u"Reload"))
-+      .AddCancelButton(base::DoNothing());
-+
-+  auto bubble = std::make_unique<views::BubbleDialogModelHost>(
-+      dialog_builder.Build(), this, views::BubbleBorder::TOP_RIGHT);
-+  views::Widget* widget = views::BubbleDialogDelegate::CreateBubbleDeprecated(
-+      std::move(bubble), views::Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET);
-+  widget->Show();
-+}
-+
-+void AppSwapUpdateBadgeView::AcceptUpdate() {
-+  content::WebContents* web_contents =
-+      browser_->GetTabStripModel()->GetActiveWebContents();
-+  AppSwapUpdateAvailableTabHelper* helper =
-+      web_contents
-+          ? AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents)
-+          : nullptr;
-+  const AppSwapApp* app = FindAppSwapAppById(app_id_);
++  const AppSwapApp* app =
++      helper && helper->app_id() ? FindAppSwapAppById(*helper->app_id())
++                                 : nullptr;
 +  if (!helper || !app) {
 +    return;
 +  }
 +
 +  AppSwapSource source = app->ToSource();
-+  // Re-resolve the dist-tag this tab is *currently* following (not the
-+  // concrete version this badge already knows about) -- consistent with the
-+  // feature's whole point: this tab tracks a moving tag, so a reload should
-+  // pick up whatever that tag resolves to right now, not freeze the tab
-+  // onto one specific version.
++  // Re-resolve the dist-tag this tab is *currently* following, not the
++  // version this controller already knows about -- consistent with the
++  // feature's whole point: this tab tracks a moving tag, so an update
++  // should pick up whatever that tag resolves to right now.
 +  source.version = GetEffectiveAppSwapVersion(*app, web_contents);
 +
 +  AppSwapArtifactProvider* provider = AppSwapArtifactProvider::GetInstance();
@@ -653,20 +537,79 @@ index 0000000000000..66ead0cfbb4eb
 +          helper->GetWeakPtr()));
 +}
 +
-+BEGIN_METADATA(AppSwapUpdateBadgeView)
-+END_METADATA
-diff --git a/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h b/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h
++base::CallbackListSubscription
++AppSwapReloadButtonController::AddChangeCallback(
++    base::RepeatingClosure callback) {
++  return change_callbacks_.Add(std::move(callback));
++}
++
++void AppSwapReloadButtonController::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  if (selection.active_tab_changed()) {
++    SubscribeToActiveTabAndRefresh();
++  }
++}
++
++void AppSwapReloadButtonController::OnTabChangedAt(
++    tabs::TabInterface* tab,
++    TabChangeType change_type) {
++  // The active tab's own content/URL may have changed (e.g. navigated to a
++  // different AppSwap app) without a tab-strip selection change, so its
++  // helper's state may now be stale relative to what we subscribed to --
++  // re-subscribing here (rather than just refreshing) is what actually
++  // re-reads the current values, even though it's the same
++  // WebContents/helper as before.
++  SubscribeToActiveTabAndRefresh();
++}
++
++void AppSwapReloadButtonController::SubscribeToActiveTabAndRefresh() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  AppSwapUpdateAvailableTabHelper* helper =
++      web_contents
++          ? AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents)
++          : nullptr;
++  if (!helper) {
++    tab_update_subscription_ = base::CallbackListSubscription();
++    RefreshState();
++    return;
++  }
++
++  tab_update_subscription_ = helper->AddChangeCallback(base::BindRepeating(
++      &AppSwapReloadButtonController::RefreshState, base::Unretained(this)));
++  RefreshState();
++}
++
++void AppSwapReloadButtonController::RefreshState() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  AppSwapUpdateAvailableTabHelper* helper =
++      web_contents
++          ? AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents)
++          : nullptr;
++  if (!helper || !helper->app_id() || !helper->available_version()) {
++    app_id_.clear();
++    available_version_.clear();
++  } else {
++    app_id_ = *helper->app_id();
++    available_version_ = *helper->available_version();
++  }
++  change_callbacks_.Notify();
++}
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h
 new file mode 100644
-index 0000000000000..d54f556b05a47
+index 0000000000000..12f11fae2af2d
 --- /dev/null
-+++ b/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h
-@@ -0,0 +1,85 @@
++++ b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h
+@@ -0,0 +1,94 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
-+#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_UPDATE_BADGE_VIEW_H_
-+#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_UPDATE_BADGE_VIEW_H_
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RELOAD_BUTTON_CONTROLLER_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RELOAD_BUTTON_CONTROLLER_H_
 +
 +#include <string>
 +
@@ -674,8 +617,6 @@ index 0000000000000..d54f556b05a47
 +#include "base/memory/raw_ptr.h"
 +#include "chrome/browser/ui/tabs/tab_change_type.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
-+#include "ui/base/metadata/metadata_header_macros.h"
-+#include "ui/views/controls/button/image_button.h"
 +
 +class BrowserWindowInterface;
 +class TabStripModel;
@@ -684,21 +625,44 @@ index 0000000000000..d54f556b05a47
 +class TabInterface;
 +}  // namespace tabs
 +
-+// A small location-bar decoration, positioned right after the version chip
-+// (LocationIconView) for an AppSwap-routed page. Hidden entirely unless the
-+// active tab's AppSwapUpdateAvailableTabHelper reports the dist-tag that
-+// tab is following now resolves to a different version than what it's
-+// running. Clicking it opens a small confirm popup offering to reload onto
-+// that version.
-+class AppSwapUpdateBadgeView : public views::ImageButton,
-+                               public TabStripModelObserver {
-+  METADATA_HEADER(AppSwapUpdateBadgeView, views::ImageButton)
-+
++// Watches the active tab for an AppSwap "update available" state, so the
++// toolbar Reload button can double as the update affordance instead of a
++// separate icon elsewhere in the UI. Deliberately has no reference to
++// ReloadButton (or any views:: type) -- it lives in
++// chrome/browser/ui/views/app_swap, and ReloadButton (chrome/browser/ui/
++// views/toolbar) is the one that depends on this target, not the other way
++// around, so a ReloadButton pointer here would create a circular target
++// dependency. ReloadButton instead owns one of these, subscribes to
++// AddChangeCallback(), and reacts to changes itself (SetHighlight(),
++// UpdateCachedTooltipText()); ButtonPressed() consults HasPendingUpdate()/
++// PerformUpdate() before falling back to its normal reload/stop handling.
++class AppSwapReloadButtonController : public TabStripModelObserver {
 + public:
-+  explicit AppSwapUpdateBadgeView(BrowserWindowInterface* browser);
-+  AppSwapUpdateBadgeView(const AppSwapUpdateBadgeView&) = delete;
-+  AppSwapUpdateBadgeView& operator=(const AppSwapUpdateBadgeView&) = delete;
-+  ~AppSwapUpdateBadgeView() override;
++  explicit AppSwapReloadButtonController(BrowserWindowInterface* browser);
++  ~AppSwapReloadButtonController() override;
++
++  AppSwapReloadButtonController(const AppSwapReloadButtonController&) = delete;
++  AppSwapReloadButtonController& operator=(
++      const AppSwapReloadButtonController&) = delete;
++
++  // Whether the active tab currently has an AppSwap update pending.
++  bool HasPendingUpdate() const;
++
++  // The tooltip to show while HasPendingUpdate() is true.
++  std::u16string GetPendingUpdateTooltip() const;
++
++  // Re-resolves the active tab's dist-tag fresh and reloads the tab onto
++  // whatever it currently points to (not the version this controller
++  // already knows about -- the whole point is following the tag live),
++  // clearing the pending state on success. No-op if !HasPendingUpdate().
++  void PerformUpdate();
++
++  // Registers `callback` to run whenever HasPendingUpdate()'s answer (or
++  // its details, e.g. which version) might have changed -- callers should
++  // re-read state and update their own display. Returns a subscription
++  // that unregisters on destruction.
++  base::CallbackListSubscription AddChangeCallback(
++      base::RepeatingClosure callback);
 +
 +  // TabStripModelObserver:
 +  void OnTabStripModelChanged(
@@ -708,41 +672,238 @@ index 0000000000000..d54f556b05a47
 +  void OnTabChangedAt(tabs::TabInterface* tab,
 +                      TabChangeType change_type) override;
 +
-+  // views::View:
-+  void OnThemeChanged() override;
-+
 + private:
-+  // Re-subscribes to the active tab's AppSwapUpdateAvailableTabHelper (if
-+  // any) and refreshes display from its current state. Only ever called
-+  // for an actual tab switch (constructor, OnTabStripModelChanged,
-+  // OnTabChangedAt) -- never from within the subscription's own callback,
-+  // since replacing tab_update_subscription_ from inside a callback that's
-+  // currently being invoked by that same subscription's Notify() would be
-+  // modifying the callback list while it's iterating itself.
++  // Re-subscribes to the active tab's AppSwapUpdateAvailableTabHelper and
++  // refreshes state from it. Only ever called for an actual tab switch --
++  // never from within the subscription's own callback, since replacing the
++  // subscription from inside a callback currently being invoked by that
++  // same subscription's Notify() would modify the callback list while it's
++  // iterating itself.
 +  void SubscribeToActiveTabAndRefresh();
 +
-+  // Refreshes visibility/tooltip from the currently-subscribed tab's
-+  // helper state, without touching the subscription itself. This is what
-+  // AddChangeCallback() is bound to, so it runs on every actual state
-+  // change without re-subscribing each time.
-+  void RefreshDisplay();
-+
-+  void ButtonPressed();
-+
-+  // Confirm-popup accept: re-resolves the app's currently-followed dist-tag
-+  // fresh and reloads the active tab onto whatever that resolves to now.
-+  void AcceptUpdate();
++  // Refreshes state from the currently-subscribed tab's helper, without
++  // touching the subscription itself, then notifies our own
++  // change_callbacks_. This is what the subscription's callback is bound
++  // to.
++  void RefreshState();
 +
 +  raw_ptr<BrowserWindowInterface> browser_;
 +
-+  // What the badge is currently offering, while visible.
++  // What's currently offered, while pending.
 +  std::string app_id_;
 +  std::string available_version_;
 +
-+  // Subscribed to only the currently-active tab's helper; replaced (which
-+  // unregisters the previous one) on every tab switch by
-+  // UpdateForActiveTab().
 +  base::CallbackListSubscription tab_update_subscription_;
++  base::RepeatingClosureList change_callbacks_;
 +};
 +
-+#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_UPDATE_BADGE_VIEW_H_
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RELOAD_BUTTON_CONTROLLER_H_
+diff --git a/chrome/browser/ui/views/toolbar/BUILD.gn b/chrome/browser/ui/views/toolbar/BUILD.gn
+index 93d2d2e1fd5a8..804916cd18110 100644
+--- a/chrome/browser/ui/views/toolbar/BUILD.gn
++++ b/chrome/browser/ui/views/toolbar/BUILD.gn
+@@ -234,6 +234,7 @@ source_set("impl") {
+     "//chrome/browser/ui/user_education",
+     "//chrome/browser/ui/views:layout_provider",
+     "//chrome/browser/ui/views/app_menu:impl",
++    "//chrome/browser/ui/views/app_swap",
+     "//chrome/browser/ui/views/contextual_tasks",
+     "//chrome/browser/ui/views/download",
+     "//chrome/browser/ui/views/extensions:extensions_container_views",
+diff --git a/chrome/browser/ui/views/toolbar/reload_button.cc b/chrome/browser/ui/views/toolbar/reload_button.cc
+index a86b7baa53a5d..2003fee1602fe 100644
+--- a/chrome/browser/ui/views/toolbar/reload_button.cc
++++ b/chrome/browser/ui/views/toolbar/reload_button.cc
+@@ -17,6 +17,7 @@
+ #include "chrome/browser/ui/browser_element_identifiers.h"
+ #include "chrome/browser/ui/ui_features.h"
+ #include "chrome/browser/ui/view_ids.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h"
+ #include "chrome/browser/ui/waap/initial_webui_window_metrics_manager.h"
+ #include "chrome/browser/ui/waap/waap_ui_metrics_recorder.h"
+ #include "chrome/grit/browser_resources.h"
+@@ -30,8 +31,11 @@
+ #include "ui/base/ui_base_features.h"
+ #include "ui/base/window_open_disposition.h"
+ #include "ui/base/window_open_disposition_utils.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
+ #include "ui/compositor/compositor.h"
+ #include "ui/gfx/color_palette.h"
++#include "ui/gfx/color_utils.h"
+ #include "ui/gfx/paint_vector_icon.h"
+ #include "ui/menus/simple_menu_model.h"
+ #include "ui/views/accessibility/view_accessibility.h"
+@@ -58,7 +62,8 @@ static constexpr gfx::Tween::Type kIconAnimationTween =
+ ReloadButton::ReloadButton(
+     Profile* profile,
+     CommandUpdater* command_updater,
+-    InitialWebUIWindowMetricsManager* window_metrics_manager)
++    InitialWebUIWindowMetricsManager* window_metrics_manager,
++    BrowserWindowInterface* browser)
+     : ToolbarButton(base::BindRepeating(&ReloadButton::ButtonPressed,
+                                         base::Unretained(this)),
+                     CreateMenuModel(),
+@@ -83,6 +88,15 @@ ReloadButton::ReloadButton(
+   if (window_metrics_manager_) {
+     window_metrics_manager_->OnReloadButtonCreated();
+   }
++  if (browser) {
++    appswap_reload_controller_ =
++        std::make_unique<AppSwapReloadButtonController>(browser);
++    appswap_update_subscription_ =
++        appswap_reload_controller_->AddChangeCallback(base::BindRepeating(
++            &ReloadButton::OnAppSwapUpdateStateChanged,
++            base::Unretained(this)));
++    OnAppSwapUpdateStateChanged();
++  }
+   SetVisibleMode(Mode::kReload);
+   SetTriggerableEventFlags(ui::EF_LEFT_MOUSE_BUTTON |
+                            ui::EF_MIDDLE_MOUSE_BUTTON);
+@@ -156,6 +170,11 @@ void ReloadButton::PaintButtonContents(gfx::Canvas* canvas) {
+ }
+ 
+ void ReloadButton::UpdateCachedTooltipText() {
++  if (appswap_reload_controller_ &&
++      appswap_reload_controller_->HasPendingUpdate()) {
++    SetTooltipText(appswap_reload_controller_->GetPendingUpdateTooltip());
++    return;
++  }
+   int reload_tooltip =
+       ShouldShowMenu() ? IDS_TOOLTIP_RELOAD_WITH_MENU : IDS_TOOLTIP_RELOAD;
+   SetTooltipText(l10n_util::GetStringUTF16(
+@@ -311,6 +330,12 @@ base::CallbackListSubscription ReloadButton::AddVisibleModeChangedCallback(
+ }
+ 
+ void ReloadButton::ButtonPressed(const ui::Event& event) {
++  if (appswap_reload_controller_ &&
++      appswap_reload_controller_->HasPendingUpdate()) {
++    appswap_reload_controller_->PerformUpdate();
++    return;
++  }
++
+   // This is called in order to signal that external protocol dialogs are
+   // allowed to show due to a user action, which are likely to happen on the
+   // next page load after the reload button is clicked.
+@@ -364,6 +389,40 @@ void ReloadButton::ButtonPressed(const ui::Event& event) {
+   }
+ }
+ 
++void ReloadButton::OnAppSwapUpdateStateChanged() {
++  if (!appswap_reload_controller_->HasPendingUpdate()) {
++    SetHighlight(std::u16string(), std::nullopt);
++    UpdateCachedTooltipText();
++    return;
++  }
++  SetHighlight(u"Update", GetAppSwapUpdateHighlightColor());
++  UpdateCachedTooltipText();
++}
++
++std::optional<SkColor> ReloadButton::GetAppSwapUpdateHighlightColor() const {
++  const ui::ColorProvider* color_provider = GetColorProvider();
++  if (!color_provider) {
++    return std::nullopt;
++  }
++  return color_provider->GetColor(ui::kColorAlertLowSeverity);
++}
++
++std::optional<SkColor> ReloadButton::GetHighlightTextColor() const {
++  if (!appswap_reload_controller_ ||
++      !appswap_reload_controller_->HasPendingUpdate()) {
++    return ToolbarButton::GetHighlightTextColor();
++  }
++  std::optional<SkColor> highlight_color = GetAppSwapUpdateHighlightColor();
++  if (!highlight_color) {
++    return ToolbarButton::GetHighlightTextColor();
++  }
++  // The default HighlightColorAnimation text color is the highlight color
++  // itself (see ToolbarButton::HighlightColorAnimation::GetTextColor()),
++  // which would paint "Update" in the same green as its own pill background.
++  // Use the higher-contrast of black/white against that background instead.
++  return color_utils::GetColorWithMaxContrast(*highlight_color);
++}
++
+ void ReloadButton::ExecuteBrowserCommand(int command, int event_flags) {
+   if (!command_updater_) {
+     return;
+diff --git a/chrome/browser/ui/views/toolbar/reload_button.h b/chrome/browser/ui/views/toolbar/reload_button.h
+index 735b1d5f798b4..abd6bb1fac1a4 100644
+--- a/chrome/browser/ui/views/toolbar/reload_button.h
++++ b/chrome/browser/ui/views/toolbar/reload_button.h
+@@ -5,6 +5,9 @@
+ #ifndef CHROME_BROWSER_UI_VIEWS_TOOLBAR_RELOAD_BUTTON_H_
+ #define CHROME_BROWSER_UI_VIEWS_TOOLBAR_RELOAD_BUTTON_H_
+ 
++#include <memory>
++
++#include "base/callback_list.h"
+ #include "base/gtest_prod_util.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+@@ -19,6 +22,8 @@
+ #include "ui/menus/simple_menu_model.h"
+ #include "ui/views/metadata/view_factory.h"
+ 
++class AppSwapReloadButtonController;
++class BrowserWindowInterface;
+ class CommandUpdater;
+ class InitialWebUIWindowMetricsManager;
+ class Profile;
+@@ -40,7 +45,8 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
+  public:
+   ReloadButton(Profile* profile,
+                CommandUpdater* command_updater,
+-               InitialWebUIWindowMetricsManager* window_metrics_manager);
++               InitialWebUIWindowMetricsManager* window_metrics_manager,
++               BrowserWindowInterface* browser = nullptr);
+   ReloadButton(const ReloadButton&) = delete;
+   ReloadButton& operator=(const ReloadButton&) = delete;
+   ~ReloadButton() override;
+@@ -100,6 +106,21 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
+ 
+   void ExecuteBrowserCommand(int command, int event_flags);
+ 
++  // ToolbarButton:
++  // Overridden because the default HighlightColorAnimation text color is the
++  // highlight color itself, which would paint "Update" in the same green as
++  // its own pill background.
++  std::optional<SkColor> GetHighlightTextColor() const override;
++
++  // Applies appswap_reload_controller_'s current state to this button's
++  // highlight/tooltip. Bound as appswap_reload_controller_'s change
++  // callback.
++  void OnAppSwapUpdateStateChanged();
++
++  // The background/border color to use for the "Update" highlight pill, or
++  // nullopt if no ColorProvider is available yet.
++  std::optional<SkColor> GetAppSwapUpdateHighlightColor() const;
++
+   void OnDoubleClickTimer();
+   void OnStopToReloadTimer();
+   void UpdateAccessibleHasPopup();
+@@ -151,6 +172,12 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
+   // Not owned and might be null.
+   const raw_ptr<InitialWebUIWindowMetricsManager> window_metrics_manager_;
+ 
++  // Makes this button double as an "update available" affordance for
++  // AppSwap-routed pages -- see AppSwapReloadButtonController's own
++  // comment. Null when constructed without a `browser` (e.g. unit tests).
++  std::unique_ptr<AppSwapReloadButtonController> appswap_reload_controller_;
++  base::CallbackListSubscription appswap_update_subscription_;
++
+   // Must be the last member.
+   base::WeakPtrFactory<ReloadButton> weak_ptr_factory_{this};
+ };
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index 58334f6105692..55427e42c7489 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -436,7 +436,7 @@ void ToolbarView::Init() {
+     reload_ = AddChildView(std::make_unique<ReloadButton>(
+         browser_->GetProfile(),
+         chrome::BrowserCommandController::From(browser_),
+-        InitialWebUIWindowMetricsManager::From(browser_)));
++        InitialWebUIWindowMetricsManager::From(browser_), browser_));
+   }
+ 
+   if (!features::IsWebUIHomeButtonEnabled()) {

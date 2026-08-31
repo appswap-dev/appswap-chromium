@@ -18,7 +18,7 @@ index fc14abacb1673..8a824ef21f217 100644
               "kAiModeEligibility",
               base::FEATURE_DISABLED_BY_DEFAULT);
 diff --git a/testing/variations/fieldtrial_testing_config.json b/testing/variations/fieldtrial_testing_config.json
-index 2b553aa98480b..54612d4372757 100644
+index 2b553aa98480b..cddcf88beeee2 100644
 --- a/testing/variations/fieldtrial_testing_config.json
 +++ b/testing/variations/fieldtrial_testing_config.json
 @@ -5706,24 +5706,6 @@
@@ -54,3 +54,52 @@ index 2b553aa98480b..54612d4372757 100644
                          "LensSidePanelUnification"
                      ]
                  }
+@@ -21381,48 +21362,6 @@
+             ]
+         }
+     ],
+-    "WebUIReloadButtonStudy": [
+-        {
+-            "platforms": [
+-                "linux",
+-                "mac",
+-                "windows"
+-            ],
+-            "experiments": [
+-                {
+-                    "name": "EnabledWithSurfaceSync_20260813",
+-                    "params": {
+-                        "WebUIReloadButtonDeferBrowserViewShow": "false",
+-                        "WebUIReloadButtonKeepVisibleUntilPaint": "true",
+-                        "WebUIReloadButtonRestartUnresponsive": "true",
+-                        "WebUIReloadButtonRestartUnresponsiveRenderersTimeout": "5s",
+-                        "config": "CjsKOUV2ZW50TGF0ZW5jeS5HZXN0dXJlU2Nyb2xsVXBkYXRlLlRvdWNoc2NyZWVuLlRvdGFsTGF0ZW5jeQooCiZQYWdlTG9hZC5JbnRlcmFjdGl2ZVRpbWluZy5JbnB1dERlbGF5Mwo4CjZHcmFwaGljcy5TbW9vdGhuZXNzLlBlcmNlbnREcm9wcGVkRnJhbWVzMy5BbGxTZXF1ZW5jZXM=",
+-                        "high_stream_priority": "true",
+-                        "renderer_commit_delay_ms": "100000"
+-                    },
+-                    "enable_features": [
+-                        "BypassOutdatedSurfaceActivation",
+-                        "InitialWebUI",
+-                        "InitialWebUISurfaceSync",
+-                        "InitialWebUISyncNavStartToCommit",
+-                        "InitialWebUIWithoutExtensions",
+-                        "PrioritizeResizeTaskRunnerOnStartup",
+-                        "SendGPUChannelEarly",
+-                        "SkipIPCChannelPausingForNonGuests",
+-                        "WebUIBundledCodeCache",
+-                        "WebUIReloadButton",
+-                        "WebUIToolbarFrameEvictionOptOut",
+-                        "WebiumMetricsMapping"
+-                    ],
+-                    "disable_features": [
+-                        "WebUIBackForwardButton",
+-                        "WebUIHomeButton",
+-                        "WebUISplitTabsButton"
+-                    ]
+-                }
+-            ]
+-        }
+-    ],
+     "WebUIRoundedIcons": [
+         {
+             "platforms": [

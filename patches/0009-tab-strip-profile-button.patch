@@ -13,10 +13,10 @@ index 50920511caf57..89f858f617cd9 100644
      "//chrome/browser/ui/views/file_system_access:impl",
 diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..9c9dcfc994949
+index 0000000000000..c44af463ebc34
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/BUILD.gn
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,35 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -27,8 +27,8 @@ index 0000000000000..9c9dcfc994949
 +    "app_swap_profile_switch_util.h",
 +    "app_swap_profile_tab_strip_button.cc",
 +    "app_swap_profile_tab_strip_button.h",
-+    "app_swap_update_badge_view.cc",
-+    "app_swap_update_badge_view.h",
++    "app_swap_reload_button_controller.cc",
++    "app_swap_reload_button_controller.h",
 +    "app_swap_version_picker_dialog.cc",
 +    "app_swap_version_picker_dialog.h",
 +  ]
@@ -42,7 +42,6 @@ index 0000000000000..9c9dcfc994949
 +    "//chrome/browser/ui/views/controls:controls",
 +    "//components/constrained_window",
 +    "//components/tabs:impl",
-+    "//components/vector_icons",
 +    "//content/public/browser",
 +    "//ui/accessibility:ax_base",
 +    "//ui/base",
@@ -523,19 +522,18 @@ index 0000000000000..bcb538af9c767
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_TAB_STRIP_BUTTON_H_
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-index f97b92504ba81..7f6612b3080e5 100644
+index f97b92504ba81..c8f9697c758dc 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-@@ -56,6 +56,8 @@
+@@ -56,6 +56,7 @@
  #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
  #include "chrome/browser/ui/tabs/tab_strip_model.h"
  #include "chrome/browser/ui/ui_features.h"
 +#include "chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h"
-+#include "chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h"
  #include "chrome/browser/ui/views/bubble_anchor_util_views.h"
  #include "chrome/browser/ui/views/chrome_layout_provider.h"
  #include "chrome/browser/ui/views/chrome_typography.h"
-@@ -464,6 +466,14 @@ void LocationBarView::Init() {
+@@ -464,6 +465,12 @@ void LocationBarView::Init() {
            page_action_items, page_actions::PageActionPropertiesProvider(),
            page_action_params));
  
@@ -543,32 +541,12 @@ index f97b92504ba81..7f6612b3080e5 100644
 +      browser_->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
 +    app_swap_profile_button_ = AddChildView(
 +        std::make_unique<AppSwapProfileTabStripButton>(browser_));
-+    app_swap_update_badge_ =
-+        AddChildView(std::make_unique<AppSwapUpdateBadgeView>(browser_));
 +  }
 +
    auto clear_all_button = views::CreateVectorImageButton(base::BindRepeating(
        static_cast<void (OmniboxView::*)(const std::u16string&)>(
            &OmniboxView::SetUserText),
-@@ -833,6 +843,17 @@ void LocationBarView::Layout(PassKey) {
-     location_icon_view_->SetVisible(false);
-   }
- 
-+  // Right after location_icon_view_ (the version chip for an AppSwap-routed
-+  // page) so the badge reads as attached to it, not as an unrelated
-+  // trailing icon. Only actually added when it has something to show --
-+  // AppSwapUpdateBadgeView keeps itself hidden otherwise.
-+  if (app_swap_update_badge_ && app_swap_update_badge_->GetVisible()) {
-+    leading_decorations.AddDecoration(
-+        vertical_padding, location_height, /*auto_collapse=*/false,
-+        /*max_fraction=*/0, /*intra_item_padding=*/4, icon_left,
-+        app_swap_update_badge_);
-+  }
-+
-   auto add_trailing_decoration = [&](View* view, int intra_item_padding,
-                                      int edge_padding) {
-     if (view->GetVisible()) {
-@@ -842,6 +863,15 @@ void LocationBarView::Layout(PassKey) {
+@@ -842,6 +849,15 @@ void LocationBarView::Layout(PassKey) {
      }
    };
  
@@ -585,19 +563,18 @@ index f97b92504ba81..7f6612b3080e5 100644
      if (page_action_container_ && page_action_container_->GetVisible()) {
        const bool is_capsule_active = page_action_container_->IsCapsuleActive();
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.h b/chrome/browser/ui/views/location_bar/location_bar_view.h
-index 2796ee6d49b16..4ef13b5e13728 100644
+index 2796ee6d49b16..b7c94e1d2ea08 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.h
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.h
-@@ -52,6 +52,8 @@
+@@ -52,6 +52,7 @@
  #include "services/device/public/cpp/geolocation/geolocation_system_permission_manager.h"
  #endif  // BUILDFLAG(OS_LEVEL_GEOLOCATION_PERMISSION_SUPPORTED)
  
 +class AppSwapProfileTabStripButton;
-+class AppSwapUpdateBadgeView;
  class BrowserWindowInterface;
  class CommandUpdater;
  class ContentSettingBubbleModelDelegate;
-@@ -581,6 +583,17 @@ class LocationBarView
+@@ -581,6 +582,12 @@ class LocationBarView
    raw_ptr<page_actions::PageActionContainerView> page_action_container_ =
        nullptr;
  
@@ -606,11 +583,6 @@ index 2796ee6d49b16..4ef13b5e13728 100644
 +  // the outermost trailing decoration so it reads like a persistent identity
 +  // indicator rather than a transient page action.
 +  raw_ptr<AppSwapProfileTabStripButton> app_swap_profile_button_ = nullptr;
-+
-+  // Shows an "update available" badge right after location_icon_view_ (the
-+  // version chip) on an AppSwap-routed page whose active tab's dist-tag has
-+  // a newer version. See AppSwapUpdateBadgeView's own comment.
-+  raw_ptr<AppSwapUpdateBadgeView> app_swap_update_badge_ = nullptr;
 +
    // An [x] that appears in touch mode (when the OSK is visible) and allows the
    // user to clear all text.

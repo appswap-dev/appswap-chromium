@@ -218,8 +218,16 @@ gen 0012-tab-level-persistence.patch \
   chrome/browser/ui/browser_tabrestore.cc \
   chrome/browser/ui/tab_helpers.cc
 
-# Periodic npm dist-tag update checker + address-bar "update available"
-# badge. Changes to already-covered files this feature also touches
+# Periodic npm dist-tag update checker. The "update available" affordance
+# lives in the toolbar Reload button itself (green "Update" highlight +
+# tooltip with the target version, click performs the update-reload) rather
+# than a separate address-bar badge -- app_swap_update_badge_view.* was
+# deleted in favor of app_swap_reload_button_controller.* below.
+# testing/variations/fieldtrial_testing_config.json also disables the
+# WebUIReloadButtonStudy field trial there, since that study silently swaps
+# in an experimental WebUI-based reload button that bypasses ReloadButton
+# entirely; that file is already covered by 0006 above. Changes to other
+# already-covered files this feature also touches
 # (app_swap_version_pin_tab_helper.*, app_swap_artifact_provider.*,
 # app_swap_url_loader_factory.*, page_info_bubble_view.cc,
 # app_swap_version_picker_dialog.cc, location_bar_view.*,
@@ -232,8 +240,12 @@ gen 0013-npm-update-checker.patch \
   chrome/browser/app_swap/app_swap_update_available_tab_helper.h \
   chrome/browser/app_swap/app_swap_update_checker.cc \
   chrome/browser/app_swap/app_swap_update_checker.h \
-  chrome/browser/ui/views/app_swap/app_swap_update_badge_view.cc \
-  chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h \
+  chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.cc \
+  chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h \
+  chrome/browser/ui/views/toolbar/reload_button.cc \
+  chrome/browser/ui/views/toolbar/reload_button.h \
+  chrome/browser/ui/views/toolbar/toolbar_view.cc \
+  chrome/browser/ui/views/toolbar/BUILD.gn \
   chrome/browser/prefs/browser_prefs.cc \
   chrome/browser/prefs/BUILD.gn
 
