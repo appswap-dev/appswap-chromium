@@ -119,7 +119,7 @@ index 0000000000000..cec6adb2815da
 +WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapUpdateAvailableTabHelper);
 diff --git a/chrome/browser/app_swap/app_swap_update_available_tab_helper.h b/chrome/browser/app_swap/app_swap_update_available_tab_helper.h
 new file mode 100644
-index 0000000000000..0f6fc97e62b63
+index 0000000000000..0c37e7480acfd
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_available_tab_helper.h
 @@ -0,0 +1,84 @@
@@ -145,10 +145,10 @@ index 0000000000000..0f6fc97e62b63
 +// Tracks, for a single tab, whether the dist-tag its AppSwap app is
 +// currently on now resolves to a different version than what it's running
 +// (not necessarily newer -- see AppSwapUpdateChecker). Populated by
-+// AppSwapUpdateChecker; read by
-+// the address-bar update badge (AppSwapUpdateBadgeView). Not persisted --
-+// purely a live-session signal, re-derived by the checker on its own
-+// schedule rather than something that needs to survive a restart.
++// AppSwapUpdateChecker; read by the toolbar Reload button's "Update"
++// highlight (AppSwapReloadButtonController). Not persisted -- purely a
++// live-session signal, re-derived by the checker on its own schedule rather
++// than something that needs to survive a restart.
 +class AppSwapUpdateAvailableTabHelper
 +    : public content::WebContentsObserver,
 +      public content::WebContentsUserData<AppSwapUpdateAvailableTabHelper> {
@@ -209,7 +209,7 @@ index 0000000000000..0f6fc97e62b63
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_AVAILABLE_TAB_HELPER_H_
 diff --git a/chrome/browser/app_swap/app_swap_update_checker.cc b/chrome/browser/app_swap/app_swap_update_checker.cc
 new file mode 100644
-index 0000000000000..112b19c42355b
+index 0000000000000..2caccec44db0d
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_checker.cc
 @@ -0,0 +1,148 @@
@@ -281,11 +281,11 @@ index 0000000000000..112b19c42355b
 +    minutes = app_swap::prefs::kDefaultUpdateCheckIntervalMinutes;
 +  }
 +  timer_.Start(FROM_HERE, base::Minutes(minutes),
-+              base::BindRepeating(&AppSwapUpdateChecker::OnTick,
++              base::BindRepeating(&AppSwapUpdateChecker::CheckNow,
 +                                  base::Unretained(this)));
 +}
 +
-+void AppSwapUpdateChecker::OnTick() {
++void AppSwapUpdateChecker::CheckNow() {
 +  std::map<std::string, PendingCheck> pending;
 +
 +  GlobalBrowserCollection::GetInstance()->ForEach(
@@ -363,10 +363,10 @@ index 0000000000000..112b19c42355b
 +}
 diff --git a/chrome/browser/app_swap/app_swap_update_checker.h b/chrome/browser/app_swap/app_swap_update_checker.h
 new file mode 100644
-index 0000000000000..ee91b409cab7b
+index 0000000000000..40b64ec6f2f32
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_checker.h
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,68 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -393,6 +393,11 @@ index 0000000000000..ee91b409cab7b
 +// repointed anywhere, including back to an older version (e.g. rolling
 +// back a bad release), and that's just as worth surfacing. Interval is
 +// controlled by app_swap::prefs::kUpdateCheckIntervalMinutes.
++//
++// This only drives the UI signal (the Reload button's "Update" pill); it
++// does not itself keep AppSwapArtifactProvider's cache fresh for tabs that
++// never get looked at -- that happens per-navigation instead, see
++// AppSwapArtifactProvider::EnsureFreshThenGetOrDownload.
 +class AppSwapUpdateChecker {
 + public:
 +  static AppSwapUpdateChecker* GetInstance();
@@ -406,13 +411,19 @@ index 0000000000000..ee91b409cab7b
 +  // needs to be wired into.
 +  void EnsureStarted();
 +
++  // Runs one check pass immediately, without waiting for (or resetting) the
++  // periodic timer. Safe to call before EnsureStarted() (e.g. from a UI
++  // surface that wants an on-demand refresh, like the version-picker dialog
++  // opening) -- the periodic timer and this are independent triggers of the
++  // same underlying pass.
++  void CheckNow();
++
 + private:
 +  friend class base::NoDestructor<AppSwapUpdateChecker>;
 +  AppSwapUpdateChecker();
 +  ~AppSwapUpdateChecker();
 +
 +  void RestartTimer();
-+  void OnTick();
 +  void OnCheckResult(
 +      AppSwapSource source,
 +      std::vector<base::WeakPtr<AppSwapUpdateAvailableTabHelper>> helpers,
@@ -458,10 +469,10 @@ index e8138bc8e72bf..6b08075a17654 100644
    browser_shutdown::RegisterPrefs(registry);
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.cc b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.cc
 new file mode 100644
-index 0000000000000..bd6ddc52ad330
+index 0000000000000..33702a5c3f987
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.cc
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,109 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -470,11 +481,7 @@ index 0000000000000..bd6ddc52ad330
 +
 +#include "base/functional/bind.h"
 +#include "base/strings/utf_string_conversions.h"
-+#include "chrome/browser/app_swap/app_swap_apps_service.h"
-+#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
-+#include "chrome/browser/app_swap/app_swap_route_matcher.h"
 +#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
-+#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
 +#include "content/public/browser/navigation_controller.h"
@@ -500,41 +507,18 @@ index 0000000000000..bd6ddc52ad330
 +}
 +
 +void AppSwapReloadButtonController::PerformUpdate() {
++  // Any navigation -- including a plain reload -- re-resolves a dist-tag
++  // source against the registry before serving it (see
++  // AppSwapArtifactProvider::EnsureFreshThenGetOrDownload, called from the
++  // URL loader factory for navigation-type requests), so there's nothing
++  // update-specific left to do here beyond reloading.
 +  content::WebContents* web_contents =
 +      browser_->GetTabStripModel()->GetActiveWebContents();
-+  AppSwapUpdateAvailableTabHelper* helper =
-+      web_contents
-+          ? AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents)
-+          : nullptr;
-+  const AppSwapApp* app =
-+      helper && helper->app_id() ? FindAppSwapAppById(*helper->app_id())
-+                                 : nullptr;
-+  if (!helper || !app) {
++  if (!web_contents) {
 +    return;
 +  }
-+
-+  AppSwapSource source = app->ToSource();
-+  // Re-resolve the dist-tag this tab is *currently* following, not the
-+  // version this controller already knows about -- consistent with the
-+  // feature's whole point: this tab tracks a moving tag, so an update
-+  // should pick up whatever that tag resolves to right now.
-+  source.version = GetEffectiveAppSwapVersion(*app, web_contents);
-+
-+  AppSwapArtifactProvider* provider = AppSwapArtifactProvider::GetInstance();
-+  provider->InvalidateCache(source);
-+  provider->GetOrDownload(
-+      source,
-+      base::BindOnce(
-+          [](base::WeakPtr<AppSwapUpdateAvailableTabHelper> helper,
-+             base::FilePath dir) {
-+            if (dir.empty() || !helper) {
-+              return;
-+            }
-+            helper->web_contents()->GetController().Reload(
-+                content::ReloadType::NORMAL, /*check_for_repost=*/false);
-+            helper->ClearAvailableVersion();
-+          },
-+          helper->GetWeakPtr()));
++  web_contents->GetController().Reload(content::ReloadType::NORMAL,
++                                       /*check_for_repost=*/false);
 +}
 +
 +base::CallbackListSubscription
@@ -600,7 +584,7 @@ index 0000000000000..bd6ddc52ad330
 +}
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h
 new file mode 100644
-index 0000000000000..12f11fae2af2d
+index 0000000000000..225fc8cf25020
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h
 @@ -0,0 +1,94 @@
@@ -651,10 +635,10 @@ index 0000000000000..12f11fae2af2d
 +  // The tooltip to show while HasPendingUpdate() is true.
 +  std::u16string GetPendingUpdateTooltip() const;
 +
-+  // Re-resolves the active tab's dist-tag fresh and reloads the tab onto
-+  // whatever it currently points to (not the version this controller
-+  // already knows about -- the whole point is following the tag live),
-+  // clearing the pending state on success. No-op if !HasPendingUpdate().
++  // Reloads the active tab. A plain reload already re-resolves a dist-tag
++  // source against the registry before serving it (see
++  // AppSwapArtifactProvider::EnsureFreshThenGetOrDownload), so this is
++  // deliberately just a reload -- no update-specific logic needed here.
 +  void PerformUpdate();
 +
 +  // Registers `callback` to run whenever HasPendingUpdate()'s answer (or
@@ -711,7 +695,7 @@ index 93d2d2e1fd5a8..804916cd18110 100644
      "//chrome/browser/ui/views/download",
      "//chrome/browser/ui/views/extensions:extensions_container_views",
 diff --git a/chrome/browser/ui/views/toolbar/reload_button.cc b/chrome/browser/ui/views/toolbar/reload_button.cc
-index a86b7baa53a5d..2003fee1602fe 100644
+index a86b7baa53a5d..12d0af31a6554 100644
 --- a/chrome/browser/ui/views/toolbar/reload_button.cc
 +++ b/chrome/browser/ui/views/toolbar/reload_button.cc
 @@ -17,6 +17,7 @@
@@ -744,11 +728,15 @@ index a86b7baa53a5d..2003fee1602fe 100644
      : ToolbarButton(base::BindRepeating(&ReloadButton::ButtonPressed,
                                          base::Unretained(this)),
                      CreateMenuModel(),
-@@ -83,6 +88,15 @@ ReloadButton::ReloadButton(
+@@ -83,6 +88,19 @@ ReloadButton::ReloadButton(
    if (window_metrics_manager_) {
      window_metrics_manager_->OnReloadButtonCreated();
    }
 +  if (browser) {
++    // ToolbarButton's constructor defaults to ALIGN_RIGHT (icon after
++    // label), matching how the "Update" pill's icon+text should read:
++    // icon first, then "Update".
++    SetHorizontalAlignment(gfx::ALIGN_LEFT);
 +    appswap_reload_controller_ =
 +        std::make_unique<AppSwapReloadButtonController>(browser);
 +    appswap_update_subscription_ =
@@ -760,7 +748,7 @@ index a86b7baa53a5d..2003fee1602fe 100644
    SetVisibleMode(Mode::kReload);
    SetTriggerableEventFlags(ui::EF_LEFT_MOUSE_BUTTON |
                             ui::EF_MIDDLE_MOUSE_BUTTON);
-@@ -156,6 +170,11 @@ void ReloadButton::PaintButtonContents(gfx::Canvas* canvas) {
+@@ -156,6 +174,11 @@ void ReloadButton::PaintButtonContents(gfx::Canvas* canvas) {
  }
  
  void ReloadButton::UpdateCachedTooltipText() {
@@ -772,7 +760,7 @@ index a86b7baa53a5d..2003fee1602fe 100644
    int reload_tooltip =
        ShouldShowMenu() ? IDS_TOOLTIP_RELOAD_WITH_MENU : IDS_TOOLTIP_RELOAD;
    SetTooltipText(l10n_util::GetStringUTF16(
-@@ -311,6 +330,12 @@ base::CallbackListSubscription ReloadButton::AddVisibleModeChangedCallback(
+@@ -311,6 +334,12 @@ base::CallbackListSubscription ReloadButton::AddVisibleModeChangedCallback(
  }
  
  void ReloadButton::ButtonPressed(const ui::Event& event) {
@@ -785,7 +773,7 @@ index a86b7baa53a5d..2003fee1602fe 100644
    // This is called in order to signal that external protocol dialogs are
    // allowed to show due to a user action, which are likely to happen on the
    // next page load after the reload button is clicked.
-@@ -364,6 +389,40 @@ void ReloadButton::ButtonPressed(const ui::Event& event) {
+@@ -364,6 +393,56 @@ void ReloadButton::ButtonPressed(const ui::Event& event) {
    }
  }
  
@@ -797,6 +785,11 @@ index a86b7baa53a5d..2003fee1602fe 100644
 +  }
 +  SetHighlight(u"Update", GetAppSwapUpdateHighlightColor());
 +  UpdateCachedTooltipText();
++  // SetHighlight() alone doesn't touch the icon -- ToolbarButton's icon
++  // color is baked in by UpdateIcon() at the time it's called, not
++  // recomputed per-paint, so it has to be explicitly refreshed here to pick
++  // up GetForegroundColor()'s new answer below.
++  UpdateIcon();
 +}
 +
 +std::optional<SkColor> ReloadButton::GetAppSwapUpdateHighlightColor() const {
@@ -804,7 +797,7 @@ index a86b7baa53a5d..2003fee1602fe 100644
 +  if (!color_provider) {
 +    return std::nullopt;
 +  }
-+  return color_provider->GetColor(ui::kColorAlertLowSeverity);
++  return color_provider->GetColor(ui::kColorAccent);
 +}
 +
 +std::optional<SkColor> ReloadButton::GetHighlightTextColor() const {
@@ -823,11 +816,22 @@ index a86b7baa53a5d..2003fee1602fe 100644
 +  return color_utils::GetColorWithMaxContrast(*highlight_color);
 +}
 +
++SkColor ReloadButton::GetForegroundColor(ButtonState state) const {
++  if (appswap_reload_controller_ &&
++      appswap_reload_controller_->HasPendingUpdate()) {
++    if (std::optional<SkColor> highlight_color =
++            GetAppSwapUpdateHighlightColor()) {
++      return color_utils::GetColorWithMaxContrast(*highlight_color);
++    }
++  }
++  return ToolbarButton::GetForegroundColor(state);
++}
++
  void ReloadButton::ExecuteBrowserCommand(int command, int event_flags) {
    if (!command_updater_) {
      return;
 diff --git a/chrome/browser/ui/views/toolbar/reload_button.h b/chrome/browser/ui/views/toolbar/reload_button.h
-index 735b1d5f798b4..abd6bb1fac1a4 100644
+index 735b1d5f798b4..5612898f4b54c 100644
 --- a/chrome/browser/ui/views/toolbar/reload_button.h
 +++ b/chrome/browser/ui/views/toolbar/reload_button.h
 @@ -5,6 +5,9 @@
@@ -859,7 +863,7 @@ index 735b1d5f798b4..abd6bb1fac1a4 100644
    ReloadButton(const ReloadButton&) = delete;
    ReloadButton& operator=(const ReloadButton&) = delete;
    ~ReloadButton() override;
-@@ -100,6 +106,21 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
+@@ -100,6 +106,27 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
  
    void ExecuteBrowserCommand(int command, int event_flags);
  
@@ -868,6 +872,12 @@ index 735b1d5f798b4..abd6bb1fac1a4 100644
 +  // highlight color itself, which would paint "Update" in the same green as
 +  // its own pill background.
 +  std::optional<SkColor> GetHighlightTextColor() const override;
++
++  // ToolbarButton:
++  // Overridden so the reload icon itself also uses the max-contrast color
++  // while the "Update" pill is showing, instead of the normal toolbar icon
++  // color -- otherwise the icon and the text next to it wouldn't match.
++  SkColor GetForegroundColor(ButtonState state) const override;
 +
 +  // Applies appswap_reload_controller_'s current state to this button's
 +  // highlight/tooltip. Bound as appswap_reload_controller_'s change
@@ -881,7 +891,7 @@ index 735b1d5f798b4..abd6bb1fac1a4 100644
    void OnDoubleClickTimer();
    void OnStopToReloadTimer();
    void UpdateAccessibleHasPopup();
-@@ -151,6 +172,12 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
+@@ -151,6 +178,12 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
    // Not owned and might be null.
    const raw_ptr<InitialWebUIWindowMetricsManager> window_metrics_manager_;
  

@@ -1020,10 +1020,10 @@ index 0000000000000..3f7310edb06f2
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_UI_H_
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.cc b/chrome/browser/app_swap/app_swap_artifact_provider.cc
 new file mode 100644
-index 0000000000000..c0f6a8583add6
+index 0000000000000..3308209f92432
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.cc
-@@ -0,0 +1,469 @@
+@@ -0,0 +1,494 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1268,6 +1268,31 @@ index 0000000000000..c0f6a8583add6
 +  }
 +}
 +
++void AppSwapArtifactProvider::EnsureFreshThenGetOrDownload(
++    const AppSwapSource& source,
++    base::OnceCallback<void(base::FilePath)> callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if (IsExactVersion(source.version)) {
++    GetOrDownload(source, std::move(callback));
++    return;
++  }
++  CheckForNewerVersion(
++      source, base::BindOnce(
++                  [](AppSwapArtifactProvider* self, AppSwapSource source,
++                     base::OnceCallback<void(base::FilePath)> callback,
++                     std::optional<std::string> registry_version) {
++                    if (registry_version) {
++                      std::optional<std::string> cached =
++                          self->GetResolvedVersionIfCached(source);
++                      if (!cached || *cached != *registry_version) {
++                        self->InvalidateCache(source);
++                      }
++                    }
++                    self->GetOrDownload(source, std::move(callback));
++                  },
++                  base::Unretained(this), source, std::move(callback)));
++}
++
 +AppSwapPackageMetadata::AppSwapPackageMetadata() = default;
 +AppSwapPackageMetadata::AppSwapPackageMetadata(
 +    const AppSwapPackageMetadata&) = default;
@@ -1495,10 +1520,10 @@ index 0000000000000..c0f6a8583add6
 +}
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.h b/chrome/browser/app_swap/app_swap_artifact_provider.h
 new file mode 100644
-index 0000000000000..534ea641e2654
+index 0000000000000..d1614cfc56443
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.h
-@@ -0,0 +1,138 @@
+@@ -0,0 +1,158 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1549,8 +1574,28 @@ index 0000000000000..534ea641e2654
 +  // Asynchronously ensures the artifact for `source` is present and calls
 +  // `callback` with its directory (empty on failure). Must be called on the UI
 +  // thread; `callback` runs on the UI thread.
++  //
++  // For a dist-tag `source`, this trusts whatever is already cached under
++  // that tag -- it does not re-consult the registry once a tag has resolved
++  // once. Use EnsureFreshThenGetOrDownload() at points where staleness would
++  // actually be visible to the user (a navigation), not for every
++  // subresource of an already-loading page.
 +  void GetOrDownload(const AppSwapSource& source,
 +                     base::OnceCallback<void(base::FilePath)> callback);
++
++  // Same contract as GetOrDownload(), except for a dist-tag `source` it first
++  // asks the registry what the tag currently resolves to and, if that
++  // differs from what's cached, invalidates the cache so the download that
++  // follows fetches the current version instead of serving a stale one.
++  // Falls back to plain GetOrDownload() behavior (serve whatever's cached,
++  // or resolve for the first time) if the registry query itself fails, so a
++  // transient network hiccup degrades to the old behavior rather than
++  // failing the navigation. Intended for navigation-type requests (a new tab
++  // or a refresh) -- an exact-version `source` skips the registry query
++  // entirely, since there's no tag to have drifted.
++  void EnsureFreshThenGetOrDownload(
++      const AppSwapSource& source,
++      base::OnceCallback<void(base::FilePath)> callback);
 +
 +  // Returns the concrete version `source` resolved to (e.g. "1.1.0" for a
 +  // `source.version` of "latest"), if its artifact has already been
@@ -2686,10 +2731,10 @@ index 0000000000000..707f425096a7c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000000..1e7fcf67742b6
+index 0000000000000..9da0f8720aa0a
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,394 @@
+@@ -0,0 +1,406 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3071,10 +3116,22 @@ index 0000000000000..1e7fcf67742b6
 +        }
 +      }
 +
-+      AppSwapArtifactProvider::GetInstance()->GetOrDownload(
-+          source, base::BindOnce(&ServeAfterResolve, request.url,
-+                                 accepts_html, std::move(loader),
-+                                 std::move(client)));
++      // Only a navigation (not each subresource of an already-loading page)
++      // pays for a live "is this dist-tag still what I have cached" check --
++      // otherwise a single page load would fire one registry query per
++      // script/style/image it references. This is also what makes the
++      // Reload button's "Update" click just a plain reload: any refresh is a
++      // navigation, so it already re-resolves the tag here.
++      auto resolve_callback = base::BindOnce(&ServeAfterResolve, request.url,
++                                             accepts_html, std::move(loader),
++                                             std::move(client));
++      if (accepts_html) {
++        AppSwapArtifactProvider::GetInstance()->EnsureFreshThenGetOrDownload(
++            source, std::move(resolve_callback));
++      } else {
++        AppSwapArtifactProvider::GetInstance()->GetOrDownload(
++            source, std::move(resolve_callback));
++      }
 +      return;
 +    }
 +  }

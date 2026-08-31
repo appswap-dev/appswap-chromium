@@ -102,10 +102,10 @@ index 0000000000000..c1d2484f38aec
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_UTILS_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc
 new file mode 100644
-index 0000000000000..16103a9ede980
+index 0000000000000..56be2a09fcca5
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc
-@@ -0,0 +1,403 @@
+@@ -0,0 +1,413 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -129,6 +129,7 @@ index 0000000000000..16103a9ede980
 +#include "base/strings/string_util.h"
 +#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
++#include "chrome/browser/app_swap/app_swap_update_checker.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_version_utils.h"
 +#include "chrome/browser/ui/views/controls/hover_button.h"
@@ -463,7 +464,11 @@ index 0000000000000..16103a9ede980
 +      ->SetPinnedVersion(app.id, new_version);
 +  app.version = std::move(new_version);
 +
-+  AppSwapArtifactProvider::GetInstance()->GetOrDownload(
++  // EnsureFreshThenGetOrDownload rather than plain GetOrDownload: switching
++  // to a dist-tag the provider already has *some* cached resolution for
++  // (e.g. re-selecting "next" after it moved) should serve the tag's
++  // current version, not whatever was cached from an earlier resolution.
++  AppSwapArtifactProvider::GetInstance()->EnsureFreshThenGetOrDownload(
 +      app.ToSource(),
 +      base::BindOnce(
 +          [](base::WeakPtr<WebContentsWeakHandle> handle,
@@ -503,6 +508,11 @@ index 0000000000000..16103a9ede980
 +
 +void ShowAppSwapVersionPickerDialog(content::WebContents* web_contents,
 +                                    const AppSwapApp& app) {
++  // The user is explicitly looking at version/tag info right now, so this is
++  // a good moment for an out-of-band refresh of every open tab's "update
++  // available" state too, rather than waiting on the periodic timer.
++  AppSwapUpdateChecker::GetInstance()->CheckNow();
++
 +  WebContentsWeakHandle* handle =
 +      WebContentsWeakHandle::GetOrCreateForWebContents(web_contents);
 +  AppSwapArtifactProvider::GetInstance()->FetchPackageMetadata(
