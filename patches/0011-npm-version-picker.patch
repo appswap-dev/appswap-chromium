@@ -91,10 +91,10 @@ index 0000000000000..c1d2484f38aec
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_UTILS_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc
 new file mode 100644
-index 0000000000000..2e6213665362a
+index 0000000000000..2c0a2db840af1
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc
-@@ -0,0 +1,388 @@
+@@ -0,0 +1,409 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -118,6 +118,7 @@ index 0000000000000..2e6213665362a
 +#include "base/strings/string_util.h"
 +#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
++#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_version_utils.h"
 +#include "chrome/browser/ui/views/controls/hover_button.h"
 +#include "components/constrained_window/constrained_window_views.h"
@@ -438,8 +439,18 @@ index 0000000000000..2e6213665362a
 +  if (!handle) {
 +    return;
 +  }
++  content::WebContents& web_contents = handle->GetWebContents();
++
++  // Pin this specific tab to the picked version. Deliberately *not* also
++  // writing it into the app's own configured version (AppSwapAppsService::
++  // UpdateApp) -- doing so would silently change what every other,
++  // never-explicitly-pinned tab on this app resolves to as a side effect of
++  // picking a version in just one tab, defeating the point of a per-tab pin.
++  // The app's own default version is changed deliberately via appswap://apps
++  // instead.
++  AppSwapVersionPinTabHelper::GetOrCreateForWebContents(&web_contents)
++      ->SetPinnedVersion(app.id, new_version);
 +  app.version = std::move(new_version);
-+  AppSwapAppsService::GetInstance()->UpdateApp(app);
 +
 +  AppSwapArtifactProvider::GetInstance()->GetOrDownload(
 +      app.ToSource(),
@@ -463,6 +474,16 @@ index 0000000000000..2e6213665362a
 +    return;
 +  }
 +  content::WebContents& web_contents = handle->GetWebContents();
++
++  // Reflect this tab's own pin (if any) as the pre-selected row, rather
++  // than the app-wide default -- this dialog is about what THIS tab shows.
++  if (AppSwapVersionPinTabHelper* pin_helper =
++          AppSwapVersionPinTabHelper::FromWebContents(&web_contents)) {
++    if (std::optional<std::string> pinned =
++            pin_helper->GetPinnedVersion(app.id)) {
++      app.version = *pinned;
++    }
++  }
 +
 +  auto dialog_model = CreateAppSwapVersionPickerDialog(
 +      app, *metadata,

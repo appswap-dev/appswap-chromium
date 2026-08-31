@@ -41,7 +41,7 @@ index 4e23238dea745..b5fdd36434471 100644
                   ? omnibox::kChromeProductIcon
                   : omnibox::kProductChromeRefreshOldIcon);
 diff --git a/chrome/browser/ui/views/location_bar/BUILD.gn b/chrome/browser/ui/views/location_bar/BUILD.gn
-index 8ec3b04f08a10..7d65baeb63371 100644
+index 8ec3b04f08a10..62e50333a5819 100644
 --- a/chrome/browser/ui/views/location_bar/BUILD.gn
 +++ b/chrome/browser/ui/views/location_bar/BUILD.gn
 @@ -73,6 +73,7 @@ source_set("impl") {
@@ -52,6 +52,14 @@ index 8ec3b04f08a10..7d65baeb63371 100644
      "//chrome/browser/ui/dialogs",
      "//chrome/browser/ui/select_file_policy",
    ]
+@@ -143,6 +144,7 @@ source_set("impl") {
+       "//chrome/browser/ui/tabs:tabs_public",
+       "//chrome/browser/ui/tabs/saved_tab_groups",
+       "//chrome/browser/ui/user_education",
++      "//chrome/browser/ui/views/app_swap",
+       "//chrome/browser/ui/views:bubble_anchor_util_views",
+       "//chrome/browser/ui/views:content_setting_bubble_contents",
+       "//chrome/browser/ui/views:layout_provider",
 diff --git a/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc b/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
 index 2611503829f48..194d23d8c548f 100644
 --- a/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
@@ -105,20 +113,21 @@ index 2db8d679023ad..9d487eaee8729 100644
      "//components/safe_browsing/core/browser:suspicious_site_warning_allowlist",
      "//components/strings:components_branded_strings_grit",
 diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-index ce635526633ef..a91b4df3858d1 100644
+index ce635526633ef..1f6d8731aae3e 100644
 --- a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 +++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-@@ -6,6 +6,9 @@
+@@ -6,6 +6,10 @@
  
  #include <memory>
  
 +#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
++#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
  #include "chrome/browser/page_info/page_info_features.h"
  #include "chrome/browser/platform_util.h"
  #include "chrome/browser/ui/browser_window.h"
-@@ -13,9 +16,11 @@
+@@ -13,9 +17,11 @@
  #include "chrome/browser/ui/page_info/chrome_page_info_delegate.h"
  #include "chrome/browser/ui/page_info/chrome_page_info_ui_delegate.h"
  #include "chrome/browser/ui/page_info/page_info_dialog.h"
@@ -130,7 +139,7 @@ index ce635526633ef..a91b4df3858d1 100644
  #include "chrome/browser/ui/views/page_info/page_info_bubble_specification.h"
  #include "chrome/browser/ui/views/page_info/page_info_main_view.h"
  #include "chrome/browser/ui/views/page_info/page_info_merchant_trust_content_view.h"
-@@ -27,13 +32,17 @@
+@@ -27,13 +33,17 @@
  #include "components/page_info/core/features.h"
  #include "components/privacy_sandbox/privacy_sandbox_features.h"
  #include "components/strings/grit/components_branded_strings.h"
@@ -148,7 +157,7 @@ index ce635526633ef..a91b4df3858d1 100644
  #include "ui/views/layout/box_layout.h"
  #include "url/gurl.h"
  
-@@ -85,6 +94,32 @@ bool ShouldRouteToInternalBubble(const GURL& url,
+@@ -85,6 +95,43 @@ bool ShouldRouteToInternalBubble(const GURL& url,
    return IsExtensionPageInfoBubble(url, web_contents);
  }
  
@@ -159,8 +168,19 @@ index ce635526633ef..a91b4df3858d1 100644
 +// switch to a different dist-tag or exact version
 +// (ShowAppSwapVersionPickerDialog).
 +std::unique_ptr<views::View> CreateAppSwapPackageInfoView(
-+    const AppSwapApp& app,
++    AppSwapApp app,
 +    content::WebContents* web_contents) {
++  // Reflect this tab's own pinned version (if any), not the app-wide
++  // default -- a pinned tab may be showing a different version than what
++  // any other tab on the same app currently resolves to.
++  if (AppSwapVersionPinTabHelper* pin_helper =
++          AppSwapVersionPinTabHelper::FromWebContents(web_contents)) {
++    if (std::optional<std::string> pinned =
++            pin_helper->GetPinnedVersion(app.id)) {
++      app.version = *pinned;
++    }
++  }
++
 +  std::u16string version_text = base::UTF8ToUTF16(app.version);
 +  if (!AppSwapArtifactProvider::IsExactVersion(app.version)) {
 +    if (std::optional<std::string> resolved =
@@ -181,7 +201,7 @@ index ce635526633ef..a91b4df3858d1 100644
  }  // namespace
  
  // The regular PageInfoBubbleView is not supported for internal Chrome pages and
-@@ -139,7 +174,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
+@@ -139,7 +186,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
        text = IDS_PAGE_INFO_READER_MODE_PAGE;
      }
    } else {
@@ -191,7 +211,7 @@ index ce635526633ef..a91b4df3858d1 100644
    }
  
    // Title insets assume there is content (and thus have no bottom padding). Use
-@@ -225,6 +261,12 @@ PageInfoBubbleView::PageInfoBubbleView(
+@@ -225,6 +273,12 @@ PageInfoBubbleView::PageInfoBubbleView(
    page_container_ = AddChildView(
        std::make_unique<PageSwitcherView>(std::move(main_page_view)));
  

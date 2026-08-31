@@ -1,0 +1,640 @@
+diff --git a/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.cc b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.cc
+new file mode 100644
+index 0000000000000..bb9cf67caeffd
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.cc
+@@ -0,0 +1,37 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h"
++
++#include <string>
++
++#include "chrome/browser/app_swap/app_swap_profile_session_restore_util.h"
++#include "chrome/browser/app_swap/app_swap_profiles_service.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_process_host.h"
++#include "content/public/browser/storage_partition.h"
++#include "content/public/browser/storage_partition_config.h"
++#include "content/public/browser/web_contents.h"
++
++AppSwapProfilePinTabHelper::AppSwapProfilePinTabHelper(
++    content::WebContents* web_contents)
++    : content::WebContentsObserver(web_contents),
++      content::WebContentsUserData<AppSwapProfilePinTabHelper>(
++          *web_contents) {}
++
++AppSwapProfilePinTabHelper::~AppSwapProfilePinTabHelper() = default;
++
++void AppSwapProfilePinTabHelper::PrimaryPageChanged(content::Page& page) {
++  content::WebContents* contents = web_contents();
++  const content::StoragePartitionConfig& config =
++      contents->GetPrimaryMainFrame()->GetProcess()->GetStoragePartition()->GetConfig();
++
++  std::string profile_id;
++  if (config.partition_domain() == kAppSwapProfilePartitionDomain) {
++    profile_id = config.partition_name();
++  }
++  PersistAppSwapProfilePinning(contents, profile_id);
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapProfilePinTabHelper);
+diff --git a/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h
+new file mode 100644
+index 0000000000000..d35f326eb2226
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h
+@@ -0,0 +1,51 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_PIN_TAB_HELPER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_PIN_TAB_HELPER_H_
++
++#include "content/public/browser/web_contents_observer.h"
++#include "content/public/browser/web_contents_user_data.h"
++
++namespace content {
++class Page;
++}  // namespace content
++
++// Watches this tab's committed navigations and persists which AppSwap
++// Profile (if any) it's actually running under via
++// PersistAppSwapProfilePinning(), so a future session restore can re-pin it
++// to the same Profile instead of falling back to whatever Profile happens
++// to be globally active at restore time.
++//
++// This covers every way a tab can end up pinned to a Profile's storage
++// partition: an explicit switch via SwitchActiveAppSwapProfile(), a fresh
++// tab that gets ambiently pinned to whatever Profile is currently active at
++// creation time (see ChromeContentBrowserClient::GetStoragePartitionConfigForSite),
++// and unpinning back to default storage via SwapWebContentsToDefaultPartition().
++// A tab's fixed storage partition can't change without replacing its
++// WebContents (see SiteInstance::CreateForFixedStoragePartition), so it's
++// safe -- and simplest -- to just re-derive and persist the pin from
++// scratch on every commit rather than track each of those call sites
++// individually.
++class AppSwapProfilePinTabHelper
++    : public content::WebContentsObserver,
++      public content::WebContentsUserData<AppSwapProfilePinTabHelper> {
++ public:
++  ~AppSwapProfilePinTabHelper() override;
++
++  AppSwapProfilePinTabHelper(const AppSwapProfilePinTabHelper&) = delete;
++  AppSwapProfilePinTabHelper& operator=(const AppSwapProfilePinTabHelper&) =
++      delete;
++
++ private:
++  friend class content::WebContentsUserData<AppSwapProfilePinTabHelper>;
++  explicit AppSwapProfilePinTabHelper(content::WebContents* web_contents);
++
++  // content::WebContentsObserver:
++  void PrimaryPageChanged(content::Page& page) override;
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_PIN_TAB_HELPER_H_
+diff --git a/chrome/browser/app_swap/app_swap_profile_removal_util.cc b/chrome/browser/app_swap/app_swap_profile_removal_util.cc
+new file mode 100644
+index 0000000000000..dc45b2ed3fe47
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_profile_removal_util.cc
+@@ -0,0 +1,112 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_profile_removal_util.h"
++
++#include <memory>
++#include <utility>
++
++#include "base/functional/callback_helpers.h"
++#include "chrome/browser/app_swap/app_swap_profiles_service.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "content/public/browser/browser_context.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_process_host.h"
++#include "content/public/browser/site_instance.h"
++#include "content/public/browser/storage_partition.h"
++#include "content/public/browser/storage_partition_config.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/common/referrer.h"
++#include "third_party/blink/public/common/storage_key/storage_key.h"
++#include "ui/base/page_transition_types.h"
++#include "url/gurl.h"
++
++namespace {
++
++// Rebuilds `web_contents`'s tab with a SiteInstance for the browser's
++// ordinary default (unpartitioned) storage, reloading the current URL in
++// place. Deliberately *not* SiteInstance::CreateForFixedStoragePartition()
++// (the mechanism SwitchActiveAppSwapProfile() uses to pin a tab to a named
++// profile's partition) -- that API CHECK-fails on a default
++// StoragePartitionConfig, since "fix this tab to a partition" doesn't make
++// sense for the one partition every unpinned tab already resolves to.
++// CreateForURL() is the ordinary, no-pinning factory used for any regular
++// navigation.
++void SwapWebContentsToDefaultPartition(BrowserWindowInterface* browser,
++                                       content::WebContents* web_contents) {
++  TabStripModel* tab_strip_model = browser->GetTabStripModel();
++  content::BrowserContext* browser_context = web_contents->GetBrowserContext();
++  const GURL url = web_contents->GetLastCommittedURL();
++  scoped_refptr<content::SiteInstance> site_instance =
++      content::SiteInstance::CreateForURL(browser_context, url);
++
++  content::WebContents::CreateParams create_params(browser_context,
++                                                    site_instance);
++  std::unique_ptr<content::WebContents> new_contents =
++      content::WebContents::Create(create_params);
++  content::WebContents* raw_new_contents = new_contents.get();
++
++  // Replaces `web_contents` at its current tab-strip index in one call,
++  // preserving position/active state, and hands back the old contents by
++  // unique_ptr.
++  std::unique_ptr<content::WebContents> old_contents =
++      tab_strip_model->DiscardWebContents(web_contents, std::move(new_contents));
++
++  raw_new_contents->GetController().LoadURL(
++      old_contents->GetLastCommittedURL(), content::Referrer(),
++      ui::PAGE_TRANSITION_RELOAD, std::string());
++
++  old_contents.reset();  // Synchronous destroy -- safe for the same reason
++                         // documented on SwitchActiveAppSwapProfile().
++}
++
++}  // namespace
++
++void SwitchTabsOffAppSwapProfile(const std::string& profile_id) {
++  GlobalBrowserCollection::GetInstance()->ForEach(
++      [&](BrowserWindowInterface* browser) {
++        TabStripModel* tab_strip_model = browser->GetTabStripModel();
++        for (int i = 0; i < tab_strip_model->count(); ++i) {
++          content::WebContents* web_contents =
++              tab_strip_model->GetWebContentsAt(i);
++
++          // Read the tab's *actual* assigned partition directly, the same
++          // way AppSwapProfileTabStripButton does -- this is the only
++          // reliable source of truth for what profile (if any) a given tab
++          // is really running under.
++          content::StoragePartition* partition =
++              web_contents->GetPrimaryMainFrame()
++                  ->GetProcess()
++                  ->GetStoragePartition();
++          const content::StoragePartitionConfig& config =
++              partition->GetConfig();
++          if (config.partition_domain() != kAppSwapProfilePartitionDomain ||
++              config.partition_name() != profile_id) {
++            continue;
++          }
++
++          SwapWebContentsToDefaultPartition(browser, web_contents);
++        }
++        return true;
++      });
++}
++
++void ClearAppSwapProfileData(const std::string& profile_id,
++                             content::BrowserContext* browser_context) {
++  content::StoragePartitionConfig config =
++      content::StoragePartitionConfig::Create(
++          browser_context, kAppSwapProfilePartitionDomain,
++          /*partition_name=*/profile_id, /*in_memory=*/false);
++  content::StoragePartition* partition =
++      browser_context->GetStoragePartition(config, /*can_create=*/false);
++  if (!partition) {
++    return;  // Never actually used -- nothing on disk to clear.
++  }
++  partition->ClearData(content::StoragePartition::REMOVE_DATA_MASK_ALL,
++                       blink::StorageKey(), base::Time(), base::Time::Max(),
++                       base::DoNothing());
++}
+diff --git a/chrome/browser/app_swap/app_swap_profile_removal_util.h b/chrome/browser/app_swap/app_swap_profile_removal_util.h
+new file mode 100644
+index 0000000000000..c786acf9f0c31
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_profile_removal_util.h
+@@ -0,0 +1,30 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_REMOVAL_UTIL_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_REMOVAL_UTIL_H_
++
++#include <string>
++
++namespace content {
++class BrowserContext;
++}  // namespace content
++
++// Reassigns every currently open tab running under `profile_id`'s storage
++// partition back to the browser's default (unpartitioned) storage
++// partition, reloading each tab in place. Call this before removing a
++// Profile so no open tab is left pointing at a partition that's about to be
++// cleared out from under it.
++void SwitchTabsOffAppSwapProfile(const std::string& profile_id);
++
++// Clears all on-disk data (cookies, local storage, IndexedDB, cache, etc.)
++// for `profile_id`'s storage partition within `browser_context`. AppSwap
++// Profile partitions live within a single Chrome profile, so any currently
++// available BrowserContext works. Call SwitchTabsOffAppSwapProfile() first
++// so nothing is still actively using the partition while it's cleared.
++// Asynchronous; does not wait for the clear to finish.
++void ClearAppSwapProfileData(const std::string& profile_id,
++                             content::BrowserContext* browser_context);
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_REMOVAL_UTIL_H_
+diff --git a/chrome/browser/app_swap/app_swap_profile_session_restore_util.cc b/chrome/browser/app_swap/app_swap_profile_session_restore_util.cc
+new file mode 100644
+index 0000000000000..7ce8b91f22882
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_profile_session_restore_util.cc
+@@ -0,0 +1,53 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_profile_session_restore_util.h"
++
++#include <utility>
++
++#include "chrome/browser/app_swap/app_swap_profiles_service.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/sessions/session_service.h"
++#include "chrome/browser/sessions/session_service_factory.h"
++#include "components/sessions/content/session_tab_helper.h"
++#include "content/public/browser/site_instance.h"
++#include "content/public/browser/storage_partition_config.h"
++#include "content/public/browser/web_contents.h"
++#include "url/gurl.h"
++
++void PersistAppSwapProfilePinning(content::WebContents* web_contents,
++                                  const std::string& profile_id) {
++  Profile* profile =
++      Profile::FromBrowserContext(web_contents->GetBrowserContext());
++  SessionService* session_service =
++      SessionServiceFactory::GetForProfile(profile);
++  if (!session_service) {
++    return;
++  }
++  SessionID window_id =
++      sessions::SessionTabHelper::IdForWindowContainingTab(web_contents);
++  SessionID tab_id = sessions::SessionTabHelper::IdForTab(web_contents);
++  if (!window_id.is_valid() || !tab_id.is_valid()) {
++    return;
++  }
++  session_service->AddTabExtraData(window_id, tab_id,
++                                   kAppSwapProfileExtraDataKey, profile_id);
++}
++
++scoped_refptr<content::SiteInstance>
++BuildAppSwapPinnedSiteInstanceFromExtraData(
++    Profile* profile,
++    const GURL& url,
++    const std::map<std::string, std::string>& extra_data) {
++  auto it = extra_data.find(kAppSwapProfileExtraDataKey);
++  if (it == extra_data.end() || it->second.empty()) {
++    return nullptr;
++  }
++  content::StoragePartitionConfig partition_config =
++      content::StoragePartitionConfig::Create(
++          profile, kAppSwapProfilePartitionDomain,
++          /*partition_name=*/it->second, /*in_memory=*/false);
++  return content::SiteInstance::CreateForFixedStoragePartition(
++      profile, url, partition_config);
++}
+diff --git a/chrome/browser/app_swap/app_swap_profile_session_restore_util.h b/chrome/browser/app_swap/app_swap_profile_session_restore_util.h
+new file mode 100644
+index 0000000000000..3242764f21d98
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_profile_session_restore_util.h
+@@ -0,0 +1,47 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_SESSION_RESTORE_UTIL_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_SESSION_RESTORE_UTIL_H_
++
++#include <map>
++#include <string>
++
++#include "base/memory/scoped_refptr.h"
++
++class GURL;
++class Profile;
++
++namespace content {
++class SiteInstance;
++class WebContents;
++}  // namespace content
++
++// Key used in sessions::SessionTab::extra_data (via
++// SessionService::AddTabExtraData) to record which AppSwap Profile (if any)
++// a tab is pinned to. Session restore recreates each tab's WebContents from
++// scratch, so without this the tab's storage partition would fall back to
++// whatever Profile is globally "active" at restore time instead of the one
++// it actually had before shutdown -- see BuildAppSwapPinnedSiteInstanceFromExtraData.
++inline constexpr char kAppSwapProfileExtraDataKey[] = "appswap.profile_id";
++
++// Records (or clears, if `profile_id` is empty) which AppSwap Profile
++// `web_contents`'s tab is pinned to, so a future session restore can re-pin
++// it to the same Profile. Call this any time a tab's fixed storage
++// partition changes: after switching it to a Profile, and after moving it
++// back to default storage (with an empty `profile_id`) when its Profile is
++// removed.
++void PersistAppSwapProfilePinning(content::WebContents* web_contents,
++                                  const std::string& profile_id);
++
++// Returns a SiteInstance fixed to the AppSwap Profile recorded for `url` in
++// `extra_data`, or nullptr if `extra_data` doesn't name one (in which case
++// the caller should fall back to ordinary SiteInstance selection).
++scoped_refptr<content::SiteInstance>
++BuildAppSwapPinnedSiteInstanceFromExtraData(
++    Profile* profile,
++    const GURL& url,
++    const std::map<std::string, std::string>& extra_data);
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_SESSION_RESTORE_UTIL_H_
+diff --git a/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc
+new file mode 100644
+index 0000000000000..204df89a80747
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc
+@@ -0,0 +1,116 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
++
++#include <utility>
++
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/values.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/sessions/session_service.h"
++#include "chrome/browser/sessions/session_service_factory.h"
++#include "components/sessions/content/session_tab_helper.h"
++#include "content/public/browser/web_contents.h"
++
++namespace {
++
++constexpr char kAppSwapVersionPinsExtraDataKey[] = "appswap.version_pins";
++
++std::string EncodePins(const std::map<std::string, std::string>& pins) {
++  base::DictValue dict;
++  for (const auto& [app_id, version] : pins) {
++    dict.Set(app_id, version);
++  }
++  std::string json;
++  base::JSONWriter::Write(dict, &json);
++  return json;
++}
++
++std::map<std::string, std::string> DecodePins(const std::string& json) {
++  std::map<std::string, std::string> pins;
++  std::optional<base::DictValue> dict =
++      base::JSONReader::ReadDict(json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
++  if (!dict) {
++    return pins;
++  }
++  for (auto [app_id, value] : *dict) {
++    if (const std::string* version = value.GetIfString()) {
++      pins[app_id] = *version;
++    }
++  }
++  return pins;
++}
++
++}  // namespace
++
++AppSwapVersionPinTabHelper::AppSwapVersionPinTabHelper(
++    content::WebContents* web_contents)
++    : content::WebContentsObserver(web_contents),
++      content::WebContentsUserData<AppSwapVersionPinTabHelper>(
++          *web_contents) {}
++
++AppSwapVersionPinTabHelper::~AppSwapVersionPinTabHelper() = default;
++
++void AppSwapVersionPinTabHelper::SetPinnedVersion(const std::string& app_id,
++                                                   const std::string& version) {
++  if (version.empty()) {
++    pinned_versions_.erase(app_id);
++  } else {
++    pinned_versions_[app_id] = version;
++  }
++  Persist();
++}
++
++std::optional<std::string> AppSwapVersionPinTabHelper::GetPinnedVersion(
++    const std::string& app_id) const {
++  auto it = pinned_versions_.find(app_id);
++  if (it == pinned_versions_.end()) {
++    return std::nullopt;
++  }
++  return it->second;
++}
++
++void AppSwapVersionPinTabHelper::PrimaryPageChanged(content::Page& page) {
++  // Re-persist on every commit (not just when a pin actually changes) so a
++  // tab whose pins were populated via RestoreFromExtraData -- rather than a
++  // direct SetPinnedVersion() call -- gets written into *this* session's own
++  // SessionService log too, keeping the pin alive across further restarts.
++  // A no-op write when `pinned_versions_` is empty and was never restored.
++  Persist();
++}
++
++// static
++void AppSwapVersionPinTabHelper::RestoreFromExtraData(
++    content::WebContents* web_contents,
++    const std::map<std::string, std::string>& extra_data) {
++  auto it = extra_data.find(kAppSwapVersionPinsExtraDataKey);
++  if (it == extra_data.end() || it->second.empty()) {
++    return;
++  }
++  AppSwapVersionPinTabHelper* helper =
++      GetOrCreateForWebContents(web_contents);
++  helper->pinned_versions_ = DecodePins(it->second);
++}
++
++void AppSwapVersionPinTabHelper::Persist() {
++  content::WebContents* contents = web_contents();
++  Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
++  SessionService* session_service = SessionServiceFactory::GetForProfile(profile);
++  if (!session_service) {
++    return;
++  }
++  SessionID window_id =
++      sessions::SessionTabHelper::IdForWindowContainingTab(contents);
++  SessionID tab_id = sessions::SessionTabHelper::IdForTab(contents);
++  if (!window_id.is_valid() || !tab_id.is_valid()) {
++    return;
++  }
++  session_service->AddTabExtraData(window_id, tab_id,
++                                   kAppSwapVersionPinsExtraDataKey,
++                                   EncodePins(pinned_versions_));
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapVersionPinTabHelper);
+diff --git a/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h
+new file mode 100644
+index 0000000000000..dd4c1e22699a5
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h
+@@ -0,0 +1,71 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_PIN_TAB_HELPER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_PIN_TAB_HELPER_H_
++
++#include <map>
++#include <optional>
++#include <string>
++
++#include "content/public/browser/web_contents_observer.h"
++#include "content/public/browser/web_contents_user_data.h"
++
++namespace content {
++class Page;
++}  // namespace content
++
++// Lets a single tab pin a specific version of an AppSwap app, independent of
++// the app's own globally-configured version. Two tabs on the same app can
++// each be pinned to a different version at once this way, mirroring how
++// AppSwap Profiles let different tabs use different storage identities.
++//
++// Persisted per-tab via SessionService::AddTabExtraData so a pin survives a
++// session restore -- see RestoreFromExtraData(). Re-persisted on every
++// navigation commit (PrimaryPageChanged), not just when SetPinnedVersion()
++// is called directly: a restored tab's pins are set via RestoreFromExtraData
++// rather than SetPinnedVersion, and that data needs to be written back into
++// *this* session's own SessionService log too, or it would only survive a
++// single restart -- a restored tab's pin would never get re-persisted for
++// the *next* restart otherwise.
++class AppSwapVersionPinTabHelper
++    : public content::WebContentsObserver,
++      public content::WebContentsUserData<AppSwapVersionPinTabHelper> {
++ public:
++  ~AppSwapVersionPinTabHelper() override;
++
++  AppSwapVersionPinTabHelper(const AppSwapVersionPinTabHelper&) = delete;
++  AppSwapVersionPinTabHelper& operator=(const AppSwapVersionPinTabHelper&) =
++      delete;
++
++  // Pins `app_id` to `version` for this tab. An empty `version` clears the
++  // pin (the tab then falls back to the app's own configured version).
++  void SetPinnedVersion(const std::string& app_id, const std::string& version);
++
++  // Returns the version pinned for `app_id` on this tab, or nullopt if this
++  // tab has no pin for that app.
++  std::optional<std::string> GetPinnedVersion(const std::string& app_id) const;
++
++  // Rebuilds this tab's version pins from persisted session-restore extra
++  // data. Call before the tab's first navigation request, mirroring
++  // send_tab_to_self::SendTabToSelfActivationTracker::RestoreFromExtraData().
++  static void RestoreFromExtraData(
++      content::WebContents* web_contents,
++      const std::map<std::string, std::string>& extra_data);
++
++ private:
++  friend class content::WebContentsUserData<AppSwapVersionPinTabHelper>;
++  explicit AppSwapVersionPinTabHelper(content::WebContents* web_contents);
++
++  // content::WebContentsObserver:
++  void PrimaryPageChanged(content::Page& page) override;
++
++  void Persist();
++
++  std::map<std::string, std::string> pinned_versions_;  // app_id -> version
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_PIN_TAB_HELPER_H_
+diff --git a/chrome/browser/ui/browser_tabrestore.cc b/chrome/browser/ui/browser_tabrestore.cc
+index fa43dd782cdb8..cdc2113644798 100644
+--- a/chrome/browser/ui/browser_tabrestore.cc
++++ b/chrome/browser/ui/browser_tabrestore.cc
+@@ -4,12 +4,15 @@
+ 
+ #include "chrome/browser/ui/browser_tabrestore.h"
+ 
++#include <algorithm>
+ #include <map>
+ #include <memory>
+ #include <utility>
+ 
+ #include "base/containers/span.h"
+ #include "build/build_config.h"
++#include "chrome/browser/app_swap/app_swap_profile_session_restore_util.h"
++#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
+ #include "chrome/browser/apps/app_service/web_contents_app_id_utils.h"
+ #include "chrome/browser/glic/glic_tab_restore_helper.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -76,6 +79,23 @@ std::unique_ptr<WebContents> CreateRestoredTab(
+       WebContents::CreateParams::kNoRendererProcess;
+   create_params.last_active_time_ticks = last_active_time_ticks;
+   create_params.last_active_time = last_active_time;
++
++  // If this tab was pinned to an AppSwap Profile's storage partition before
++  // shutdown, restore it to that same partition explicitly. Left unset,
++  // SiteInstance selection falls back to whatever AppSwap Profile happens to
++  // be globally "active" right now for every restored tab alike, losing the
++  // fact that different tabs may have been pinned to different Profiles.
++  if (!navigations.empty()) {
++    const size_t navigation_index = static_cast<size_t>(std::clamp(
++        selected_navigation, 0, static_cast<int>(navigations.size()) - 1));
++    if (scoped_refptr<content::SiteInstance> pinned_site_instance =
++            BuildAppSwapPinnedSiteInstanceFromExtraData(
++                browser->GetProfile(),
++                navigations[navigation_index].virtual_url(), extra_data)) {
++      create_params.site_instance = std::move(pinned_site_instance);
++    }
++  }
++
+   std::unique_ptr<WebContents> web_contents =
+       WebContents::CreateWithSessionStorage(create_params,
+                                             session_storage_namespace_map);
+@@ -85,6 +105,8 @@ std::unique_ptr<WebContents> CreateRestoredTab(
+   glic::RestoreGlicStateFromExtraData(web_contents.get(), extra_data);
+   send_tab_to_self::SendTabToSelfActivationTracker::RestoreFromExtraData(
+       web_contents.get(), extra_data);
++  AppSwapVersionPinTabHelper::RestoreFromExtraData(web_contents.get(),
++                                                   extra_data);
+ 
+   std::vector<std::unique_ptr<NavigationEntry>> entries =
+       ContentSerializedNavigationBuilder::ToNavigationEntries(
+diff --git a/chrome/browser/ui/tab_helpers.cc b/chrome/browser/ui/tab_helpers.cc
+index dcf66fff381ea..c9b8a591734fe 100644
+--- a/chrome/browser/ui/tab_helpers.cc
++++ b/chrome/browser/ui/tab_helpers.cc
+@@ -15,6 +15,8 @@
+ #include "base/time/default_tick_clock.h"
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
++#include "chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
+ #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+ #include "chrome/browser/breadcrumbs/breadcrumb_manager_tab_helper.h"
+ #include "chrome/browser/browser_process.h"
+@@ -446,6 +448,8 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents,
+   content_settings::PageSpecificContentSettings::CreateForWebContents(
+       web_contents,
+       std::make_unique<PageSpecificContentSettingsDelegate>(web_contents));
++  AppSwapProfilePinTabHelper::CreateForWebContents(web_contents);
++  AppSwapVersionPinTabHelper::CreateForWebContents(web_contents);
+   CoreTabHelper::CreateForWebContents(web_contents);
+   ExternalProtocolObserver::CreateForWebContents(web_contents);
+   favicon::CreateContentFaviconDriverForWebContents(web_contents);

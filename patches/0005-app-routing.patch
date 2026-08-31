@@ -12,10 +12,10 @@ index 2a3958f78ddb6..4e6f3b49ffa24 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..8e2180a766f2b
+index 0000000000000..ab9875bf8f8bc
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,59 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -28,6 +28,12 @@ index 0000000000000..8e2180a766f2b
 +    "app_swap_apps_ui.h",
 +    "app_swap_artifact_provider.cc",
 +    "app_swap_artifact_provider.h",
++    "app_swap_profile_pin_tab_helper.cc",
++    "app_swap_profile_pin_tab_helper.h",
++    "app_swap_profile_removal_util.cc",
++    "app_swap_profile_removal_util.h",
++    "app_swap_profile_session_restore_util.cc",
++    "app_swap_profile_session_restore_util.h",
 +    "app_swap_profiles_service.cc",
 +    "app_swap_profiles_service.h",
 +    "app_swap_profiles_ui.cc",
@@ -39,6 +45,8 @@ index 0000000000000..8e2180a766f2b
 +    "app_swap_route_matcher.cc",
 +    "app_swap_route_matcher.h",
 +    "app_swap_source.h",
++    "app_swap_version_pin_tab_helper.cc",
++    "app_swap_version_pin_tab_helper.h",
 +    "app_swap_version_utils.cc",
 +    "app_swap_version_utils.h",
 +    "app_swap_url_loader_factory.cc",
@@ -50,6 +58,10 @@ index 0000000000000..8e2180a766f2b
 +    "//chrome/app/theme:theme_resources",
 +    "//chrome/browser/net",
 +    "//chrome/browser/profiles",
++    "//chrome/browser/sessions",
++    "//chrome/browser/ui/browser_window",
++    "//chrome/browser/ui/tabs",
++    "//components/sessions",
 +    "//chrome/common",
 +    "//content/public/browser",
 +    "//mojo/public/cpp/bindings",
@@ -57,6 +69,7 @@ index 0000000000000..8e2180a766f2b
 +    "//net",
 +    "//services/network/public/cpp",
 +    "//services/network/public/mojom",
++    "//third_party/blink/public/common",
 +    "//third_party/zlib/google:compression_utils",
 +    "//ui/base",
 +    "//url",
@@ -2612,10 +2625,10 @@ index 0000000000000..707f425096a7c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000000..1c82d28e6fd0f
+index 0000000000000..5df194682e5dd
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,365 @@
+@@ -0,0 +1,392 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2641,6 +2654,9 @@ index 0000000000000..1c82d28e6fd0f
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
 +#include "chrome/browser/app_swap/app_swap_routes_service.h"
++#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/web_contents.h"
 +#include "mojo/public/cpp/system/data_pipe.h"
 +#include "mojo/public/cpp/system/data_pipe_producer.h"
 +#include "mojo/public/cpp/system/file_data_source.h"
@@ -2776,6 +2792,13 @@ index 0000000000000..1c82d28e6fd0f
 +    head->headers->AddHeader(net::HttpRequestHeaders::kContentType, mime_type);
 +    head->headers->AddHeader(net::HttpRequestHeaders::kContentLength,
 +                             base::NumberToString(info.size));
++    // Without this, a URL's response can be reused from Blink's in-memory
++    // resource cache (shared by same-process, same-origin tabs -- e.g. two
++    // tabs on the same route that aren't isolated by an AppSwap Profile
++    // partition) even after a different app version is pinned/resolved for
++    // this request, silently serving the wrong version's bytes.
++    head->headers->AddHeader(net::HttpRequestHeaders::kCacheControl,
++                             "no-store");
 +    head->content_length = info.size;
 +    content_length_ = info.size;
 +    // Headers are trusted (fetched by us and/or read from local disk), so
@@ -2917,14 +2940,16 @@ index 0000000000000..1c82d28e6fd0f
 +
 +  auto [receiver, remote] = builder.Append();
 +  base::MakeSelfDeleting<AppSwapProxyingURLLoaderFactory>(
-+      std::move(receiver), std::move(remote));
++      std::move(receiver), std::move(remote), frame->GetGlobalId());
 +}
 +
 +AppSwapProxyingURLLoaderFactory::AppSwapProxyingURLLoaderFactory(
 +    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
 +    mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
++    content::GlobalRenderFrameHostId frame_id,
 +    base::SelfDeletingPassKey pass_key)
-+    : network::SelfDeletingURLLoaderFactory(std::move(receiver), pass_key) {
++    : network::SelfDeletingURLLoaderFactory(std::move(receiver), pass_key),
++      frame_id_(frame_id) {
 +  target_factory_.Bind(std::move(target_factory));
 +  target_factory_.set_disconnect_handler(base::BindOnce(
 +      &AppSwapProxyingURLLoaderFactory::OnTargetFactoryError,
@@ -2968,10 +2993,25 @@ index 0000000000000..1c82d28e6fd0f
 +        accepts_html = true;
 +      }
 +
++      AppSwapSource source = app->ToSource();
++      if (content::RenderFrameHost* frame =
++              content::RenderFrameHost::FromID(frame_id_)) {
++        if (content::WebContents* web_contents =
++                content::WebContents::FromRenderFrameHost(frame)) {
++          if (AppSwapVersionPinTabHelper* pin_helper =
++                  AppSwapVersionPinTabHelper::FromWebContents(web_contents)) {
++            if (std::optional<std::string> pinned_version =
++                    pin_helper->GetPinnedVersion(app->id)) {
++              source.version = *pinned_version;
++            }
++          }
++        }
++      }
++
 +      AppSwapArtifactProvider::GetInstance()->GetOrDownload(
-+          app->ToSource(),
-+          base::BindOnce(&ServeAfterResolve, request.url, accepts_html,
-+                         std::move(loader), std::move(client)));
++          source, base::BindOnce(&ServeAfterResolve, request.url,
++                                 accepts_html, std::move(loader),
++                                 std::move(client)));
 +      return;
 +    }
 +  }
@@ -2983,10 +3023,10 @@ index 0000000000000..1c82d28e6fd0f
 +}
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.h b/chrome/browser/app_swap/app_swap_url_loader_factory.h
 new file mode 100644
-index 0000000000000..e8b682b075fc2
+index 0000000000000..4b82b1280f454
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.h
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,61 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2994,6 +3034,7 @@ index 0000000000000..e8b682b075fc2
 +#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 +#define CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 +
++#include "content/public/browser/global_routing_id.h"
 +#include "mojo/public/cpp/bindings/pending_receiver.h"
 +#include "mojo/public/cpp/bindings/pending_remote.h"
 +#include "mojo/public/cpp/bindings/remote.h"
@@ -3015,6 +3056,7 @@ index 0000000000000..e8b682b075fc2
 +  AppSwapProxyingURLLoaderFactory(
 +      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
 +      mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
++      content::GlobalRenderFrameHostId frame_id,
 +      base::SelfDeletingPassKey pass_key);
 +  AppSwapProxyingURLLoaderFactory(const AppSwapProxyingURLLoaderFactory&) =
 +      delete;
@@ -3037,6 +3079,12 @@ index 0000000000000..e8b682b075fc2
 +  void OnTargetFactoryError();
 +
 +  mojo::Remote<network::mojom::URLLoaderFactory> target_factory_;
++
++  // The frame this factory serves requests for. Looked up fresh (rather than
++  // held as a raw content::RenderFrameHost*) since a RenderFrameHost can
++  // outlive or be swapped independently of this factory's lifetime; an ID
++  // that no longer resolves just means "no per-tab override applies".
++  const content::GlobalRenderFrameHostId frame_id_;
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_

@@ -1,6 +1,6 @@
 diff --git a/chrome/browser/app_swap/app_swap_profiles_service.cc b/chrome/browser/app_swap/app_swap_profiles_service.cc
 new file mode 100644
-index 0000000000000..00576d9591c72
+index 0000000000000..46140c7073acf
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profiles_service.cc
 @@ -0,0 +1,237 @@
@@ -30,21 +30,18 @@ index 0000000000000..00576d9591c72
 +base::DictValue ProfileToDict(const AppSwapProfile& profile) {
 +  base::DictValue dict;
 +  dict.Set("id", profile.id);
-+  dict.Set("app_id", profile.app_id);
 +  dict.Set("name", profile.name);
 +  return dict;
 +}
 +
 +std::optional<AppSwapProfile> ProfileFromDict(const base::DictValue& dict) {
 +  const std::string* id = dict.FindString("id");
-+  const std::string* app_id = dict.FindString("app_id");
 +  const std::string* name = dict.FindString("name");
-+  if (!id || !app_id || !name) {
++  if (!id || !name) {
 +    return std::nullopt;
 +  }
 +  AppSwapProfile profile;
 +  profile.id = *id;
-+  profile.app_id = *app_id;
 +  profile.name = *name;
 +  return profile;
 +}
@@ -207,6 +204,9 @@ index 0000000000000..00576d9591c72
 +  for (auto it = profiles_.begin(); it != profiles_.end(); ++it) {
 +    if (it->id == id) {
 +      profiles_.erase(it);
++      if (active_profile_id_ == id) {
++        active_profile_id_.reset();
++      }
 +      ScheduleSave();
 +      return;
 +    }
@@ -243,10 +243,10 @@ index 0000000000000..00576d9591c72
 +}
 diff --git a/chrome/browser/app_swap/app_swap_profiles_service.h b/chrome/browser/app_swap/app_swap_profiles_service.h
 new file mode 100644
-index 0000000000000..658b218da49c4
+index 0000000000000..f5787f39a1337
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profiles_service.h
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,92 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -274,16 +274,11 @@ index 0000000000000..658b218da49c4
 +inline constexpr char kAppSwapProfilePartitionDomain[] = "appswap-profile";
 +
 +// A configured profile: an isolated storage identity. Profiles are a global
-+// browsing identity, not restricted to any one app -- at most one is
-+// "active" for the whole browser at a time (see GetActiveProfileIdIfLoaded),
-+// and once active it applies to every http/https navigation, not just the
-+// app it happens to be organized under.
++// browsing identity, not tied to any app -- at most one is "active" for the
++// whole browser at a time (see GetActiveProfileIdIfLoaded), and once active
++// it applies to every http/https navigation.
 +struct AppSwapProfile {
-+  std::string id;       // GUID, generated on creation.
-+  std::string app_id;   // -> AppSwapApp.id, the app this profile was created
-+                         // under -- used only to group it in the UI (e.g. the
-+                         // Profiles page, the tab-strip switcher menu); does
-+                         // not restrict where the profile can be used.
++  std::string id;    // GUID, generated on creation.
 +  std::string name;
 +};
 +
@@ -346,10 +341,10 @@ index 0000000000000..658b218da49c4
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILES_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_profiles_ui.cc b/chrome/browser/app_swap/app_swap_profiles_ui.cc
 new file mode 100644
-index 0000000000000..d53d00b7604d1
+index 0000000000000..ec8edcc726ec9
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profiles_ui.cc
-@@ -0,0 +1,630 @@
+@@ -0,0 +1,547 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -365,7 +360,7 @@ index 0000000000000..d53d00b7604d1
 +#include "base/memory/ref_counted_memory.h"
 +#include "base/memory/weak_ptr.h"
 +#include "base/values.h"
-+#include "chrome/browser/app_swap/app_swap_apps_service.h"
++#include "chrome/browser/app_swap/app_swap_profile_removal_util.h"
 +#include "chrome/browser/app_swap/app_swap_profiles_service.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/grit/theme_resources.h"
@@ -510,20 +505,6 @@ index 0000000000000..d53d00b7604d1
 +  }
 +  .star-btn.active { color: var(--star); }
 +  .star-btn:hover { color: var(--star); }
-+  .meta { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-+  .badge {
-+    font-size: 0.72rem;
-+    padding: 0.15rem 0.55rem;
-+    border-radius: 999px;
-+    background: var(--bg);
-+    border: 1px solid var(--border);
-+    color: var(--text-muted);
-+    max-width: 100%;
-+    overflow: hidden;
-+    text-overflow: ellipsis;
-+    white-space: nowrap;
-+  }
-+  .badge.missing { color: var(--danger); border-color: var(--danger); background: var(--danger-bg); }
 +  .card-actions {
 +    margin-top: auto;
 +    display: flex;
@@ -625,11 +606,7 @@ index 0000000000000..d53d00b7604d1
 +        <label for="name">Name</label>
 +        <input id="name" placeholder="Client" required>
 +      </div>
-+      <div class="field">
-+        <label for="appId">App</label>
-+        <select id="appId" required></select>
-+      </div>
-+      <div class="preview" id="preview"></div>
++      <div class="preview">An isolated identity — its own cookies, local storage, and cache — that you can switch to on any site.</div>
 +      <div class="dialog-actions">
 +        <button class="btn-secondary" id="cancel" type="button">Cancel</button>
 +        <button class="btn-primary" id="save" type="submit">Add profile</button>
@@ -639,32 +616,9 @@ index 0000000000000..d53d00b7604d1
 +
 +  <script>
 +    let editingId = null;
-+    let apps = [];
 +    let profiles = [];
 +    const field = (id) => document.getElementById(id);
 +    const dialog = field('dialog');
-+
-+    function appById(id) {
-+      return apps.find((app) => app.id === id);
-+    }
-+
-+    function renderAppOptions() {
-+      const select = field('appId');
-+      select.replaceChildren();
-+      for (const app of apps) {
-+        const option = document.createElement('option');
-+        option.value = app.id;
-+        option.textContent = app.title + ' (' + app.package + ')';
-+        select.appendChild(option);
-+      }
-+    }
-+
-+    function updatePreview() {
-+      const app = appById(field('appId').value);
-+      field('preview').textContent = app
-+          ? 'An isolated profile for ' + app.title + '.'
-+          : apps.length ? 'Select an app.' : 'No apps configured yet — add one on the Apps page first.';
-+    }
 +
 +    function render() {
 +      const content = field('content');
@@ -675,8 +629,8 @@ index 0000000000000..d53d00b7604d1
 +        const empty = document.createElement('div');
 +        empty.className = 'empty';
 +        empty.innerHTML = '<div class="glyph">&#128100;</div>' +
-+            '<p>No profiles configured yet. Profiles give an app its own isolated cookies, ' +
-+            'local storage, and cache — handy for staying signed into the same app as two ' +
++            '<p>No profiles configured yet. A profile is its own isolated cookies, ' +
++            'local storage, and cache — handy for staying signed into the same site as two ' +
 +            'different accounts.</p>';
 +        const btn = document.createElement('button');
 +        btn.className = 'btn-primary';
@@ -697,7 +651,6 @@ index 0000000000000..d53d00b7604d1
 +    }
 +
 +    function buildCard(profile) {
-+      const app = appById(profile.app_id);
 +      const card = document.createElement('div');
 +      card.className = 'card';
 +
@@ -713,19 +666,6 @@ index 0000000000000..d53d00b7604d1
 +      label.textContent = profile.name;
 +      name.appendChild(star);
 +      name.appendChild(label);
-+
-+      const meta = document.createElement('div');
-+      meta.className = 'meta';
-+      const appBadge = document.createElement('span');
-+      if (app) {
-+        appBadge.className = 'badge';
-+        appBadge.textContent = app.title;
-+        appBadge.title = app.package + '@' + app.version;
-+      } else {
-+        appBadge.className = 'badge missing';
-+        appBadge.textContent = 'app not found';
-+      }
-+      meta.appendChild(appBadge);
 +
 +      const actions = document.createElement('div');
 +      actions.className = 'card-actions';
@@ -747,7 +687,6 @@ index 0000000000000..d53d00b7604d1
 +      actions.appendChild(rmBtn);
 +
 +      card.appendChild(name);
-+      card.appendChild(meta);
 +      card.appendChild(actions);
 +      return card;
 +    }
@@ -757,9 +696,6 @@ index 0000000000000..d53d00b7604d1
 +      field('dialogTitle').textContent = 'Add profile';
 +      field('save').textContent = 'Add profile';
 +      field('name').value = '';
-+      renderAppOptions();
-+      if (apps.length) field('appId').value = apps[0].id;
-+      updatePreview();
 +      dialog.showModal();
 +      field('name').focus();
 +    }
@@ -769,32 +705,26 @@ index 0000000000000..d53d00b7604d1
 +      field('dialogTitle').textContent = 'Edit profile';
 +      field('save').textContent = 'Save';
 +      field('name').value = profile.name;
-+      renderAppOptions();
-+      field('appId').value = profile.app_id;
-+      updatePreview();
 +      dialog.showModal();
 +      field('name').focus();
 +    }
 +
 +    field('openAdd').addEventListener('click', openAddDialog);
 +    field('cancel').addEventListener('click', () => dialog.close());
-+    field('appId').addEventListener('change', updatePreview);
 +
 +    field('form').addEventListener('submit', (event) => {
 +      event.preventDefault();
 +      const name = field('name').value.trim();
-+      const appId = field('appId').value;
-+      if (!name || !appId) return;
++      if (!name) return;
 +      if (editingId) {
-+        chrome.send('updateProfile', [editingId, name, appId]);
++        chrome.send('updateProfile', [editingId, name]);
 +      } else {
-+        chrome.send('addProfile', [name, appId]);
++        chrome.send('addProfile', [name]);
 +      }
 +      dialog.close();
 +    });
 +
 +    window.setData = (data) => {
-+      apps = data.apps;
 +      profiles = data.profiles;
 +      render();
 +    };
@@ -830,34 +760,15 @@ index 0000000000000..d53d00b7604d1
 +
 + private:
 +  void SendData() {
-+    AppSwapAppsService::GetInstance()->GetApps(base::BindOnce(
-+        &AppSwapProfilesHandler::OnAppsLoaded, weak_factory_.GetWeakPtr()));
++    AppSwapProfilesService::GetInstance()->GetProfiles(base::BindOnce(
++        &AppSwapProfilesHandler::OnProfilesLoaded, weak_factory_.GetWeakPtr()));
 +  }
 +
-+  void OnAppsLoaded(std::vector<AppSwapApp> apps) {
-+    AppSwapProfilesService::GetInstance()->GetProfiles(
-+        base::BindOnce(&AppSwapProfilesHandler::OnProfilesLoaded,
-+                       weak_factory_.GetWeakPtr(), std::move(apps)));
-+  }
-+
-+  void OnProfilesLoaded(std::vector<AppSwapApp> apps,
-+                        std::vector<AppSwapProfile> profiles) {
-+    base::ListValue apps_list;
-+    for (const AppSwapApp& app : apps) {
-+      base::DictValue dict;
-+      dict.Set("id", app.id);
-+      dict.Set("title", app.title);
-+      dict.Set("package", app.package_name);
-+      dict.Set("version", app.version);
-+      dict.Set("registry", app.registry);
-+      apps_list.Append(std::move(dict));
-+    }
-+
++  void OnProfilesLoaded(std::vector<AppSwapProfile> profiles) {
 +    base::ListValue profiles_list;
 +    for (const AppSwapProfile& profile : profiles) {
 +      base::DictValue dict;
 +      dict.Set("id", profile.id);
-+      dict.Set("app_id", profile.app_id);
 +      dict.Set("name", profile.name);
 +      std::optional<std::string> active_id =
 +          AppSwapProfilesService::GetInstance()->GetActiveProfileIdIfLoaded();
@@ -866,7 +777,6 @@ index 0000000000000..d53d00b7604d1
 +    }
 +
 +    base::DictValue data;
-+    data.Set("apps", std::move(apps_list));
 +    data.Set("profiles", std::move(profiles_list));
 +    CallJavascriptFunction("setData", data);
 +  }
@@ -878,38 +788,34 @@ index 0000000000000..d53d00b7604d1
 +
 +  void HandleAddProfile(const base::ListValue& args) {
 +    AllowJavascript();
-+    if (args.size() < 2) {
++    if (args.empty()) {
 +      return;
 +    }
 +    const std::string* name = args[0].GetIfString();
-+    const std::string* app_id = args[1].GetIfString();
-+    if (!name || !app_id) {
++    if (!name) {
 +      return;
 +    }
 +
 +    AppSwapProfile profile;
 +    profile.name = *name;
-+    profile.app_id = *app_id;
 +    AppSwapProfilesService::GetInstance()->AddProfile(std::move(profile));
 +    SendData();
 +  }
 +
 +  void HandleUpdateProfile(const base::ListValue& args) {
 +    AllowJavascript();
-+    if (args.size() < 3) {
++    if (args.size() < 2) {
 +      return;
 +    }
 +    const std::string* id = args[0].GetIfString();
 +    const std::string* name = args[1].GetIfString();
-+    const std::string* app_id = args[2].GetIfString();
-+    if (!id || !name || !app_id) {
++    if (!id || !name) {
 +      return;
 +    }
 +
 +    AppSwapProfile profile;
 +    profile.id = *id;
 +    profile.name = *name;
-+    profile.app_id = *app_id;
 +    AppSwapProfilesService::GetInstance()->UpdateProfile(std::move(profile));
 +    SendData();
 +  }
@@ -923,6 +829,12 @@ index 0000000000000..d53d00b7604d1
 +    if (!id) {
 +      return;
 +    }
++    // Move any tab currently running under this profile off it first, then
++    // wipe the partition's data, and only then forget the profile itself --
++    // in that order so nothing is left mid-navigation on a partition that's
++    // about to be cleared.
++    SwitchTabsOffAppSwapProfile(*id);
++    ClearAppSwapProfileData(*id, Profile::FromWebUI(web_ui()));
 +    AppSwapProfilesService::GetInstance()->RemoveProfile(*id);
 +    SendData();
 +  }

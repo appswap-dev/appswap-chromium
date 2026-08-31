@@ -179,7 +179,9 @@ gen 0009-tab-strip-profile-button.patch \
   chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h \
   chrome/browser/ui/BUILD.gn \
   chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc \
-  chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+  chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h \
+  chrome/browser/ui/views/location_bar/location_bar_view.cc \
+  chrome/browser/ui/views/location_bar/location_bar_view.h
 
 gen_devtools 0010-devtools-disable-paste-guard.patch \
   front_end/panels/console/ConsoleView.ts \
@@ -197,6 +199,24 @@ gen 0011-npm-version-picker.patch \
   chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc \
   chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.h \
   chrome/browser/ui/views/controls/rich_hover_button.cc
+
+# Per-tab persistence: AppSwap Profile pins and npm version pins each survive
+# a session restore via a small per-tab helper that reads/writes
+# SessionService extra data. Changes to already-covered files this feature
+# also touches (app_swap_profile_switch_util.cc, app_swap_url_loader_factory.*,
+# page_info_bubble_view.cc, the app_swap/BUILD.gn and ui/BUILD.gn files) are
+# picked up automatically by 0005/0007/0009/0011 above.
+gen 0012-tab-level-persistence.patch \
+  chrome/browser/app_swap/app_swap_profile_pin_tab_helper.cc \
+  chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h \
+  chrome/browser/app_swap/app_swap_profile_removal_util.cc \
+  chrome/browser/app_swap/app_swap_profile_removal_util.h \
+  chrome/browser/app_swap/app_swap_profile_session_restore_util.cc \
+  chrome/browser/app_swap/app_swap_profile_session_restore_util.h \
+  chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc \
+  chrome/browser/app_swap/app_swap_version_pin_tab_helper.h \
+  chrome/browser/ui/browser_tabrestore.cc \
+  chrome/browser/ui/tab_helpers.cc
 
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."
