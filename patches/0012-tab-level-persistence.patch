@@ -366,10 +366,10 @@ index 0000000000000..3242764f21d98
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_SESSION_RESTORE_UTIL_H_
 diff --git a/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc
 new file mode 100644
-index 0000000000000..204df89a80747
+index 0000000000000..dce48bab37dc4
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,131 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -381,6 +381,7 @@ index 0000000000000..204df89a80747
 +#include "base/json/json_reader.h"
 +#include "base/json/json_writer.h"
 +#include "base/values.h"
++#include "chrome/browser/app_swap/app_swap_apps_service.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/sessions/session_service.h"
 +#include "chrome/browser/sessions/session_service_factory.h"
@@ -486,12 +487,26 @@ index 0000000000000..204df89a80747
 +}
 +
 +WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapVersionPinTabHelper);
++
++std::string GetEffectiveAppSwapVersion(const AppSwapApp& app,
++                                       content::WebContents* web_contents) {
++  if (!web_contents) {
++    return app.version;
++  }
++  if (AppSwapVersionPinTabHelper* pin_helper =
++          AppSwapVersionPinTabHelper::FromWebContents(web_contents)) {
++    if (std::optional<std::string> pinned = pin_helper->GetPinnedVersion(app.id)) {
++      return *pinned;
++    }
++  }
++  return app.version;
++}
 diff --git a/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h
 new file mode 100644
-index 0000000000000..dd4c1e22699a5
+index 0000000000000..762bbc577ec3c
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,81 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -508,7 +523,10 @@ index 0000000000000..dd4c1e22699a5
 +
 +namespace content {
 +class Page;
++class WebContents;
 +}  // namespace content
++
++struct AppSwapApp;
 +
 +// Lets a single tab pin a specific version of an AppSwap app, independent of
 +// the app's own globally-configured version. Two tabs on the same app can
@@ -561,6 +579,13 @@ index 0000000000000..dd4c1e22699a5
 +
 +  WEB_CONTENTS_USER_DATA_KEY_DECL();
 +};
++
++// Returns the version `app` should be shown/served as for `web_contents`'s
++// tab: the tab's own pin if `AppSwapVersionPinTabHelper` has one for
++// `app.id`, otherwise `app.version` unchanged. `web_contents` may be
++// nullptr (treated as "no pin").
++std::string GetEffectiveAppSwapVersion(const AppSwapApp& app,
++                                       content::WebContents* web_contents);
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_PIN_TAB_HELPER_H_
 diff --git a/chrome/browser/ui/browser_tabrestore.cc b/chrome/browser/ui/browser_tabrestore.cc
@@ -617,23 +642,25 @@ index fa43dd782cdb8..cdc2113644798 100644
    std::vector<std::unique_ptr<NavigationEntry>> entries =
        ContentSerializedNavigationBuilder::ToNavigationEntries(
 diff --git a/chrome/browser/ui/tab_helpers.cc b/chrome/browser/ui/tab_helpers.cc
-index dcf66fff381ea..c9b8a591734fe 100644
+index dcf66fff381ea..f122f28e36285 100644
 --- a/chrome/browser/ui/tab_helpers.cc
 +++ b/chrome/browser/ui/tab_helpers.cc
-@@ -15,6 +15,8 @@
+@@ -15,6 +15,9 @@
  #include "base/time/default_tick_clock.h"
  #include "base/trace_event/trace_event.h"
  #include "build/build_config.h"
 +#include "chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
  #include "chrome/browser/bookmarks/bookmark_model_factory.h"
  #include "chrome/browser/breadcrumbs/breadcrumb_manager_tab_helper.h"
  #include "chrome/browser/browser_process.h"
-@@ -446,6 +448,8 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents,
+@@ -446,6 +449,9 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents,
    content_settings::PageSpecificContentSettings::CreateForWebContents(
        web_contents,
        std::make_unique<PageSpecificContentSettingsDelegate>(web_contents));
 +  AppSwapProfilePinTabHelper::CreateForWebContents(web_contents);
++  AppSwapUpdateAvailableTabHelper::CreateForWebContents(web_contents);
 +  AppSwapVersionPinTabHelper::CreateForWebContents(web_contents);
    CoreTabHelper::CreateForWebContents(web_contents);
    ExternalProtocolObserver::CreateForWebContents(web_contents);

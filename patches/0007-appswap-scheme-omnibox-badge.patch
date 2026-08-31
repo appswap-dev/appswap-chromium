@@ -61,27 +61,73 @@ index 8ec3b04f08a10..62e50333a5819 100644
        "//chrome/browser/ui/views:content_setting_bubble_contents",
        "//chrome/browser/ui/views:layout_provider",
 diff --git a/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc b/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
-index 2611503829f48..194d23d8c548f 100644
+index 2611503829f48..335e7ec6c8317 100644
 --- a/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
 +++ b/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
-@@ -5,6 +5,7 @@
+@@ -4,7 +4,11 @@
+ 
  #include "chrome/browser/ui/views/location_bar/location_icon_state_helper.h"
  
++#include "base/strings/utf_string_conversions.h"
  #include "build/branding_buildflags.h"
++#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
++#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
  #include "chrome/browser/extensions/extension_ui_util.h"
  #include "chrome/browser/ui/omnibox/omnibox_controller.h"
  #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
-@@ -43,6 +44,8 @@ std::u16string GetSecurityChipText(const LocationBarModel* model,
+@@ -35,6 +39,37 @@
+ 
+ namespace location_bar {
+ 
++namespace {
++
++// Returns the version text to show in the chip for an AppSwap-routed page:
++// this tab's own pinned version if it has one, resolved to a concrete
++// version if it's a dist-tag that's already been fetched -- otherwise the
++// app's own configured version, similarly resolved. Falls back to the
++// product name if the route/app can't be resolved (shouldn't normally
++// happen for a page IsAppSwapRoutedPage() already confirmed is routed).
++std::u16string GetAppSwapRoutedPageChipText(const GURL& url,
++                                            content::WebContents* web_contents) {
++  const AppSwapRoute* route = FindAppSwapRouteForUrl(url);
++  const AppSwapApp* app = route ? FindAppSwapAppById(route->app_id) : nullptr;
++  if (!app) {
++    return l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
++  }
++
++  std::string version = GetEffectiveAppSwapVersion(*app, web_contents);
++  if (!AppSwapArtifactProvider::IsExactVersion(version)) {
++    AppSwapApp effective = *app;
++    effective.version = version;
++    if (std::optional<std::string> resolved =
++            AppSwapArtifactProvider::GetInstance()->GetResolvedVersionIfCached(
++                effective.ToSource())) {
++      version = *resolved;
++    }
++  }
++  return base::UTF8ToUTF16(version);
++}
++
++}  // namespace
++
+ std::u16string GetSecurityChipText(const LocationBarModel* model,
+                                    content::WebContents* web_contents,
+                                    bool is_editing_or_empty) {
+@@ -42,7 +77,12 @@ std::u16string GetSecurityChipText(const LocationBarModel* model,
+     return std::u16string();
    }
  
++  if (IsAppSwapRoutedPage(model->GetURL())) {
++    return GetAppSwapRoutedPageChipText(model->GetURL(), web_contents);
++  }
++
    if (model->GetURL().SchemeIs(content::kChromeUIScheme) ||
 +      model->GetURL().SchemeIs(content::kAppSwapUIScheme) ||
-+      IsAppSwapRoutedPage(model->GetURL()) ||
        (contextual_tasks::ShouldShowExpandedSecurityChip() &&
         model->IsContextualTasksPage())) {
      return l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
-@@ -87,6 +90,8 @@ bool ShouldShowSecurityChipText(const LocationBarModel* model,
+@@ -87,6 +127,8 @@ bool ShouldShowSecurityChipText(const LocationBarModel* model,
  
    const GURL& url = model->GetURL();
    if (url.SchemeIs(content::kChromeUIScheme) ||
@@ -113,7 +159,7 @@ index 2db8d679023ad..9d487eaee8729 100644
      "//components/safe_browsing/core/browser:suspicious_site_warning_allowlist",
      "//components/strings:components_branded_strings_grit",
 diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-index ce635526633ef..1f6d8731aae3e 100644
+index ce635526633ef..ec33ccf8ae9bc 100644
 --- a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 +++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 @@ -6,6 +6,10 @@
@@ -157,7 +203,7 @@ index ce635526633ef..1f6d8731aae3e 100644
  #include "ui/views/layout/box_layout.h"
  #include "url/gurl.h"
  
-@@ -85,6 +95,43 @@ bool ShouldRouteToInternalBubble(const GURL& url,
+@@ -85,6 +95,37 @@ bool ShouldRouteToInternalBubble(const GURL& url,
    return IsExtensionPageInfoBubble(url, web_contents);
  }
  
@@ -173,13 +219,7 @@ index ce635526633ef..1f6d8731aae3e 100644
 +  // Reflect this tab's own pinned version (if any), not the app-wide
 +  // default -- a pinned tab may be showing a different version than what
 +  // any other tab on the same app currently resolves to.
-+  if (AppSwapVersionPinTabHelper* pin_helper =
-+          AppSwapVersionPinTabHelper::FromWebContents(web_contents)) {
-+    if (std::optional<std::string> pinned =
-+            pin_helper->GetPinnedVersion(app.id)) {
-+      app.version = *pinned;
-+    }
-+  }
++  app.version = GetEffectiveAppSwapVersion(app, web_contents);
 +
 +  std::u16string version_text = base::UTF8ToUTF16(app.version);
 +  if (!AppSwapArtifactProvider::IsExactVersion(app.version)) {
@@ -201,7 +241,7 @@ index ce635526633ef..1f6d8731aae3e 100644
  }  // namespace
  
  // The regular PageInfoBubbleView is not supported for internal Chrome pages and
-@@ -139,7 +186,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
+@@ -139,7 +180,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
        text = IDS_PAGE_INFO_READER_MODE_PAGE;
      }
    } else {
@@ -211,7 +251,7 @@ index ce635526633ef..1f6d8731aae3e 100644
    }
  
    // Title insets assume there is content (and thus have no bottom padding). Use
-@@ -225,6 +273,12 @@ PageInfoBubbleView::PageInfoBubbleView(
+@@ -225,6 +267,12 @@ PageInfoBubbleView::PageInfoBubbleView(
    page_container_ = AddChildView(
        std::make_unique<PageSwitcherView>(std::move(main_page_view)));
  

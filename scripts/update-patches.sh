@@ -218,6 +218,25 @@ gen 0012-tab-level-persistence.patch \
   chrome/browser/ui/browser_tabrestore.cc \
   chrome/browser/ui/tab_helpers.cc
 
+# Periodic npm dist-tag update checker + address-bar "update available"
+# badge. Changes to already-covered files this feature also touches
+# (app_swap_version_pin_tab_helper.*, app_swap_artifact_provider.*,
+# app_swap_url_loader_factory.*, page_info_bubble_view.cc,
+# app_swap_version_picker_dialog.cc, location_bar_view.*,
+# location_icon_state_helper.cc, tab_helpers.cc, and the various BUILD.gn
+# files) are picked up automatically by 0005/0007/0009/0011/0012 above.
+gen 0013-npm-update-checker.patch \
+  chrome/browser/app_swap/app_swap_prefs.cc \
+  chrome/browser/app_swap/app_swap_prefs.h \
+  chrome/browser/app_swap/app_swap_update_available_tab_helper.cc \
+  chrome/browser/app_swap/app_swap_update_available_tab_helper.h \
+  chrome/browser/app_swap/app_swap_update_checker.cc \
+  chrome/browser/app_swap/app_swap_update_checker.h \
+  chrome/browser/ui/views/app_swap/app_swap_update_badge_view.cc \
+  chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h \
+  chrome/browser/prefs/browser_prefs.cc \
+  chrome/browser/prefs/BUILD.gn
+
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."
 for f in $(git status --porcelain --untracked-files=no | cut -c4-); do

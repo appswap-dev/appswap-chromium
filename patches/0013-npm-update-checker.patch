@@ -1,0 +1,703 @@
+diff --git a/chrome/browser/app_swap/app_swap_prefs.cc b/chrome/browser/app_swap/app_swap_prefs.cc
+new file mode 100644
+index 0000000000000..84691524cdd31
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_prefs.cc
+@@ -0,0 +1,16 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_prefs.h"
++
++#include "components/prefs/pref_registry_simple.h"
++
++namespace app_swap::prefs {
++
++void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
++  registry->RegisterIntegerPref(kUpdateCheckIntervalMinutes,
++                                kDefaultUpdateCheckIntervalMinutes);
++}
++
++}  // namespace app_swap::prefs
+diff --git a/chrome/browser/app_swap/app_swap_prefs.h b/chrome/browser/app_swap/app_swap_prefs.h
+new file mode 100644
+index 0000000000000..56d1ba88fffd2
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_prefs.h
+@@ -0,0 +1,25 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_PREFS_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_PREFS_H_
++
++class PrefRegistrySimple;
++
++namespace app_swap::prefs {
++
++// How often (in minutes) AppSwapUpdateChecker re-checks open tabs' dist-tags
++// against the registry for a newer version. Browser-wide, not per-profile --
++// matches components/performance_manager/user_tuning/prefs.cc's
++// kMemorySaverModeTimeBeforeDiscardInMinutes precedent for a similar
++// local-only interval setting.
++inline constexpr char kUpdateCheckIntervalMinutes[] =
++    "app_swap.update_check_interval_minutes";
++inline constexpr int kDefaultUpdateCheckIntervalMinutes = 10;
++
++void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
++
++}  // namespace app_swap::prefs
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PREFS_H_
+diff --git a/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc b/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc
+new file mode 100644
+index 0000000000000..cec6adb2815da
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc
+@@ -0,0 +1,60 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
++
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
++#include "content/public/browser/web_contents.h"
++
++AppSwapUpdateAvailableTabHelper::AppSwapUpdateAvailableTabHelper(
++    content::WebContents* web_contents)
++    : content::WebContentsObserver(web_contents),
++      content::WebContentsUserData<AppSwapUpdateAvailableTabHelper>(
++          *web_contents) {}
++
++AppSwapUpdateAvailableTabHelper::~AppSwapUpdateAvailableTabHelper() = default;
++
++void AppSwapUpdateAvailableTabHelper::SetAvailableVersion(
++    const std::string& version) {
++  available_version_ = version;
++  change_callbacks_.Notify();
++}
++
++void AppSwapUpdateAvailableTabHelper::ClearAvailableVersion() {
++  if (!available_version_) {
++    return;
++  }
++  available_version_.reset();
++  change_callbacks_.Notify();
++}
++
++base::CallbackListSubscription
++AppSwapUpdateAvailableTabHelper::AddChangeCallback(
++    base::RepeatingClosure callback) {
++  return change_callbacks_.Add(std::move(callback));
++}
++
++base::WeakPtr<AppSwapUpdateAvailableTabHelper>
++AppSwapUpdateAvailableTabHelper::GetWeakPtr() {
++  return weak_factory_.GetWeakPtr();
++}
++
++void AppSwapUpdateAvailableTabHelper::PrimaryPageChanged(content::Page& page) {
++  // A new page: any previously-known update no longer applies (it was for
++  // the page we just navigated away from), and no check has run for the new
++  // one yet. AppSwapUpdateChecker will populate it again on its own
++  // schedule if this new page also turns out to be update-checkable.
++  available_version_.reset();
++
++  if (const AppSwapRoute* route =
++          FindAppSwapRouteForUrl(web_contents()->GetLastCommittedURL())) {
++    app_id_ = route->app_id;
++  } else {
++    app_id_.reset();
++  }
++
++  change_callbacks_.Notify();
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapUpdateAvailableTabHelper);
+diff --git a/chrome/browser/app_swap/app_swap_update_available_tab_helper.h b/chrome/browser/app_swap/app_swap_update_available_tab_helper.h
+new file mode 100644
+index 0000000000000..fa027c896159b
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_update_available_tab_helper.h
+@@ -0,0 +1,81 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_AVAILABLE_TAB_HELPER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_AVAILABLE_TAB_HELPER_H_
++
++#include <optional>
++#include <string>
++
++#include "base/callback_list.h"
++#include "base/memory/weak_ptr.h"
++#include "content/public/browser/web_contents_observer.h"
++#include "content/public/browser/web_contents_user_data.h"
++
++namespace content {
++class Page;
++}  // namespace content
++
++// Tracks, for a single tab, whether a newer version is available for the
++// AppSwap app it's currently on. Populated by AppSwapUpdateChecker; read by
++// the address-bar update badge (AppSwapUpdateBadgeView). Not persisted --
++// purely a live-session signal, re-derived by the checker on its own
++// schedule rather than something that needs to survive a restart.
++class AppSwapUpdateAvailableTabHelper
++    : public content::WebContentsObserver,
++      public content::WebContentsUserData<AppSwapUpdateAvailableTabHelper> {
++ public:
++  ~AppSwapUpdateAvailableTabHelper() override;
++
++  AppSwapUpdateAvailableTabHelper(const AppSwapUpdateAvailableTabHelper&) =
++      delete;
++  AppSwapUpdateAvailableTabHelper& operator=(
++      const AppSwapUpdateAvailableTabHelper&) = delete;
++
++  // The AppSwap app id this tab is currently on, or nullopt if it isn't on
++  // an AppSwap-routed page at all.
++  const std::optional<std::string>& app_id() const { return app_id_; }
++
++  // The newer version available for that app, or nullopt if none is known
++  // right now (either none exists, or no check has completed yet).
++  const std::optional<std::string>& available_version() const {
++    return available_version_;
++  }
++
++  // Called by AppSwapUpdateChecker once it confirms a newer version. Runs
++  // the change-callback list.
++  void SetAvailableVersion(const std::string& version);
++
++  // Called after a confirmed reload onto the newer version. Runs the
++  // change-callback list.
++  void ClearAvailableVersion();
++
++  // Registers `callback` to run whenever available_version() changes (set
++  // or cleared). Returns a subscription that unregisters on destruction --
++  // callers (the badge) should hold it only while displaying this tab.
++  base::CallbackListSubscription AddChangeCallback(
++      base::RepeatingClosure callback);
++
++  // Safe to hold across an async gap (e.g. AppSwapUpdateChecker's
++  // in-flight registry query) -- becomes null exactly when this tab (and so
++  // this helper) is destroyed, unlike a raw WebContents pointer.
++  base::WeakPtr<AppSwapUpdateAvailableTabHelper> GetWeakPtr();
++
++ private:
++  friend class content::WebContentsUserData<AppSwapUpdateAvailableTabHelper>;
++  explicit AppSwapUpdateAvailableTabHelper(content::WebContents* web_contents);
++
++  // content::WebContentsObserver:
++  void PrimaryPageChanged(content::Page& page) override;
++
++  std::optional<std::string> app_id_;
++  std::optional<std::string> available_version_;
++  base::RepeatingClosureList change_callbacks_;
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++
++  base::WeakPtrFactory<AppSwapUpdateAvailableTabHelper> weak_factory_{this};
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_AVAILABLE_TAB_HELPER_H_
+diff --git a/chrome/browser/app_swap/app_swap_update_checker.cc b/chrome/browser/app_swap/app_swap_update_checker.cc
+new file mode 100644
+index 0000000000000..f942674d1798b
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_update_checker.cc
+@@ -0,0 +1,145 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_update_checker.h"
++
++#include <map>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/no_destructor.h"
++#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
++#include "chrome/browser/app_swap/app_swap_prefs.h"
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
++#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_version_utils.h"
++#include "chrome/browser/browser_process.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "components/prefs/pref_service.h"
++#include "content/public/browser/web_contents.h"
++
++namespace {
++
++// One dist-tag app resolved from one or more open tabs, checked once per
++// tick regardless of how many tabs are on it.
++struct PendingCheck {
++  AppSwapSource source;
++  std::vector<base::WeakPtr<AppSwapUpdateAvailableTabHelper>> helpers;
++};
++
++std::string PendingCheckKey(const AppSwapSource& source) {
++  return source.package_name + "@" + source.version + "@" + source.registry;
++}
++
++}  // namespace
++
++// static
++AppSwapUpdateChecker* AppSwapUpdateChecker::GetInstance() {
++  static base::NoDestructor<AppSwapUpdateChecker> instance;
++  return instance.get();
++}
++
++AppSwapUpdateChecker::AppSwapUpdateChecker() = default;
++AppSwapUpdateChecker::~AppSwapUpdateChecker() = default;
++
++void AppSwapUpdateChecker::EnsureStarted() {
++  if (started_) {
++    return;
++  }
++  started_ = true;
++
++  pref_change_registrar_.Init(g_browser_process->local_state());
++  pref_change_registrar_.Add(
++      app_swap::prefs::kUpdateCheckIntervalMinutes,
++      base::BindRepeating(&AppSwapUpdateChecker::RestartTimer,
++                          base::Unretained(this)));
++  RestartTimer();
++}
++
++void AppSwapUpdateChecker::RestartTimer() {
++  int minutes = g_browser_process->local_state()->GetInteger(
++      app_swap::prefs::kUpdateCheckIntervalMinutes);
++  if (minutes <= 0) {
++    minutes = app_swap::prefs::kDefaultUpdateCheckIntervalMinutes;
++  }
++  timer_.Start(FROM_HERE, base::Minutes(minutes),
++              base::BindRepeating(&AppSwapUpdateChecker::OnTick,
++                                  base::Unretained(this)));
++}
++
++void AppSwapUpdateChecker::OnTick() {
++  std::map<std::string, PendingCheck> pending;
++
++  GlobalBrowserCollection::GetInstance()->ForEach(
++      [&](BrowserWindowInterface* browser) {
++        TabStripModel* tab_strip_model = browser->GetTabStripModel();
++        for (int i = 0; i < tab_strip_model->count(); ++i) {
++          content::WebContents* web_contents =
++              tab_strip_model->GetWebContentsAt(i);
++
++          const AppSwapRoute* route =
++              FindAppSwapRouteForUrl(web_contents->GetLastCommittedURL());
++          const AppSwapApp* app =
++              route ? FindAppSwapAppById(route->app_id) : nullptr;
++          if (!app) {
++            continue;
++          }
++
++          AppSwapSource source = app->ToSource();
++          source.version = GetEffectiveAppSwapVersion(*app, web_contents);
++          // Only a dist-tag can have drifted to a newer version under the
++          // same tag; an exact-pinned version is intentionally fixed.
++          if (AppSwapArtifactProvider::IsExactVersion(source.version)) {
++            continue;
++          }
++          // Nothing meaningful to compare the registry's answer against
++          // yet -- this tab's content hasn't actually resolved once
++          // through GetOrDownload (shouldn't normally happen for a page
++          // that's already loaded, but skip rather than guess).
++          if (!AppSwapArtifactProvider::GetInstance()->GetResolvedVersionIfCached(
++                  source)) {
++            continue;
++          }
++
++          PendingCheck& entry = pending[PendingCheckKey(source)];
++          entry.source = source;
++          entry.helpers.push_back(
++              AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents)
++                  ->GetWeakPtr());
++        }
++        return true;
++      });
++
++  for (auto& [key, entry] : pending) {
++    AppSwapArtifactProvider::GetInstance()->CheckForNewerVersion(
++        entry.source,
++        base::BindOnce(&AppSwapUpdateChecker::OnCheckResult,
++                       base::Unretained(this), entry.source,
++                       std::move(entry.helpers)));
++  }
++}
++
++void AppSwapUpdateChecker::OnCheckResult(
++    AppSwapSource source,
++    std::vector<base::WeakPtr<AppSwapUpdateAvailableTabHelper>> helpers,
++    std::optional<std::string> registry_version) {
++  if (!registry_version) {
++    return;
++  }
++  std::optional<std::string> current_resolved =
++      AppSwapArtifactProvider::GetInstance()->GetResolvedVersionIfCached(
++          source);
++  if (!current_resolved ||
++      !app_swap::IsNewerVersion(*registry_version, *current_resolved)) {
++    return;
++  }
++  for (base::WeakPtr<AppSwapUpdateAvailableTabHelper>& helper : helpers) {
++    if (helper) {
++      helper->SetAvailableVersion(*registry_version);
++    }
++  }
++}
+diff --git a/chrome/browser/app_swap/app_swap_update_checker.h b/chrome/browser/app_swap/app_swap_update_checker.h
+new file mode 100644
+index 0000000000000..e78f1b59a05a0
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_update_checker.h
+@@ -0,0 +1,55 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_CHECKER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_CHECKER_H_
++
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/memory/weak_ptr.h"
++#include "base/no_destructor.h"
++#include "base/timer/timer.h"
++#include "chrome/browser/app_swap/app_swap_source.h"
++#include "components/prefs/pref_change_registrar.h"
++
++class AppSwapUpdateAvailableTabHelper;
++
++// Periodically re-checks every open tab on a dist-tag-pinned AppSwap app
++// against the registry, and flags (via AppSwapUpdateAvailableTabHelper) any
++// tab whose tag has moved to a newer version than what it's currently
++// running. Interval is controlled by
++// app_swap::prefs::kUpdateCheckIntervalMinutes.
++class AppSwapUpdateChecker {
++ public:
++  static AppSwapUpdateChecker* GetInstance();
++
++  AppSwapUpdateChecker(const AppSwapUpdateChecker&) = delete;
++  AppSwapUpdateChecker& operator=(const AppSwapUpdateChecker&) = delete;
++
++  // Starts the periodic timer if it isn't already running. Idempotent --
++  // safe to call from any AppSwap-routed-request path, since there's no
++  // single "browser has finished starting up" hook this feature otherwise
++  // needs to be wired into.
++  void EnsureStarted();
++
++ private:
++  friend class base::NoDestructor<AppSwapUpdateChecker>;
++  AppSwapUpdateChecker();
++  ~AppSwapUpdateChecker();
++
++  void RestartTimer();
++  void OnTick();
++  void OnCheckResult(
++      AppSwapSource source,
++      std::vector<base::WeakPtr<AppSwapUpdateAvailableTabHelper>> helpers,
++      std::optional<std::string> registry_version);
++
++  base::RepeatingTimer timer_;
++  PrefChangeRegistrar pref_change_registrar_;
++  bool started_ = false;
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_CHECKER_H_
+diff --git a/chrome/browser/prefs/BUILD.gn b/chrome/browser/prefs/BUILD.gn
+index 79f7e90a7b9c4..985d6227556cc 100644
+--- a/chrome/browser/prefs/BUILD.gn
++++ b/chrome/browser/prefs/BUILD.gn
+@@ -67,6 +67,7 @@ source_set("impl") {
+     "//chrome/browser:flags",
+     "//chrome/browser/accessibility",
+     "//chrome/browser/accessibility/accessibility_prefs",
++    "//chrome/browser/app_swap",
+     "//chrome/browser/autocomplete:aim_eligibility_service",
+     "//chrome/browser/background/glic",
+     "//chrome/browser/component_updater",
+diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
+index e8138bc8e72bf..6b08075a17654 100644
+--- a/chrome/browser/prefs/browser_prefs.cc
++++ b/chrome/browser/prefs/browser_prefs.cc
+@@ -23,6 +23,7 @@
+ #include "chrome/browser/accessibility/invert_bubble_prefs.h"
+ #include "chrome/browser/accessibility/page_colors_controller.h"
+ #include "chrome/browser/accessibility/prefers_default_scrollbar_styles_prefs.h"
++#include "chrome/browser/app_swap/app_swap_prefs.h"
+ #include "chrome/browser/browser_process_impl.h"
+ #include "chrome/browser/chrome_content_browser_client.h"
+ #include "chrome/browser/component_updater/component_updater_prefs.h"
+@@ -1459,6 +1460,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
+   accessibility::AccessibilityPrefsController::RegisterLocalStatePrefs(
+       registry);
+ #endif
++  app_swap::prefs::RegisterLocalStatePrefs(registry);
+   autofill::prefs::RegisterLocalStatePrefs(registry);
+   breadcrumbs::RegisterPrefs(registry);
+   browser_shutdown::RegisterPrefs(registry);
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.cc b/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.cc
+new file mode 100644
+index 0000000000000..7385c1fcc7438
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.cc
+@@ -0,0 +1,168 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h"
++
++#include <memory>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/app_swap/app_swap_apps_service.h"
++#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
++#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "components/vector_icons/vector_icons.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/l10n/l10n_util.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/models/dialog_model.h"
++#include "ui/base/models/image_model.h"
++#include "ui/color/color_id.h"
++#include "ui/views/bubble/bubble_dialog_model_host.h"
++#include "ui/views/widget/widget.h"
++
++namespace {
++constexpr int kBadgeIconSize = 16;
++}  // namespace
++
++AppSwapUpdateBadgeView::AppSwapUpdateBadgeView(BrowserWindowInterface* browser)
++    : views::ImageButton(base::BindRepeating(
++          &AppSwapUpdateBadgeView::ButtonPressed, base::Unretained(this))),
++      browser_(browser) {
++  SetVisible(false);
++  SetTooltipText(u"Update available");
++  browser_->GetTabStripModel()->AddObserver(this);
++  UpdateForActiveTab();
++}
++
++AppSwapUpdateBadgeView::~AppSwapUpdateBadgeView() {
++  browser_->GetTabStripModel()->RemoveObserver(this);
++}
++
++void AppSwapUpdateBadgeView::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  if (selection.active_tab_changed()) {
++    UpdateForActiveTab();
++  }
++}
++
++void AppSwapUpdateBadgeView::OnTabChangedAt(tabs::TabInterface* tab,
++                                            TabChangeType change_type) {
++  UpdateForActiveTab();
++}
++
++void AppSwapUpdateBadgeView::UpdateForActiveTab() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  AppSwapUpdateAvailableTabHelper* helper =
++      web_contents
++          ? AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents)
++          : nullptr;
++  if (!helper) {
++    tab_update_subscription_ = base::CallbackListSubscription();
++    SetVisible(false);
++    return;
++  }
++
++  tab_update_subscription_ = helper->AddChangeCallback(base::BindRepeating(
++      &AppSwapUpdateBadgeView::UpdateForActiveTab, base::Unretained(this)));
++
++  if (!helper->app_id() || !helper->available_version()) {
++    SetVisible(false);
++    return;
++  }
++
++  app_id_ = *helper->app_id();
++  available_version_ = *helper->available_version();
++  SetTooltipText(u"Update available: v" +
++                base::UTF8ToUTF16(available_version_));
++  SetVisible(true);
++}
++
++void AppSwapUpdateBadgeView::OnThemeChanged() {
++  views::ImageButton::OnThemeChanged();
++  SetImageModel(
++      views::Button::STATE_NORMAL,
++      ui::ImageModel::FromVectorIcon(vector_icons::kDownloadIcon,
++                                     ui::kColorAccent, kBadgeIconSize));
++}
++
++void AppSwapUpdateBadgeView::ButtonPressed() {
++  const AppSwapApp* app = FindAppSwapAppById(app_id_);
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  if (!app || !web_contents) {
++    return;
++  }
++
++  AppSwapSource current_source = app->ToSource();
++  current_source.version = GetEffectiveAppSwapVersion(*app, web_contents);
++  std::string current_version =
++      AppSwapArtifactProvider::GetInstance()
++          ->GetResolvedVersionIfCached(current_source)
++          .value_or(current_source.version);
++
++  ui::DialogModel::Builder dialog_builder;
++  dialog_builder.SetTitle(u"Update available")
++      .AddParagraph(ui::DialogModelLabel(base::UTF8ToUTF16(
++          app->package_name + ": v" + available_version_ +
++          " is available (currently running v" + current_version + ")")))
++      .AddOkButton(base::BindOnce(&AppSwapUpdateBadgeView::AcceptUpdate,
++                                  base::Unretained(this)),
++                  ui::DialogModel::Button::Params().SetLabel(u"Reload"))
++      .AddCancelButton(base::DoNothing());
++
++  auto bubble = std::make_unique<views::BubbleDialogModelHost>(
++      dialog_builder.Build(), this, views::BubbleBorder::TOP_RIGHT);
++  views::Widget* widget = views::BubbleDialogDelegate::CreateBubbleDeprecated(
++      std::move(bubble), views::Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET);
++  widget->Show();
++}
++
++void AppSwapUpdateBadgeView::AcceptUpdate() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  AppSwapUpdateAvailableTabHelper* helper =
++      web_contents
++          ? AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents)
++          : nullptr;
++  const AppSwapApp* app = FindAppSwapAppById(app_id_);
++  if (!helper || !app) {
++    return;
++  }
++
++  AppSwapSource source = app->ToSource();
++  // Re-resolve the dist-tag this tab is *currently* following (not the
++  // concrete version this badge already knows about) -- consistent with the
++  // feature's whole point: this tab tracks a moving tag, so a reload should
++  // pick up whatever that tag resolves to right now, not freeze the tab
++  // onto one specific version.
++  source.version = GetEffectiveAppSwapVersion(*app, web_contents);
++
++  AppSwapArtifactProvider* provider = AppSwapArtifactProvider::GetInstance();
++  provider->InvalidateCache(source);
++  provider->GetOrDownload(
++      source,
++      base::BindOnce(
++          [](base::WeakPtr<AppSwapUpdateAvailableTabHelper> helper,
++             base::FilePath dir) {
++            if (dir.empty() || !helper) {
++              return;
++            }
++            helper->web_contents()->GetController().Reload(
++                content::ReloadType::NORMAL, /*check_for_repost=*/false);
++            helper->ClearAvailableVersion();
++          },
++          helper->GetWeakPtr()));
++}
++
++BEGIN_METADATA(AppSwapUpdateBadgeView)
++END_METADATA
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h b/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h
+new file mode 100644
+index 0000000000000..9142078fbfe0b
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_update_badge_view.h
+@@ -0,0 +1,73 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_UPDATE_BADGE_VIEW_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_UPDATE_BADGE_VIEW_H_
++
++#include <string>
++
++#include "base/callback_list.h"
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/ui/tabs/tab_change_type.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/views/controls/button/image_button.h"
++
++class BrowserWindowInterface;
++class TabStripModel;
++
++namespace tabs {
++class TabInterface;
++}  // namespace tabs
++
++// A small location-bar decoration, positioned right after the version chip
++// (LocationIconView) for an AppSwap-routed page. Hidden entirely unless the
++// active tab's AppSwapUpdateAvailableTabHelper reports a newer version is
++// available under the dist-tag that tab is following. Clicking it opens a
++// small confirm popup offering to reload onto that version.
++class AppSwapUpdateBadgeView : public views::ImageButton,
++                               public TabStripModelObserver {
++  METADATA_HEADER(AppSwapUpdateBadgeView, views::ImageButton)
++
++ public:
++  explicit AppSwapUpdateBadgeView(BrowserWindowInterface* browser);
++  AppSwapUpdateBadgeView(const AppSwapUpdateBadgeView&) = delete;
++  AppSwapUpdateBadgeView& operator=(const AppSwapUpdateBadgeView&) = delete;
++  ~AppSwapUpdateBadgeView() override;
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      TabChangeType change_type) override;
++
++  // views::View:
++  void OnThemeChanged() override;
++
++ private:
++  // Re-subscribes to the active tab's AppSwapUpdateAvailableTabHelper (if
++  // any) and recomputes visibility/tooltip from its current state.
++  void UpdateForActiveTab();
++
++  void ButtonPressed();
++
++  // Confirm-popup accept: re-resolves the app's currently-followed dist-tag
++  // fresh and reloads the active tab onto whatever that resolves to now.
++  void AcceptUpdate();
++
++  raw_ptr<BrowserWindowInterface> browser_;
++
++  // What the badge is currently offering, while visible.
++  std::string app_id_;
++  std::string available_version_;
++
++  // Subscribed to only the currently-active tab's helper; replaced (which
++  // unregisters the previous one) on every tab switch by
++  // UpdateForActiveTab().
++  base::CallbackListSubscription tab_update_subscription_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_UPDATE_BADGE_VIEW_H_
