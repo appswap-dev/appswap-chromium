@@ -167,7 +167,7 @@ index 2db8d679023ad..9d487eaee8729 100644
      "//components/safe_browsing/core/browser:suspicious_site_warning_allowlist",
      "//components/strings:components_branded_strings_grit",
 diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-index ce635526633ef..4550f41b7385c 100644
+index ce635526633ef..3e6acc4fc538b 100644
 --- a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 +++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 @@ -6,6 +6,11 @@
@@ -212,7 +212,7 @@ index ce635526633ef..4550f41b7385c 100644
  #include "ui/views/layout/box_layout.h"
  #include "url/gurl.h"
  
-@@ -85,6 +96,43 @@ bool ShouldRouteToInternalBubble(const GURL& url,
+@@ -85,6 +96,44 @@ bool ShouldRouteToInternalBubble(const GURL& url,
    return IsExtensionPageInfoBubble(url, web_contents);
  }
  
@@ -221,10 +221,11 @@ index ce635526633ef..4550f41b7385c 100644
 +// dist-tag alongside the concrete version it resolved to, if `app.version`
 +// isn't already an exact version. Clicking it opens a modal letting the user
 +// switch to a different dist-tag or exact version
-+// (ShowAppSwapVersionPickerDialog).
++// (PageInfoNavigationHandler::OpenVersionPickerPage).
 +std::unique_ptr<views::View> CreateAppSwapPackageInfoView(
 +    AppSwapApp app,
-+    content::WebContents* web_contents) {
++    content::WebContents* web_contents,
++    PageInfoNavigationHandler* navigation_handler) {
 +  // Reflect this tab's own pinned version (if any), not the app-wide
 +  // default -- a pinned tab may be showing a different version than what
 +  // any other tab on the same app currently resolves to.
@@ -246,8 +247,8 @@ index ce635526633ef..4550f41b7385c 100644
 +  }
 +
 +  return std::make_unique<RichHoverButton>(
-+      base::BindRepeating(&ShowAppSwapVersionPickerDialog,
-+                          base::Unretained(web_contents), app),
++      base::BindRepeating(&PageInfoNavigationHandler::OpenVersionPickerPage,
++                          base::Unretained(navigation_handler), app),
 +      PageInfoViewFactory::GetImageModel(vector_icons::kExtensionFilledIcon),
 +      u"Package: " + base::UTF8ToUTF16(app.package_name),
 +      u"Version: " + version_text, PageInfoViewFactory::GetOpenSubpageIcon());
@@ -256,7 +257,7 @@ index ce635526633ef..4550f41b7385c 100644
  }  // namespace
  
  // The regular PageInfoBubbleView is not supported for internal Chrome pages and
-@@ -139,7 +187,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
+@@ -139,7 +188,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
        text = IDS_PAGE_INFO_READER_MODE_PAGE;
      }
    } else {
@@ -266,19 +267,64 @@ index ce635526633ef..4550f41b7385c 100644
    }
  
    // Title insets assume there is content (and thus have no bottom padding). Use
-@@ -225,6 +274,12 @@ PageInfoBubbleView::PageInfoBubbleView(
+@@ -222,6 +272,8 @@ PageInfoBubbleView::PageInfoBubbleView(
+   std::unique_ptr<views::View> main_page_view =
+       view_factory_->CreateMainPageView(std::move(initialized_callback));
+   main_page_view->SetID(PageInfoViewFactory::VIEW_ID_PAGE_INFO_CURRENT_VIEW);
++  MaybeAddAppSwapPackageInfoView(main_page_view.get());
++
    page_container_ = AddChildView(
        std::make_unique<PageSwitcherView>(std::move(main_page_view)));
  
-+  if (const AppSwapRoute* route = FindAppSwapRouteForUrl(url)) {
-+    if (const AppSwapApp* app = FindAppSwapAppById(route->app_id)) {
-+      AddChildView(CreateAppSwapPackageInfoView(*app, web_contents()));
-+    }
+@@ -238,6 +290,21 @@ PageInfoBubbleView::~PageInfoBubbleView() {
+   RemoveAllChildViews();
+ }
+ 
++void PageInfoBubbleView::MaybeAddAppSwapPackageInfoView(
++    views::View* main_page_view) {
++  const AppSwapRoute* route =
++      FindAppSwapRouteForUrl(web_contents()->GetLastCommittedURL());
++  if (!route) {
++    return;
 +  }
++  const AppSwapApp* app = FindAppSwapAppById(route->app_id);
++  if (!app) {
++    return;
++  }
++  main_page_view->AddChildView(
++      CreateAppSwapPackageInfoView(*app, web_contents(), this));
++}
 +
-   if (page_info::IsMerchantTrustFeatureEnabled()) {
-     merchant_trust_coordinator_ =
-         std::make_unique<PageInfoMerchantTrustCoordinator>(web_contents());
+ // static
+ views::BubbleDialogDelegateView* PageInfoBubbleView::CreatePageInfoBubble(
+     std::unique_ptr<PageInfoBubbleSpecification> specification) {
+@@ -270,6 +337,7 @@ void PageInfoBubbleView::OpenMainPage(base::OnceClosure initialized_callback) {
+   std::unique_ptr<views::View> main_page_view =
+       view_factory_->CreateMainPageView(std::move(initialized_callback));
+   main_page_view->SetID(PageInfoViewFactory::VIEW_ID_PAGE_INFO_CURRENT_VIEW);
++  MaybeAddAppSwapPackageInfoView(main_page_view.get());
+   page_container_->SwitchToPage(std::move(main_page_view));
+ 
+   auto* close_button = page_container_->GetViewByID(
+@@ -310,6 +378,18 @@ void PageInfoBubbleView::OpenCookiesPage() {
+   AnnouncePageOpened(l10n_util::GetStringUTF16(IDS_PAGE_INFO_COOKIES));
+ }
+ 
++void PageInfoBubbleView::OpenVersionPickerPage(AppSwapApp app) {
++  std::u16string title = u"Switch version";
++  std::unique_ptr<views::View> content_view =
++      CreateAppSwapVersionPickerSubpageView(web_contents(), app,
++                                            weak_factory_.GetWeakPtr());
++  std::unique_ptr<views::View> page_view =
++      view_factory_->CreatePageView(title, std::move(content_view));
++  page_view->SetID(PageInfoViewFactory::VIEW_ID_PAGE_INFO_CURRENT_VIEW);
++  page_container_->SwitchToPage(std::move(page_view));
++  AnnouncePageOpened(title);
++}
++
+ void PageInfoBubbleView::OpenMerchantTrustPage() {
+   CHECK(merchant_trust_coordinator_);
+   auto title = l10n_util::GetStringUTF16(IDS_PAGE_INFO_MERCHANT_TRUST_HEADER);
 diff --git a/chrome/browser/ui/views/page_info/page_info_main_view.cc b/chrome/browser/ui/views/page_info/page_info_main_view.cc
 index 5bcdfb8d63a66..9cea942a8402d 100644
 --- a/chrome/browser/ui/views/page_info/page_info_main_view.cc

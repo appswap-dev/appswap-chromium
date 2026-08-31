@@ -1,0 +1,1102 @@
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index a89c1a8c9fe16..774871f7d8d94 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -30,6 +30,8 @@
+ #include "chrome/browser/ui/webui/access_code_cast/access_code_cast_ui.h"
+ #include "chrome/browser/ui/webui/app_service_internals/app_service_internals.mojom.h"
+ #include "chrome/browser/ui/webui/app_service_internals/app_service_internals_ui.h"
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom.h"
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h"
+ #include "chrome/browser/ui/webui/autofill_ml_internals/autofill_ml_internals_ui.h"
+ #include "chrome/browser/ui/webui/bookmarks/bookmarks_ui.h"
+ #include "chrome/browser/ui/webui/color_pipeline_internals/color_pipeline_internals_ui.h"
+@@ -637,6 +639,10 @@ void PopulateChromeWebUIFrameBindersPartsDesktop(
+   RegisterWebUIControllerInterfaceBinder<
+       feedback::report_unsafe_site::mojom::PageHandlerFactory, FeedbackUI>(map);
+ 
++  RegisterWebUIControllerInterfaceBinder<
++      app_swap_version_picker::mojom::PageHandlerFactory,
++      AppSwapVersionPickerUI>(map);
++
+   RegisterWebUIControllerInterfaceBinder<
+       contextual_cueing_internals::mojom::PageHandler,
+       contextual_cueing_internals::ContextualCueingInternalsUI>(map);
+diff --git a/chrome/browser/resources/app_swap_version_picker/BUILD.gn b/chrome/browser/resources/app_swap_version_picker/BUILD.gn
+new file mode 100644
+index 0000000000000..7deeb90a23fa1
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_version_picker/BUILD.gn
+@@ -0,0 +1,37 @@
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//ui/webui/resources/tools/build_webui.gni")
++
++assert(!is_android)
++
++build_webui("build") {
++  grd_prefix = "app_swap_version_picker"
++
++  static_files = [ "app_swap_version_picker.html" ]
++
++  ts_files = [
++    "app.html.ts",
++    "app.ts",
++    "browser_proxy.ts",
++  ]
++
++  css_files = [ "app.css" ]
++
++  mojo_files_deps = [
++    "//chrome/browser/ui/webui/app_swap_version_picker:mojo_bindings_ts__generator",
++  ]
++  mojo_files = [
++    "$root_gen_dir/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom-webui.ts",
++  ]
++
++  ts_deps = [
++    "//third_party/lit/v3_0:build_ts",
++    "//ui/webui/resources/cr_elements:build_ts",
++    "//ui/webui/resources/js:build_ts",
++    "//ui/webui/resources/mojo:build_ts",
++  ]
++
++  webui_context_type = "trusted"
++}
+diff --git a/chrome/browser/resources/app_swap_version_picker/app.css b/chrome/browser/resources/app_swap_version_picker/app.css
+new file mode 100644
+index 0000000000000..d372b9cb26751
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_version_picker/app.css
+@@ -0,0 +1,91 @@
++/* Copyright 2026 The AppSwap Authors
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++/* #css_wrapper_metadata_start
++ * #type=style-lit
++ * #import=//resources/cr_elements/cr_icons_lit.css.js
++ * #include=cr-icons-lit
++ * #scheme=relative
++ * #css_wrapper_metadata_end */
++
++:host {
++  background: var(--color-sys-surface, white);
++  box-sizing: border-box;
++  color: var(--color-sys-on-surface, black);
++  display: flex;
++  flex-direction: column;
++  font-family: inherit;
++  overflow-x: hidden;
++  padding: 12px;
++  width: 100%;
++}
++
++cr-input {
++  margin-bottom: 8px;
++}
++
++.list {
++  display: flex;
++  flex: 1 1 auto;
++  flex-direction: column;
++  min-height: 0;
++  overflow-x: hidden;
++  overflow-y: auto;
++}
++
++.section-header {
++  color: var(--cr-secondary-text-color, #5f6368);
++  font-size: 0.8em;
++  font-weight: 500;
++  margin: 8px 4px 2px;
++  text-transform: uppercase;
++}
++
++.row {
++  align-items: center;
++  background: none;
++  border: none;
++  border-radius: 6px;
++  box-sizing: border-box;
++  cursor: pointer;
++  display: flex;
++  font: inherit;
++  justify-content: space-between;
++  padding: 6px 8px;
++  text-align: start;
++  width: 100%;
++}
++
++.row:hover {
++  background: var(--cr-hover-background-color, rgba(0, 0, 0, 0.06));
++}
++
++.row.current {
++  background: var(--color-sys-primary-container, rgba(66, 133, 244, 0.12));
++}
++
++.primary {
++  min-width: 0;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.secondary {
++  color: var(--cr-secondary-text-color, #5f6368);
++  flex-shrink: 0;
++  font-size: 0.85em;
++  margin-inline-start: 12px;
++  overflow: hidden;
++  text-align: end;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.loading,
++.empty {
++  color: var(--cr-secondary-text-color, #5f6368);
++  padding: 12px 4px;
++  text-align: center;
++}
+diff --git a/chrome/browser/resources/app_swap_version_picker/app.html.ts b/chrome/browser/resources/app_swap_version_picker/app.html.ts
+new file mode 100644
+index 0000000000000..8cbb4720dc49c
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_version_picker/app.html.ts
+@@ -0,0 +1,40 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {html} from 'chrome://resources/lit/v3_0/lit.rollup.js';
++
++import type {AppSwapVersionPickerAppElement} from './app.js';
++
++export function getHtml(this: AppSwapVersionPickerAppElement) {
++  // clang-format off
++  return html`
++    <cr-input type="search" placeholder="Filter tags and versions"
++        .value="${this.filter_}"
++        @value-changed="${this.onFilterValueChanged_}">
++      <div slot="inline-prefix" class="cr-icon icon-search" alt=""></div>
++    </cr-input>
++    ${this.loading_ ? html`<div class="loading">Loading&hellip;</div>` : ''}
++    ${!this.loading_ && this.filteredTagRows_().length === 0 &&
++        this.filteredVersionRows_().length === 0 ?
++        html`<div class="empty">No matches</div>` : ''}
++    <div class="list">
++      ${this.filteredTagRows_().length > 0 ? html`
++        <div class="section-header">Tags</div>
++        ${this.filteredTagRows_().map(row => html`
++          <button class="row ${row.isCurrent ? 'current' : ''}"
++              data-value="${row.value}" @click="${this.onRowClick_}">
++            <span class="primary">${row.primaryText}</span>
++            <span class="secondary">${row.secondaryText}</span>
++          </button>`)}` : ''}
++      ${this.filteredVersionRows_().length > 0 ? html`
++        <div class="section-header">Versions</div>
++        ${this.filteredVersionRows_().map(row => html`
++          <button class="row ${row.isCurrent ? 'current' : ''}"
++              data-value="${row.value}" @click="${this.onRowClick_}">
++            <span class="primary">${row.primaryText}</span>
++            <span class="secondary">${row.secondaryText}</span>
++          </button>`)}` : ''}
++    </div>`;
++  // clang-format on
++}
+diff --git a/chrome/browser/resources/app_swap_version_picker/app.ts b/chrome/browser/resources/app_swap_version_picker/app.ts
+new file mode 100644
+index 0000000000000..175dc63ed58bc
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_version_picker/app.ts
+@@ -0,0 +1,110 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
++import 'chrome://resources/cr_elements/cr_input/cr_input.js';
++
++import {getCss} from './app.css.js';
++import {getHtml} from './app.html.js';
++import type {BrowserProxy} from './browser_proxy.js';
++import {BrowserProxyImpl} from './browser_proxy.js';
++import type {TagInfo, VersionInfo} from './app_swap_version_picker.mojom-webui.js';
++
++export interface Row {
++  value: string;
++  primaryText: string;
++  secondaryText: string;
++  isCurrent: boolean;
++}
++
++export class AppSwapVersionPickerAppElement extends CrLitElement {
++  static get is() {
++    return 'app-swap-version-picker-app';
++  }
++
++  static override get styles() {
++    return getCss();
++  }
++
++  override render() {
++    return getHtml.bind(this)();
++  }
++
++  static override get properties() {
++    return {
++      filter_: {type: String},
++      tagRows_: {type: Array},
++      versionRows_: {type: Array},
++      loading_: {type: Boolean},
++    };
++  }
++
++  private apiProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
++  protected accessor filter_: string = '';
++  protected accessor tagRows_: Row[] = [];
++  protected accessor versionRows_: Row[] = [];
++  protected accessor loading_: boolean = true;
++
++  override connectedCallback() {
++    super.connectedCallback();
++    this.apiProxy_.handler.getVersionInfo().then(
++        ({tags, versions, currentValue}) => {
++          this.tagRows_ = tags.map((tag: TagInfo) => ({
++                                     value: tag.name,
++                                     primaryText: tag.name,
++                                     secondaryText: tag.resolvedVersion,
++                                     isCurrent: tag.name === currentValue,
++                                   }));
++          this.versionRows_ = versions.map((version: VersionInfo) => ({
++                                             value: version.version,
++                                             primaryText: version.version,
++                                             secondaryText:
++                                                 version.tags.join(', '),
++                                             isCurrent:
++                                                 version.version ===
++                                                 currentValue,
++                                           }));
++          this.loading_ = false;
++        });
++  }
++
++  protected onFilterValueChanged_(e: CustomEvent<{value: string}>) {
++    this.filter_ = e.detail.value;
++  }
++
++  protected filteredTagRows_(): Row[] {
++    return this.filterRows_(this.tagRows_);
++  }
++
++  protected filteredVersionRows_(): Row[] {
++    return this.filterRows_(this.versionRows_);
++  }
++
++  private filterRows_(rows: Row[]): Row[] {
++    const filter = this.filter_.trim().toLowerCase();
++    if (!filter) {
++      return rows;
++    }
++    return rows.filter(
++        row => row.primaryText.toLowerCase().includes(filter) ||
++            row.secondaryText.toLowerCase().includes(filter));
++  }
++
++  protected async onRowClick_(e: Event) {
++    const value = (e.currentTarget as HTMLElement).dataset['value']!;
++    const {success} = await this.apiProxy_.handler.selectVersion(value);
++    if (success) {
++      window.close();
++    }
++  }
++}
++
++declare global {
++  interface HTMLElementTagNameMap {
++    'app-swap-version-picker-app': AppSwapVersionPickerAppElement;
++  }
++}
++
++customElements.define(
++    AppSwapVersionPickerAppElement.is, AppSwapVersionPickerAppElement);
+diff --git a/chrome/browser/resources/app_swap_version_picker/app_swap_version_picker.html b/chrome/browser/resources/app_swap_version_picker/app_swap_version_picker.html
+new file mode 100644
+index 0000000000000..1a1edce0effef
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_version_picker/app_swap_version_picker.html
+@@ -0,0 +1,19 @@
++<!doctype html>
++<html dir="$i18n{textdirection}" lang="$i18n{language}">
++<head>
++  <meta charset="utf-8">
++  <title>Switch version</title>
++  <link rel="stylesheet" href="chrome://theme/colors.css?sets=ui,chrome">
++  <link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
++  <style>
++    html,
++    body {
++      margin: 0;
++    }
++  </style>
++</head>
++<body>
++  <app-swap-version-picker-app></app-swap-version-picker-app>
++  <script type="module" src="app.js"></script>
++</body>
++</html>
+diff --git a/chrome/browser/resources/app_swap_version_picker/browser_proxy.ts b/chrome/browser/resources/app_swap_version_picker/browser_proxy.ts
+new file mode 100644
+index 0000000000000..1c72e0fe3b13e
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_version_picker/browser_proxy.ts
+@@ -0,0 +1,28 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {PageHandlerFactory, PageHandlerRemote} from './app_swap_version_picker.mojom-webui.js';
++
++export interface BrowserProxy {
++  handler: PageHandlerRemote;
++}
++
++export class BrowserProxyImpl implements BrowserProxy {
++  handler: PageHandlerRemote = new PageHandlerRemote();
++
++  constructor() {
++    const factory = PageHandlerFactory.getRemote();
++    factory.createPageHandler(this.handler.$.bindNewPipeAndPassReceiver());
++  }
++
++  static getInstance(): BrowserProxy {
++    return instance || (instance = new BrowserProxyImpl());
++  }
++
++  static setInstance(obj: BrowserProxy) {
++    instance = obj;
++  }
++}
++
++let instance: BrowserProxy|null = null;
+diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.h b/chrome/browser/ui/views/page_info/page_info_bubble_view.h
+index 71997156f1eff..4e6c9248ad042 100644
+--- a/chrome/browser/ui/views/page_info/page_info_bubble_view.h
++++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.h
+@@ -46,6 +46,7 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
+   void OpenPermissionPage(ContentSettingsType type) override;
+   void OpenCookiesPage() override;
+   void OpenMerchantTrustPage() override;
++  void OpenVersionPickerPage(AppSwapApp app) override;
+   void CloseBubble() override;
+ 
+   // WebContentsObserver:
+@@ -74,6 +75,13 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
+ 
+   void AnnouncePageOpened(std::u16string announcement);
+ 
++  // Adds the "Package: ..." row to `main_page_view` if the tab is showing a
++  // page served via a configured AppSwap route. `main_page_view` is rebuilt
++  // from scratch on every OpenMainPage() call (e.g. clicking "Back" from a
++  // subpage), so this needs calling there too, not just once at
++  // construction.
++  void MaybeAddAppSwapPackageInfoView(views::View* main_page_view);
++
+   // The presenter that controls the Page Info UI.
+   std::unique_ptr<PageInfo> presenter_;
+ 
+diff --git a/chrome/browser/ui/views/page_info/page_info_navigation_handler.h b/chrome/browser/ui/views/page_info/page_info_navigation_handler.h
+index 0037c170cb9b6..83baefff96d68 100644
+--- a/chrome/browser/ui/views/page_info/page_info_navigation_handler.h
++++ b/chrome/browser/ui/views/page_info/page_info_navigation_handler.h
+@@ -6,6 +6,7 @@
+ #define CHROME_BROWSER_UI_VIEWS_PAGE_INFO_PAGE_INFO_NAVIGATION_HANDLER_H_
+ 
+ #include "base/functional/callback_forward.h"
++#include "chrome/browser/app_swap/app_swap_apps_service.h"
+ #include "components/content_settings/core/common/content_settings_types.h"
+ #include "components/page_info/core/page_info_types.h"
+ 
+@@ -20,6 +21,7 @@ class PageInfoNavigationHandler {
+   virtual void OpenPermissionPage(ContentSettingsType type) = 0;
+   virtual void OpenCookiesPage() = 0;
+   virtual void OpenMerchantTrustPage() = 0;
++  virtual void OpenVersionPickerPage(AppSwapApp app) = 0;
+   virtual void CloseBubble() = 0;
+ };
+ 
+diff --git a/chrome/browser/ui/webui/app_swap_version_picker/BUILD.gn b/chrome/browser/ui/webui/app_swap_version_picker/BUILD.gn
+new file mode 100644
+index 0000000000000..ac6d1ecb0af27
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_version_picker/BUILD.gn
+@@ -0,0 +1,36 @@
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//mojo/public/tools/bindings/mojom.gni")
++
++assert(!is_android)
++
++mojom("mojo_bindings") {
++  sources = [ "app_swap_version_picker.mojom" ]
++  webui_module_path = "/"
++}
++
++source_set("app_swap_version_picker") {
++  sources = [
++    "app_swap_version_picker_context.cc",
++    "app_swap_version_picker_context.h",
++    "app_swap_version_picker_page_handler.cc",
++    "app_swap_version_picker_page_handler.h",
++    "app_swap_version_picker_ui.cc",
++    "app_swap_version_picker_ui.h",
++  ]
++
++  deps = [
++    ":mojo_bindings",
++    "//base",
++    "//chrome/browser/app_swap",
++    "//chrome/browser/profiles:profile",
++    "//chrome/browser/resources/app_swap_version_picker:resources",
++    "//content/public/browser",
++    "//mojo/public/cpp/bindings",
++    "//net",
++    "//ui/webui",
++    "//url",
++  ]
++}
+diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom
+new file mode 100644
+index 0000000000000..21dd293c321c0
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom
+@@ -0,0 +1,38 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++module app_swap_version_picker.mojom;
++
++// A published dist-tag and the version it currently resolves to.
++struct TagInfo {
++  string name;
++  string resolved_version;
++};
++
++// A published version and the dist-tags (if any) currently pointing at it.
++struct VersionInfo {
++  string version;
++  array<string> tags;
++};
++
++interface PageHandlerFactory {
++  CreatePageHandler(pending_receiver<PageHandler> handler);
++};
++
++interface PageHandler {
++  // Tags first (each with what it currently resolves to), then every
++  // published version (each with any tags pointing at it) -- mirrors
++  // AppSwapArtifactProvider::FetchPackageMetadata(). `current_value` is
++  // this tab's effective version (its own pin, or the app's configured
++  // default), for pre-selecting/highlighting the active row. All fields
++  // come back empty on failure (network error, or the tab/app this bubble
++  // was opened for no longer exists).
++  GetVersionInfo() => (array<TagInfo> tags, array<VersionInfo> versions,
++                       string current_value);
++
++  // Pins the originating tab to `value` and reloads it once resolved.
++  // `success` is false if the tab or app no longer exists, or resolution
++  // failed.
++  SelectVersion(string value) => (bool success);
++};
+diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.cc b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.cc
+new file mode 100644
+index 0000000000000..b65e59660951e
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.cc
+@@ -0,0 +1,54 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.h"
++
++#include <utility>
++
++#include "base/no_destructor.h"
++#include "base/uuid.h"
++#include "content/public/browser/web_contents.h"
++
++WebContentsWeakHandle::WebContentsWeakHandle(content::WebContents* web_contents)
++    : content::WebContentsUserData<WebContentsWeakHandle>(*web_contents) {}
++
++WebContentsWeakHandle::~WebContentsWeakHandle() = default;
++
++base::WeakPtr<WebContentsWeakHandle> WebContentsWeakHandle::GetWeakPtr() {
++  return weak_factory_.GetWeakPtr();
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(WebContentsWeakHandle);
++
++AppSwapVersionPickerContext::Entry::Entry() = default;
++AppSwapVersionPickerContext::Entry::Entry(const Entry&) = default;
++AppSwapVersionPickerContext::Entry& AppSwapVersionPickerContext::Entry::
++operator=(const Entry&) = default;
++AppSwapVersionPickerContext::Entry::~Entry() = default;
++
++// static
++AppSwapVersionPickerContext* AppSwapVersionPickerContext::GetInstance() {
++  static base::NoDestructor<AppSwapVersionPickerContext> instance;
++  return instance.get();
++}
++
++AppSwapVersionPickerContext::AppSwapVersionPickerContext() = default;
++AppSwapVersionPickerContext::~AppSwapVersionPickerContext() = default;
++
++std::string AppSwapVersionPickerContext::Stash(Entry entry) {
++  std::string token = base::Uuid::GenerateRandomV4().AsLowercaseString();
++  entries_[token] = std::move(entry);
++  return token;
++}
++
++std::optional<AppSwapVersionPickerContext::Entry>
++AppSwapVersionPickerContext::Consume(const std::string& token) {
++  auto it = entries_.find(token);
++  if (it == entries_.end()) {
++    return std::nullopt;
++  }
++  Entry entry = std::move(it->second);
++  entries_.erase(it);
++  return entry;
++}
+diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.h b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.h
+new file mode 100644
+index 0000000000000..1be42a82502ce
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.h
+@@ -0,0 +1,100 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_CONTEXT_H_
++#define CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_CONTEXT_H_
++
++#include <map>
++#include <optional>
++#include <string>
++
++#include "base/functional/callback.h"
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/app_swap/app_swap_apps_service.h"
++#include "content/public/browser/web_contents_user_data.h"
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++// content::WebContents has no public GetWeakPtr(); this gives callers that
++// need to reference a tab across an async gap (network fetch, download) a
++// safe way to do so without holding a raw WebContents pointer that could be
++// closed out from under them.
++class WebContentsWeakHandle
++    : public content::WebContentsUserData<WebContentsWeakHandle> {
++ public:
++  ~WebContentsWeakHandle() override;
++
++  base::WeakPtr<WebContentsWeakHandle> GetWeakPtr();
++
++ private:
++  friend class content::WebContentsUserData<WebContentsWeakHandle>;
++  explicit WebContentsWeakHandle(content::WebContents* web_contents);
++
++  base::WeakPtrFactory<WebContentsWeakHandle> weak_factory_{this};
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++// One-shot registry mapping a random token (embedded in the version-picker
++// sub-page's URL query string) to the tab + app it was opened for.
++//
++// A content::WebUIController is constructed generically by the framework
++// from a URL alone -- there's no way to pass a WebContents pointer into its
++// constructor directly, and this page (unlike e.g. Tab Search) is tied to
++// one specific tab, not just the browser window it's shown in.
++// CreateAppSwapVersionPickerSubpageView() stashes an entry here and builds a
++// URL carrying its token; AppSwapVersionPickerUI's constructor consumes
++// (looks up and erases) it.
++class AppSwapVersionPickerContext {
++ public:
++  struct Entry {
++    Entry();
++    Entry(const Entry&);
++    Entry& operator=(const Entry&);
++    ~Entry();
++
++    base::WeakPtr<WebContentsWeakHandle> web_contents_handle;
++    AppSwapApp app;
++
++    // Closes the Page Info bubble this page was opened from -- a
++    // type-erased closure (rather than a PageInfoNavigationHandler pointer
++    // directly) so this webui-layer class doesn't need to depend on
++    // chrome/browser/ui/views/page_info. Picking a version reloads
++    // `web_contents_handle`'s tab -- while that reload's navigation commit
++    // fires WebContentsObserver notifications (e.g.
++    // DidChangeVisibleSecurityState) that a *still-open* Page Info bubble
++    // reacts to by re-querying security/identity state for the page that's
++    // mid-navigation, which PageInfo::PresentSiteIdentity() isn't prepared
++    // for (DCHECK_NE(site_identity_status_, SITE_IDENTITY_STATUS_UNKNOWN)
++    // fires). Closing the bubble first -- matching how the native dialog
++    // this replaced always closed Page Info before switching -- avoids
++    // that entirely, and matches the expected UX anyway. Null if the
++    // bubble/tab this page was opened for is already gone.
++    base::RepeatingClosure close_page_info;
++  };
++
++  static AppSwapVersionPickerContext* GetInstance();
++
++  AppSwapVersionPickerContext(const AppSwapVersionPickerContext&) = delete;
++  AppSwapVersionPickerContext& operator=(const AppSwapVersionPickerContext&) =
++      delete;
++
++  // Stashes `entry` and returns the token to embed in the bubble URL.
++  std::string Stash(Entry entry);
++
++  // Looks up and erases the entry for `token`. Returns nullopt if the token
++  // is unknown (e.g. already consumed, or a stale/malformed URL).
++  std::optional<Entry> Consume(const std::string& token);
++
++ private:
++  friend class base::NoDestructor<AppSwapVersionPickerContext>;
++  AppSwapVersionPickerContext();
++  ~AppSwapVersionPickerContext();
++
++  std::map<std::string, Entry> entries_;
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_CONTEXT_H_
+diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.cc b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.cc
+new file mode 100644
+index 0000000000000..9de2f4cdd2ec8
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.cc
+@@ -0,0 +1,166 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.h"
++
++#include <algorithm>
++#include <map>
++#include <utility>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/functional/bind.h"
++#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
++#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_version_utils.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/web_contents.h"
++
++AppSwapVersionPickerPageHandler::AppSwapVersionPickerPageHandler(
++    mojo::PendingReceiver<app_swap_version_picker::mojom::PageHandler>
++        handler,
++    std::optional<AppSwapVersionPickerContext::Entry> entry)
++    : entry_(std::move(entry)), receiver_(this, std::move(handler)) {}
++
++AppSwapVersionPickerPageHandler::~AppSwapVersionPickerPageHandler() = default;
++
++content::WebContents*
++AppSwapVersionPickerPageHandler::GetTargetWebContents() const {
++  if (!entry_ || !entry_->web_contents_handle) {
++    return nullptr;
++  }
++  return &entry_->web_contents_handle->GetWebContents();
++}
++
++void AppSwapVersionPickerPageHandler::GetVersionInfo(
++    GetVersionInfoCallback callback) {
++  content::WebContents* web_contents = GetTargetWebContents();
++  if (!web_contents) {
++    std::move(callback).Run({}, {}, std::string());
++    return;
++  }
++
++  AppSwapApp app = entry_->app;
++  AppSwapArtifactProvider::GetInstance()->FetchPackageMetadata(
++      app.ToSource(),
++      base::BindOnce(
++          [](base::WeakPtr<AppSwapVersionPickerPageHandler> self,
++             AppSwapApp app, base::WeakPtr<WebContentsWeakHandle> handle,
++             GetVersionInfoCallback callback,
++             std::optional<AppSwapPackageMetadata> metadata) {
++            if (!self || !handle || !metadata) {
++              std::move(callback).Run({}, {}, std::string());
++              return;
++            }
++            content::WebContents* web_contents = &handle->GetWebContents();
++
++            // "latest" first, then alphabetical -- same ordering the
++            // native dialog used.
++            std::vector<std::string> tag_names;
++            for (const auto& [tag, unused] : metadata->dist_tags) {
++              tag_names.push_back(tag);
++            }
++            std::sort(tag_names.begin(), tag_names.end(),
++                      [](const std::string& a, const std::string& b) {
++                        if (a == "latest" || b == "latest") {
++                          return a == "latest";
++                        }
++                        return a < b;
++                      });
++            std::vector<app_swap_version_picker::mojom::TagInfoPtr> tags;
++            for (const std::string& tag : tag_names) {
++              tags.push_back(app_swap_version_picker::mojom::TagInfo::New(
++                  tag, metadata->dist_tags.at(tag)));
++            }
++
++            // Invert dist-tags: version -> the tag names pointing at it.
++            std::map<std::string, std::vector<std::string>> tags_by_version;
++            for (const auto& [tag, version] : metadata->dist_tags) {
++              tags_by_version[version].push_back(tag);
++            }
++
++            std::vector<std::string> version_names = metadata->versions;
++            std::sort(version_names.begin(), version_names.end(),
++                      [](const std::string& a, const std::string& b) {
++                        return app_swap::IsNewerVersion(a, b);
++                      });
++            std::vector<app_swap_version_picker::mojom::VersionInfoPtr>
++                versions;
++            for (const std::string& version : version_names) {
++              std::vector<std::string> pointing_tags;
++              if (auto it = tags_by_version.find(version);
++                  it != tags_by_version.end()) {
++                pointing_tags = it->second;
++                std::sort(pointing_tags.begin(), pointing_tags.end());
++              }
++              versions.push_back(
++                  app_swap_version_picker::mojom::VersionInfo::New(
++                      version, std::move(pointing_tags)));
++            }
++
++            std::move(callback).Run(
++                std::move(tags), std::move(versions),
++                GetEffectiveAppSwapVersion(app, web_contents));
++          },
++          weak_factory_.GetWeakPtr(), app, entry_->web_contents_handle,
++          std::move(callback)));
++}
++
++void AppSwapVersionPickerPageHandler::SelectVersion(
++    const std::string& value,
++    SelectVersionCallback callback) {
++  content::WebContents* web_contents = GetTargetWebContents();
++  if (!web_contents) {
++    std::move(callback).Run(false);
++    return;
++  }
++
++  // Pin this specific tab to the picked version. Deliberately *not* also
++  // writing it into the app's own configured version (AppSwapAppsService::
++  // UpdateApp) -- doing so would silently change what every other,
++  // never-explicitly-pinned tab on this app resolves to as a side effect of
++  // picking a version in just one tab, defeating the point of a per-tab pin.
++  AppSwapVersionPinTabHelper::GetOrCreateForWebContents(web_contents)
++      ->SetPinnedVersion(entry_->app.id, value);
++
++  AppSwapApp app = entry_->app;
++  app.version = value;
++
++  // EnsureFreshThenGetOrDownload rather than plain GetOrDownload: picking a
++  // dist-tag the provider already has *some* cached resolution for should
++  // serve the tag's current version, not whatever was cached earlier.
++  AppSwapArtifactProvider::GetInstance()->EnsureFreshThenGetOrDownload(
++      app.ToSource(),
++      base::BindOnce(
++          [](base::WeakPtr<WebContentsWeakHandle> handle,
++             base::RepeatingClosure close_page_info,
++             SelectVersionCallback callback, base::FilePath dir) {
++            if (dir.empty() || !handle) {
++              std::move(callback).Run(false);
++              return;
++            }
++            // Reply before reloading, not after: reloading this tab can
++            // tear down the PageHandler this callback runs on (if it's
++            // the same tab Page Info -- and this sub-page's WebView --
++            // is anchored to, the reload's navigation commit fires
++            // PageInfoBubbleViewBase::PrimaryPageChanged, which closes
++            // the whole Page Info widget). `callback`'s underlying mojo
++            // pipe lives on that PageHandler, so it must be run first,
++            // while everything is still guaranteed alive.
++            std::move(callback).Run(true);
++            // Close Page Info before reloading, not after: leaving it open
++            // through the reload lets it react to the mid-navigation
++            // security-state notifications that fire as part of the
++            // commit, which PageInfo::PresentSiteIdentity() isn't
++            // prepared for (DCHECK_NE(site_identity_status_,
++            // SITE_IDENTITY_STATUS_UNKNOWN) fires).
++            if (close_page_info) {
++              close_page_info.Run();
++            }
++            handle->GetWebContents().GetController().Reload(
++                content::ReloadType::NORMAL, /*check_for_repost=*/false);
++          },
++          entry_->web_contents_handle, entry_->close_page_info,
++          std::move(callback)));
++}
+diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.h b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.h
+new file mode 100644
+index 0000000000000..c2bf01eaca2e7
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.h
+@@ -0,0 +1,58 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_PAGE_HANDLER_H_
++#define CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_PAGE_HANDLER_H_
++
++#include <optional>
++#include <string>
++
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom.h"
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++// Implements the version-picker's PageHandler: fetches the package's
++// dist-tags/versions for display, and performs the actual switch (pin +
++// resolve + reload) the originating tab when one is picked. `entry` (the
++// target tab + AppSwapApp, consumed from AppSwapVersionPickerContext by
++// AppSwapVersionPickerUI) is nullopt if the token in the page's URL was
++// unknown/stale -- every method then just reports failure/empty rather than
++// crashing, since that can legitimately happen (e.g. the tab closed in the
++// gap between navigating here and the page actually loading).
++class AppSwapVersionPickerPageHandler
++    : public app_swap_version_picker::mojom::PageHandler {
++ public:
++  AppSwapVersionPickerPageHandler(
++      mojo::PendingReceiver<app_swap_version_picker::mojom::PageHandler>
++          handler,
++      std::optional<AppSwapVersionPickerContext::Entry> entry);
++  AppSwapVersionPickerPageHandler(const AppSwapVersionPickerPageHandler&) =
++      delete;
++  AppSwapVersionPickerPageHandler& operator=(
++      const AppSwapVersionPickerPageHandler&) = delete;
++  ~AppSwapVersionPickerPageHandler() override;
++
++  // app_swap_version_picker::mojom::PageHandler:
++  void GetVersionInfo(GetVersionInfoCallback callback) override;
++  void SelectVersion(const std::string& value,
++                     SelectVersionCallback callback) override;
++
++ private:
++  // Returns the target WebContents, or nullptr if `entry_` is unset or the
++  // tab it referred to has since been closed.
++  content::WebContents* GetTargetWebContents() const;
++
++  std::optional<AppSwapVersionPickerContext::Entry> entry_;
++  mojo::Receiver<app_swap_version_picker::mojom::PageHandler> receiver_;
++
++  base::WeakPtrFactory<AppSwapVersionPickerPageHandler> weak_factory_{this};
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_PAGE_HANDLER_H_
+diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.cc b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.cc
+new file mode 100644
+index 0000000000000..b8bc8a609b8df
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.cc
+@@ -0,0 +1,65 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h"
++
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.h"
++#include "chrome/grit/app_swap_version_picker_resources.h"
++#include "chrome/grit/app_swap_version_picker_resources_map.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++#include "content/public/common/url_constants.h"
++#include "net/base/url_util.h"
++#include "ui/webui/webui_util.h"
++#include "url/gurl.h"
++
++AppSwapVersionPickerUIConfig::AppSwapVersionPickerUIConfig()
++    : DefaultWebUIConfig(content::kChromeUIScheme,
++                         "appswap-version-picker") {}
++
++AppSwapVersionPickerUI::AppSwapVersionPickerUI(content::WebUI* web_ui,
++                                               const GURL& url)
++    : content::WebUIController(web_ui) {
++  Profile* profile = Profile::FromWebUI(web_ui);
++  content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
++      profile, "appswap-version-picker");
++  webui::SetupWebUIDataSource(
++      source, kAppSwapVersionPickerResources,
++      IDR_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_HTML);
++
++  // The tab/app this page is for was stashed under a token embedded in
++  // `url`'s query string by CreateAppSwapVersionPickerSubpageView() -- see
++  // AppSwapVersionPickerContext's comment. Consumed here, once.
++  std::string token;
++  net::GetValueForKeyInQuery(url, "token", &token);
++  consumed_entry_ = AppSwapVersionPickerContext::GetInstance()->Consume(token);
++}
++
++AppSwapVersionPickerUI::~AppSwapVersionPickerUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(AppSwapVersionPickerUI)
++
++void AppSwapVersionPickerUI::WebUIRenderFrameCreated(
++    content::RenderFrameHost* rfh) {
++  rfh->EnableMojoJsBindings(nullptr);
++}
++
++void AppSwapVersionPickerUI::BindInterface(
++    mojo::PendingReceiver<app_swap_version_picker::mojom::PageHandlerFactory>
++        receiver) {
++  page_factory_receiver_.reset();
++  page_factory_receiver_.Bind(std::move(receiver));
++}
++
++void AppSwapVersionPickerUI::CreatePageHandler(
++    mojo::PendingReceiver<app_swap_version_picker::mojom::PageHandler>
++        handler) {
++  page_handler_ = std::make_unique<AppSwapVersionPickerPageHandler>(
++      std::move(handler), std::move(consumed_entry_));
++}
+diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h
+new file mode 100644
+index 0000000000000..5b8b57da99c93
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h
+@@ -0,0 +1,79 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_UI_H_
++
++#include <memory>
++#include <optional>
++
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom.h"
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++
++class AppSwapVersionPickerPageHandler;
++class AppSwapVersionPickerUI;
++class GURL;
++
++namespace content {
++class RenderFrameHost;
++}  // namespace content
++
++class AppSwapVersionPickerUIConfig
++    : public content::DefaultWebUIConfig<AppSwapVersionPickerUI> {
++ public:
++  AppSwapVersionPickerUIConfig();
++};
++
++// The "Switch version" content shown as a Page Info sub-page (like
++// "Cookies and Site Data" or "Permissions") -- a small WebUI page embedded
++// directly via a plain views::WebView, not a separate floating bubble.
++// Page Info's own sub-page navigation (PageInfoNavigationHandler /
++// PageInfoBubbleView::SwitchToPage) already handles showing/hiding this
++// alongside a "Back" button, so this class only needs to be a normal,
++// directly-navigable WebUI page -- no TopChromeWebUIController/
++// WebUIBubbleManager "hidden until shown" machinery, which is specific to
++// floating anchored bubbles and doesn't apply here (and, being anchored to
++// a view living inside Page Info's *own* popup, that approach also
++// suffered from Page Info's popup closing itself right after dispatching
++// the triggering click, immediately auto-closing the anchored bubble
++// before its renderer ever got a chance to run).
++//
++// The tab/app this page is for is threaded in via AppSwapVersionPickerContext
++// (see that class's comment for why a URL-embedded token, not a direct
++// constructor argument).
++class AppSwapVersionPickerUI : public content::WebUIController,
++                               public app_swap_version_picker::mojom::
++                                   PageHandlerFactory {
++ public:
++  AppSwapVersionPickerUI(content::WebUI* web_ui, const GURL& url);
++  AppSwapVersionPickerUI(const AppSwapVersionPickerUI&) = delete;
++  AppSwapVersionPickerUI& operator=(const AppSwapVersionPickerUI&) = delete;
++  ~AppSwapVersionPickerUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<
++          app_swap_version_picker::mojom::PageHandlerFactory> receiver);
++
++ private:
++  // content::WebUIController:
++  void WebUIRenderFrameCreated(content::RenderFrameHost* rfh) override;
++
++  // app_swap_version_picker::mojom::PageHandlerFactory:
++  void CreatePageHandler(
++      mojo::PendingReceiver<app_swap_version_picker::mojom::PageHandler>
++          handler) override;
++
++  std::optional<AppSwapVersionPickerContext::Entry> consumed_entry_;
++  std::unique_ptr<AppSwapVersionPickerPageHandler> page_handler_;
++  mojo::Receiver<app_swap_version_picker::mojom::PageHandlerFactory>
++      page_factory_receiver_{this};
++
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_UI_H_
+diff --git a/third_party/lit/v3_0/BUILD.gn b/third_party/lit/v3_0/BUILD.gn
+index 087c776b3a90d..ecf7f9562d025 100644
+--- a/third_party/lit/v3_0/BUILD.gn
++++ b/third_party/lit/v3_0/BUILD.gn
+@@ -30,6 +30,7 @@ ts_library("build_ts") {
+     "//chrome/browser/resources/app_home:build_ts",
+     "//chrome/browser/resources/app_service_internals:build_ts",
+     "//chrome/browser/resources/app_settings:build_ts",
++    "//chrome/browser/resources/app_swap_version_picker:build_ts",
+     "//chrome/browser/resources/autofill_ml_internals:build_ts",
+     "//chrome/browser/resources/bookmarks:build_ts",
+     "//chrome/browser/resources/browser_switch:build_ts",
+diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_ids.spec
+index b5503c48ce1c4..ce0b2489171b6 100644
+--- a/tools/gritsettings/resource_ids.spec
++++ b/tools/gritsettings/resource_ids.spec
+@@ -228,6 +228,10 @@
+     "META": {"sizes": {"includes": [45]}},
+     "includes": [2800],
+   },
++  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/app_swap_version_picker/resources.grd": {
++    "META": {"sizes": {"includes": [10]}},
++    "includes": [2810],
++  },
+   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/ash/extended_updates/resources.grd": {
+     "META": {"sizes": {"includes": [20]}},
+     "includes": [2820],

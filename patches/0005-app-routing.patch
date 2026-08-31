@@ -3299,7 +3299,7 @@ index dde051181fa13..23b70734712fd 100644
    if (disable_secure_dns) {
      WebContents* web_contents = WebContents::FromRenderFrameHost(frame);
 diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
-index 17a9289e00ac8..34d5cf1c69907 100644
+index 17a9289e00ac8..857fec92189da 100644
 --- a/chrome/browser/ui/webui/BUILD.gn
 +++ b/chrome/browser/ui/webui/BUILD.gn
 @@ -53,6 +53,7 @@ source_set("configs") {
@@ -3310,27 +3310,37 @@ index 17a9289e00ac8..34d5cf1c69907 100644
      "//chrome/browser/actor/ui:actor_overlay",
      "//chrome/browser/contextual_tasks:ui",
      "//chrome/browser/glic",
+@@ -114,6 +115,7 @@ source_set("configs") {
+       "//chrome/browser/actor/ui:actor_overlay_web_view",
+       "//chrome/browser/ui/webui/access_code_cast",
+       "//chrome/browser/ui/webui/app_service_internals",
++      "//chrome/browser/ui/webui/app_swap_version_picker",
+       "//chrome/browser/ui/webui/autofill_ml_internals",
+       "//chrome/browser/ui/webui/color_pipeline_internals",
+       "//chrome/browser/ui/webui/history",
 diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-index 7a947c092bfaf..591110e20254c 100644
+index 7a947c092bfaf..c05b3331b7a1b 100644
 --- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-@@ -13,6 +13,9 @@
+@@ -13,6 +13,10 @@
  #include "chrome/browser/optimization_guide/optimization_guide_internals_ui.h"
  #include "chrome/browser/ui/webui/about/about_ui.h"
  #include "chrome/browser/ui/webui/accessibility/accessibility_ui.h"
 +#include "chrome/browser/app_swap/app_swap_apps_ui.h"
 +#include "chrome/browser/app_swap/app_swap_profiles_ui.h"
 +#include "chrome/browser/app_swap/app_swap_routes_ui.h"
++#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h"
  #include "chrome/browser/ui/webui/actor_internals/actor_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/autofill_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/password_manager_internals_ui.h"
-@@ -252,6 +255,9 @@ void RegisterChromeWebUIConfigs() {
+@@ -252,6 +256,10 @@ void RegisterChromeWebUIConfigs() {
  
    auto& map = content::WebUIConfigMap::GetInstance();
    map.AddWebUIConfig(std::make_unique<AccessibilityUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapAppsUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapRoutesUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapProfilesUIConfig>());
++  map.AddWebUIConfig(std::make_unique<AppSwapVersionPickerUIConfig>());
    map.AddWebUIConfig(std::make_unique<AutofillInternalsUIConfig>());
    map.AddWebUIConfig(std::make_unique<BluetoothInternalsUIConfig>());
    map.AddWebUIConfig(

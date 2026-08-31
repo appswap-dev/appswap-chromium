@@ -1,22 +1,23 @@
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 50920511caf57..89f858f617cd9 100644
+index 50920511caf57..4ef3547d2c046 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
-@@ -792,6 +792,8 @@ static_library("ui") {
+@@ -792,6 +792,9 @@ static_library("ui") {
      "//chrome/browser/ui/toolbar",
      "//chrome/browser/ui/toolbar:impl",
      "//chrome/browser/ui/translate",
 +    "//chrome/browser/app_swap",
 +    "//chrome/browser/ui/views/app_swap",
++    "//chrome/browser/ui/webui/app_swap_version_picker",
      "//chrome/browser/ui/views/eye_dropper",
      "//chrome/browser/ui/views/file_system_access",
      "//chrome/browser/ui/views/file_system_access:impl",
 diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..c44af463ebc34
+index 0000000000000..1b36a9e870483
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/BUILD.gn
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,40 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -36,10 +37,14 @@ index 0000000000000..c44af463ebc34
 +  deps = [
 +    "//base",
 +    "//chrome/browser/app_swap",
++    "//chrome/browser/profiles:profile",
 +    "//chrome/browser/ui/browser_window",
 +    "//chrome/browser/ui/page_info",
 +    "//chrome/browser/ui/tabs",
++    "//chrome/browser/ui/views/page_info",
 +    "//chrome/browser/ui/views/controls:controls",
++    "//chrome/browser/ui/webui/app_swap_version_picker",
++    "//chrome/app:generated_resources",
 +    "//components/constrained_window",
 +    "//components/tabs:impl",
 +    "//content/public/browser",
@@ -49,6 +54,7 @@ index 0000000000000..c44af463ebc34
 +    "//ui/gfx",
 +    "//ui/menus",
 +    "//ui/views",
++    "//ui/views/controls/webview",
 +    "//url",
 +  ]
 +}

@@ -249,6 +249,26 @@ gen 0013-npm-update-checker.patch \
   chrome/browser/prefs/browser_prefs.cc \
   chrome/browser/prefs/BUILD.gn
 
+# The "Switch version" UI, rebuilt as a WebUI (Mojo + Lit) page hosted as a
+# Page Info sub-page (like "Cookies and Site Data") rather than the native
+# ui::DialogModel-based popup app_swap_version_picker_dialog.cc used to show
+# -- that file now just builds a views::WebView pointed at
+# chrome://appswap-version-picker/ instead, still covered by 0011 above.
+# page_info_bubble_view.h and page_info_navigation_handler.h weren't
+# previously touched by any patch (only page_info_bubble_view.cc was, via
+# 0007), so they're new here alongside the rest of the plumbing this needed:
+# the interface-broker registration switch in
+# chrome_browser_interface_binders_webui_parts_desktop.cc, the new GRIT
+# resource id range, and the Lit build's third_party visibility entry.
+gen 0014-npm-version-picker-webui.patch \
+  chrome/browser/ui/webui/app_swap_version_picker \
+  chrome/browser/resources/app_swap_version_picker \
+  chrome/browser/ui/views/page_info/page_info_bubble_view.h \
+  chrome/browser/ui/views/page_info/page_info_navigation_handler.h \
+  chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc \
+  tools/gritsettings/resource_ids.spec \
+  third_party/lit/v3_0/BUILD.gn
+
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."
 for f in $(git status --porcelain --untracked-files=no | cut -c4-); do
