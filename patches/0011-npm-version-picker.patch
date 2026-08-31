@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/app_swap/app_swap_version_utils.cc b/chrome/browser/app_swap/app_swap_version_utils.cc
 new file mode 100644
-index 0000000000000..082a7872e7231
+index 0000000000000..b234e8bcf8c94
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_utils.cc
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,70 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -19,8 +19,14 @@ index 0000000000000..082a7872e7231
 +
 +namespace {
 +
-+// Splits a version string like "1.2.3" into {1, 2, 3}. Returns an empty
-+// vector if any component isn't a plain integer.
++// Splits a version string like "1.2.3" into {1, 2, 3}. Each component is
++// parsed by its leading run of digits, so a pre-release/build suffix like
++// "1.2.3-next" or "1.2.3-beta.1" still parses its numeric part ({1, 2, 3})
++// instead of failing the whole version -- without this, two suffixed
++// versions differing only in a double-digit segment (e.g. "1.2.10-next" vs
++// "1.2.9-next") would fall back to string comparison and compare backwards.
++// Returns an empty vector if any component has no leading digits at all
++// (this isn't a version number, e.g. a dist-tag name like "next").
 +std::vector<int> SplitVersion(const std::string& version) {
 +  std::vector<int> parts;
 +  size_t start = 0;
@@ -28,8 +34,13 @@ index 0000000000000..082a7872e7231
 +    const size_t dot = version.find('.', start);
 +    const std::string part = version.substr(
 +        start, dot == std::string::npos ? std::string::npos : dot - start);
++    size_t digit_end = 0;
++    while (digit_end < part.size() && part[digit_end] >= '0' &&
++          part[digit_end] <= '9') {
++      ++digit_end;
++    }
 +    int n = 0;
-+    if (!base::StringToInt(part, &n)) {
++    if (digit_end == 0 || !base::StringToInt(part.substr(0, digit_end), &n)) {
 +      return {};
 +    }
 +    parts.push_back(n);
