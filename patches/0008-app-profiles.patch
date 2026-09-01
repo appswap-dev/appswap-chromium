@@ -362,10 +362,10 @@ index 0000000000000..75c7717cbb467
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILES_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_profiles_ui.cc b/chrome/browser/app_swap/app_swap_profiles_ui.cc
 new file mode 100644
-index 0000000000000..ec8edcc726ec9
+index 0000000000000..9c28deaa0d04b
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profiles_ui.cc
-@@ -0,0 +1,547 @@
+@@ -0,0 +1,548 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -613,6 +613,7 @@ index 0000000000000..ec8edcc726ec9
 +      <nav class="tabs">
 +        <a href="appswap://apps">Apps</a>
 +        <a href="appswap://routes">Routes</a>
++        <a href="appswap://rewrites">Rewrites</a>
 +        <a href="appswap://profiles" class="active">Profiles</a>
 +      </nav>
 +    </div>

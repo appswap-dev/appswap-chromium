@@ -167,10 +167,10 @@ index 2db8d679023ad..9d487eaee8729 100644
      "//components/safe_browsing/core/browser:suspicious_site_warning_allowlist",
      "//components/strings:components_branded_strings_grit",
 diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-index ce635526633ef..3e6acc4fc538b 100644
+index ce635526633ef..1528d6a6b7f8e 100644
 --- a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 +++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-@@ -6,6 +6,11 @@
+@@ -6,6 +6,12 @@
  
  #include <memory>
  
@@ -178,11 +178,12 @@ index ce635526633ef..3e6acc4fc538b 100644
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
 +#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_url_loader_factory.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
  #include "chrome/browser/page_info/page_info_features.h"
  #include "chrome/browser/platform_util.h"
  #include "chrome/browser/ui/browser_window.h"
-@@ -13,9 +18,11 @@
+@@ -13,9 +19,11 @@
  #include "chrome/browser/ui/page_info/chrome_page_info_delegate.h"
  #include "chrome/browser/ui/page_info/chrome_page_info_ui_delegate.h"
  #include "chrome/browser/ui/page_info/page_info_dialog.h"
@@ -194,7 +195,7 @@ index ce635526633ef..3e6acc4fc538b 100644
  #include "chrome/browser/ui/views/page_info/page_info_bubble_specification.h"
  #include "chrome/browser/ui/views/page_info/page_info_main_view.h"
  #include "chrome/browser/ui/views/page_info/page_info_merchant_trust_content_view.h"
-@@ -27,13 +34,17 @@
+@@ -27,13 +35,19 @@
  #include "components/page_info/core/features.h"
  #include "components/privacy_sandbox/privacy_sandbox_features.h"
  #include "components/strings/grit/components_branded_strings.h"
@@ -204,6 +205,8 @@ index ce635526633ef..3e6acc4fc538b 100644
 +#include "content/public/browser/web_contents.h"
  #include "content/public/common/url_constants.h"
  #include "extensions/buildflags/buildflags.h"
++#include "net/base/url_util.h"
++#include "ui/base/clipboard/scoped_clipboard_writer.h"
  #include "ui/base/l10n/l10n_util.h"
  #include "ui/base/metadata/metadata_impl_macros.h"
 +#include "ui/base/models/image_model.h"
@@ -212,7 +215,7 @@ index ce635526633ef..3e6acc4fc538b 100644
  #include "ui/views/layout/box_layout.h"
  #include "url/gurl.h"
  
-@@ -85,6 +96,44 @@ bool ShouldRouteToInternalBubble(const GURL& url,
+@@ -85,6 +99,70 @@ bool ShouldRouteToInternalBubble(const GURL& url,
    return IsExtensionPageInfoBubble(url, web_contents);
  }
  
@@ -254,10 +257,36 @@ index ce635526633ef..3e6acc4fc538b 100644
 +      u"Version: " + version_text, PageInfoViewFactory::GetOpenSubpageIcon());
 +}
 +
++// Builds the "Copy link" row: copies a URL that reproduces this tab's exact
++// current version when opened later (bookmarked, shared, etc.), via
++// kAppSwapUseVersionQueryKey (see its comment in
++// app_swap_url_loader_factory.h) -- a no-op if the tab hasn't finished
++// resolving a version yet.
++std::unique_ptr<views::View> CreateAppSwapCopyLinkView(
++    content::WebContents* web_contents) {
++  return std::make_unique<RichHoverButton>(
++      base::BindRepeating(
++          [](content::WebContents* web_contents) {
++            AppSwapUpdateAvailableTabHelper* helper =
++                AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents);
++            if (!helper || !helper->committed_version()) {
++              return;
++            }
++            GURL link = net::AppendOrReplaceQueryParameter(
++                web_contents->GetLastCommittedURL(),
++                kAppSwapUseVersionQueryKey, *helper->committed_version());
++            ui::ScopedClipboardWriter writer(ui::ClipboardBuffer::kCopyPaste);
++            writer.WriteText(base::UTF8ToUTF16(link.spec()));
++          },
++          base::Unretained(web_contents)),
++      PageInfoViewFactory::GetImageModel(vector_icons::kContentCopyIcon),
++      u"Copy link to this version", std::u16string());
++}
++
  }  // namespace
  
  // The regular PageInfoBubbleView is not supported for internal Chrome pages and
-@@ -139,7 +188,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
+@@ -139,7 +217,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
        text = IDS_PAGE_INFO_READER_MODE_PAGE;
      }
    } else {
@@ -267,7 +296,7 @@ index ce635526633ef..3e6acc4fc538b 100644
    }
  
    // Title insets assume there is content (and thus have no bottom padding). Use
-@@ -222,6 +272,8 @@ PageInfoBubbleView::PageInfoBubbleView(
+@@ -222,6 +301,8 @@ PageInfoBubbleView::PageInfoBubbleView(
    std::unique_ptr<views::View> main_page_view =
        view_factory_->CreateMainPageView(std::move(initialized_callback));
    main_page_view->SetID(PageInfoViewFactory::VIEW_ID_PAGE_INFO_CURRENT_VIEW);
@@ -276,7 +305,7 @@ index ce635526633ef..3e6acc4fc538b 100644
    page_container_ = AddChildView(
        std::make_unique<PageSwitcherView>(std::move(main_page_view)));
  
-@@ -238,6 +290,21 @@ PageInfoBubbleView::~PageInfoBubbleView() {
+@@ -238,6 +319,22 @@ PageInfoBubbleView::~PageInfoBubbleView() {
    RemoveAllChildViews();
  }
  
@@ -293,12 +322,13 @@ index ce635526633ef..3e6acc4fc538b 100644
 +  }
 +  main_page_view->AddChildView(
 +      CreateAppSwapPackageInfoView(*app, web_contents(), this));
++  main_page_view->AddChildView(CreateAppSwapCopyLinkView(web_contents()));
 +}
 +
  // static
  views::BubbleDialogDelegateView* PageInfoBubbleView::CreatePageInfoBubble(
      std::unique_ptr<PageInfoBubbleSpecification> specification) {
-@@ -270,6 +337,7 @@ void PageInfoBubbleView::OpenMainPage(base::OnceClosure initialized_callback) {
+@@ -270,6 +367,7 @@ void PageInfoBubbleView::OpenMainPage(base::OnceClosure initialized_callback) {
    std::unique_ptr<views::View> main_page_view =
        view_factory_->CreateMainPageView(std::move(initialized_callback));
    main_page_view->SetID(PageInfoViewFactory::VIEW_ID_PAGE_INFO_CURRENT_VIEW);
@@ -306,7 +336,7 @@ index ce635526633ef..3e6acc4fc538b 100644
    page_container_->SwitchToPage(std::move(main_page_view));
  
    auto* close_button = page_container_->GetViewByID(
-@@ -310,6 +378,18 @@ void PageInfoBubbleView::OpenCookiesPage() {
+@@ -310,6 +408,18 @@ void PageInfoBubbleView::OpenCookiesPage() {
    AnnouncePageOpened(l10n_util::GetStringUTF16(IDS_PAGE_INFO_COOKIES));
  }
  

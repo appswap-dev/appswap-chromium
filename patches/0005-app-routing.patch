@@ -12,10 +12,10 @@ index 2a3958f78ddb6..4e6f3b49ffa24 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..755afe025506c
+index 0000000000000..880e2170ab78d
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,71 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -40,6 +40,10 @@ index 0000000000000..755afe025506c
 +    "app_swap_profiles_service.h",
 +    "app_swap_profiles_ui.cc",
 +    "app_swap_profiles_ui.h",
++    "app_swap_rewrite_rules_service.cc",
++    "app_swap_rewrite_rules_service.h",
++    "app_swap_rewrite_rules_ui.cc",
++    "app_swap_rewrite_rules_ui.h",
 +    "app_swap_routes_service.cc",
 +    "app_swap_routes_service.h",
 +    "app_swap_routes_ui.cc",
@@ -384,10 +388,10 @@ index 0000000000000..1a76ba1fa4bcf
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_apps_ui.cc b/chrome/browser/app_swap/app_swap_apps_ui.cc
 new file mode 100644
-index 0000000000000..655d25f1fc663
+index 0000000000000..05f96ac66a904
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_ui.cc
-@@ -0,0 +1,596 @@
+@@ -0,0 +1,597 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -643,6 +647,7 @@ index 0000000000000..655d25f1fc663
 +      <nav class="tabs">
 +        <a href="appswap://apps" class="active">Apps</a>
 +        <a href="appswap://routes">Routes</a>
++        <a href="appswap://rewrites">Rewrites</a>
 +        <a href="appswap://profiles">Profiles</a>
 +      </nav>
 +    </div>
@@ -1020,22 +1025,25 @@ index 0000000000000..3f7310edb06f2
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_UI_H_
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.cc b/chrome/browser/app_swap/app_swap_artifact_provider.cc
 new file mode 100644
-index 0000000000000..3308209f92432
+index 0000000000000..01a8501a93e64
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.cc
-@@ -0,0 +1,494 @@
+@@ -0,0 +1,549 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
 +
++#include <algorithm>
 +#include <memory>
 +#include <optional>
 +#include <string>
 +#include <utility>
++#include <vector>
 +
 +#include "base/compiler_specific.h"
++#include "base/files/file_enumerator.h"
 +#include "base/files/file_path.h"
 +#include "base/files/file_util.h"
 +#include "base/functional/bind.h"
@@ -1045,6 +1053,7 @@ index 0000000000000..3308209f92432
 +#include "base/strings/string_util.h"
 +#include "base/task/thread_pool.h"
 +#include "base/values.h"
++#include "chrome/browser/app_swap/app_swap_version_utils.h"
 +#include "chrome/browser/net/system_network_context_manager.h"
 +#include "chrome/common/chrome_paths.h"
 +#include "net/base/net_errors.h"
@@ -1099,6 +1108,34 @@ index 0000000000000..3308209f92432
 +    }
 +  }
 +  return base::StrCat({source.registry, "/", encoded});
++}
++
++base::FilePath PackageDir(const AppSwapSource& source) {
++  base::FilePath apps_dir;
++  if (!base::PathService::Get(chrome::DIR_USER_DATA, &apps_dir)) {
++    base::GetTempDir(&apps_dir);
++  }
++  return apps_dir.AppendASCII("AppSwapApps")
++      .Append(base::FilePath::FromUTF8Unsafe(source.package_name));
++}
++
++base::FilePath TargetDir(const AppSwapSource& source,
++                         const std::string& version) {
++  return PackageDir(source).Append(base::FilePath::FromUTF8Unsafe(version));
++}
++
++// Blocking; must run off the UI thread. Each subdirectory of a package's
++// cache directory is an extracted version (see TargetDir()).
++std::vector<std::string> ListCachedVersionsBlocking(base::FilePath package_dir) {
++  std::vector<std::string> versions;
++  base::FileEnumerator enumerator(package_dir, /*recursive=*/false,
++                                  base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath name = enumerator.Next(); !name.empty();
++       name = enumerator.Next()) {
++    versions.push_back(name.BaseName().AsUTF8Unsafe());
++  }
++  std::sort(versions.begin(), versions.end(), &app_swap::IsNewerVersion);
++  return versions;
 +}
 +
 +// Extracts a ustar-format tar archive into `dest_dir`. Returns false on error
@@ -1246,9 +1283,30 @@ index 0000000000000..3308209f92432
 +  }
 +
 +  if (IsExactVersion(source.version)) {
-+    DownloadTarball(source, source.version, TarballUrl(source, source.version),
-+                    base::BindOnce(&AppSwapArtifactProvider::Finish,
-+                                   base::Unretained(this), source));
++    // Check disk before the network: an exact version that's already been
++    // extracted (from an earlier session, or resolved under a since-moved
++    // dist-tag) doesn't need re-downloading, and -- more importantly --
++    // this is what lets a currently-displayed tab keep working (via the
++    // fallback in AppSwapProxyingURLLoaderFactory's ServeAfterResolve) when
++    // the registry is unreachable.
++    const base::FilePath target_dir = TargetDir(source, source.version);
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&base::PathExists, target_dir),
++        base::BindOnce(
++            [](AppSwapArtifactProvider* self, AppSwapSource source,
++               base::FilePath target_dir, bool exists) {
++              if (exists) {
++                self->Finish(source, target_dir);
++                return;
++              }
++              self->DownloadTarball(
++                  source, source.version,
++                  TarballUrl(source, source.version),
++                  base::BindOnce(&AppSwapArtifactProvider::Finish,
++                                 base::Unretained(self), source));
++            },
++            base::Unretained(this), source, target_dir));
 +  } else {
 +    FetchMetadata(
 +        source, &loaders_,
@@ -1367,6 +1425,16 @@ index 0000000000000..3308209f92432
 +          base::Unretained(this), key, std::move(callback)));
 +}
 +
++void AppSwapArtifactProvider::GetCachedVersions(
++    const AppSwapSource& source,
++    base::OnceCallback<void(std::vector<std::string>)> callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&ListCachedVersionsBlocking, PackageDir(source)),
++      std::move(callback));
++}
++
 +void AppSwapArtifactProvider::FetchMetadata(
 +    const AppSwapSource& source,
 +    std::map<std::string, std::unique_ptr<network::SimpleURLLoader>>*
@@ -1430,15 +1498,7 @@ index 0000000000000..3308209f92432
 +    const std::string& version,
 +    const std::string& tarball_url,
 +    base::OnceCallback<void(base::FilePath)> callback) {
-+  // Resolve the cache directory for this exact version.
-+  base::FilePath apps_dir;
-+  if (!base::PathService::Get(chrome::DIR_USER_DATA, &apps_dir)) {
-+    base::GetTempDir(&apps_dir);
-+  }
-+  const base::FilePath target_dir =
-+      apps_dir.AppendASCII("AppSwapApps")
-+          .Append(base::FilePath::FromUTF8Unsafe(source.package_name))
-+          .Append(base::FilePath::FromUTF8Unsafe(version));
++  const base::FilePath target_dir = TargetDir(source, version);
 +
 +  auto resource_request = std::make_unique<network::ResourceRequest>();
 +  resource_request->url = GURL(tarball_url);
@@ -1520,10 +1580,10 @@ index 0000000000000..3308209f92432
 +}
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.h b/chrome/browser/app_swap/app_swap_artifact_provider.h
 new file mode 100644
-index 0000000000000..d1614cfc56443
+index 0000000000000..e031b808837e0
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.h
-@@ -0,0 +1,158 @@
+@@ -0,0 +1,169 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1631,6 +1691,17 @@ index 0000000000000..d1614cfc56443
 +      base::OnceCallback<void(std::optional<AppSwapPackageMetadata>)>
 +          callback);
 +
++  // Lists the exact versions of `source.package_name` already extracted on
++  // disk, newest first, regardless of dist-tag or in-memory cache state.
++  // Used to offer a fallback when the registry is unreachable and a
++  // navigation has no other version to fall back to. `callback` gets an
++  // empty list if none are cached (including if the package has never been
++  // downloaded at all). Must be called on the UI thread; `callback` runs on
++  // the UI thread.
++  void GetCachedVersions(
++      const AppSwapSource& source,
++      base::OnceCallback<void(std::vector<std::string>)> callback);
++
 + private:
 +  // `loader_map` is the map to keep the in-flight SimpleURLLoader alive in
 +  // (and erase it from on completion) -- callers pick which one so an
@@ -1684,18 +1755,20 @@ index 0000000000000..d1614cfc56443
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ARTIFACT_PROVIDER_H_
 diff --git a/chrome/browser/app_swap/app_swap_route_matcher.cc b/chrome/browser/app_swap/app_swap_route_matcher.cc
 new file mode 100644
-index 0000000000000..b1aee4726c9ec
+index 0000000000000..b43eb13896755
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_matcher.cc
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,107 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
 +
++#include <string>
 +#include <string_view>
 +
++#include "base/strings/strcat.h"
 +#include "base/strings/string_util.h"
 +#include "url/gurl.h"
 +
@@ -1718,6 +1791,55 @@ index 0000000000000..b1aee4726c9ec
 +  // Require a path-segment boundary so "/docs" doesn't match "/docs-legacy".
 +  return url_path.size() == pattern_path.size() || pattern_path.back() == '/' ||
 +         url_path[pattern_path.size()] == '/';
++}
++
++GURL ComputeAppSwapRewriteUrl(const GURL& url,
++                              const std::string& url_pattern,
++                              const std::string& target) {
++  const GURL pattern_url(url_pattern);
++  const GURL target_url(target);
++
++  const std::string_view pattern_path = pattern_url.path();
++  const std::string_view url_path = url.path();
++  // Mirrors AppSwapUrlMatchesPattern()'s treatment of an empty/root pattern
++  // path as matching (and thus contributing) the whole request path.
++  std::string_view suffix;
++  if (pattern_path.empty() || pattern_path == "/") {
++    suffix = url_path;
++  } else if (url_path.size() > pattern_path.size()) {
++    suffix = url_path.substr(pattern_path.size());
++  }
++
++  std::string_view target_path = target_url.path();
++  std::string new_path;
++  if (!target_path.empty() && !suffix.empty() && target_path.back() == '/' &&
++      suffix.front() == '/') {
++    // Avoid a doubled slash where the target path and the suffix both
++    // supply one at the join point (e.g. target "/api/" + suffix "/users").
++    new_path = base::StrCat({target_path, suffix.substr(1)});
++  } else {
++    new_path = base::StrCat({target_path, suffix});
++  }
++
++  const std::string query(url.query());
++  GURL::Replacements replacements;
++  replacements.SetPathStr(new_path);
++  if (url.has_query()) {
++    replacements.SetQueryStr(query);
++  } else {
++    replacements.ClearQuery();
++  }
++  return target_url.ReplaceComponents(replacements);
++}
++
++const AppSwapRewriteRule* FindAppSwapRewriteRuleForUrl(const GURL& url) {
++  for (const AppSwapRewriteRule& rule :
++       AppSwapRewriteRulesService::GetInstance()->GetRulesIfLoaded()) {
++    if (AppSwapUrlMatchesPattern(url, rule.url_pattern)) {
++      return &rule;
++    }
++  }
++  return nullptr;
 +}
 +
 +const AppSwapRoute* FindAppSwapRouteForUrl(const GURL& url) {
@@ -1746,10 +1868,10 @@ index 0000000000000..b1aee4726c9ec
 +}
 diff --git a/chrome/browser/app_swap/app_swap_route_matcher.h b/chrome/browser/app_swap/app_swap_route_matcher.h
 new file mode 100644
-index 0000000000000..770d08ea53a41
+index 0000000000000..3ebc6aab9b7eb
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_matcher.h
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,53 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1760,6 +1882,7 @@ index 0000000000000..770d08ea53a41
 +#include <string>
 +
 +#include "chrome/browser/app_swap/app_swap_apps_service.h"
++#include "chrome/browser/app_swap/app_swap_rewrite_rules_service.h"
 +#include "chrome/browser/app_swap/app_swap_routes_service.h"
 +
 +class GURL;
@@ -1776,6 +1899,21 @@ index 0000000000000..770d08ea53a41
 +// Only consults already-loaded routes; see
 +// AppSwapRoutesService::GetRoutesIfLoaded.
 +const AppSwapRoute* FindAppSwapRouteForUrl(const GURL& url);
++
++// For a `url_pattern` that AppSwapUrlMatchesPattern() has already matched
++// against `url` (see AppSwapRewriteRule), returns the URL to actually
++// request: `target` with the portion of `url`'s path beyond `url_pattern`'s
++// own path appended, plus `url`'s original query string. Behavior is
++// unspecified if `url_pattern` didn't actually match `url`.
++GURL ComputeAppSwapRewriteUrl(const GURL& url,
++                              const std::string& url_pattern,
++                              const std::string& target);
++
++// Finds the first configured rewrite rule whose pattern matches `url`, or
++// nullptr. Only consults already-loaded rules; see
++// AppSwapRewriteRulesService::GetRulesIfLoaded. Checked independently of,
++// and before, app routes -- see AppSwapProxyingURLLoaderFactory.
++const AppSwapRewriteRule* FindAppSwapRewriteRuleForUrl(const GURL& url);
 +
 +// Finds the app with the given id among already-loaded apps, or nullptr; see
 +// AppSwapAppsService::GetAppsIfLoaded.
@@ -1996,10 +2134,10 @@ index 0000000000000..07ae514bd8dc1
 +}
 diff --git a/chrome/browser/app_swap/app_swap_routes_service.h b/chrome/browser/app_swap/app_swap_routes_service.h
 new file mode 100644
-index 0000000000000..f065478b13540
+index 0000000000000..af488db58ba32
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_routes_service.h
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,69 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2016,7 +2154,9 @@ index 0000000000000..f065478b13540
 +
 +// A configured route: requests whose URL matches `url_pattern` (an origin,
 +// optionally with a path prefix) are served from the app identified by
-+// `app_id` instead of the network.
++// `app_id` instead of the network. See also AppSwapRewriteRule (a separate,
++// app-independent concept: a named "rewrite this URL to a different origin"
++// rule, not tied to any one app's routes).
 +struct AppSwapRoute {
 +  std::string id;           // GUID, generated on creation.
 +  std::string url_pattern;  // e.g. "https://my-website.com" or
@@ -2069,10 +2209,10 @@ index 0000000000000..f065478b13540
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_routes_ui.cc b/chrome/browser/app_swap/app_swap_routes_ui.cc
 new file mode 100644
-index 0000000000000..a4b99164cb33d
+index 0000000000000..dc1f192963f49
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_routes_ui.cc
-@@ -0,0 +1,597 @@
+@@ -0,0 +1,598 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2319,6 +2459,7 @@ index 0000000000000..a4b99164cb33d
 +      <nav class="tabs">
 +        <a href="appswap://apps">Apps</a>
 +        <a href="appswap://routes" class="active">Routes</a>
++        <a href="appswap://rewrites">Rewrites</a>
 +        <a href="appswap://profiles">Profiles</a>
 +      </nav>
 +    </div>
@@ -2731,10 +2872,10 @@ index 0000000000000..707f425096a7c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000000..88ff587393019
+index 0000000000000..9752f4f2ecb0e
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,428 @@
+@@ -0,0 +1,879 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2746,6 +2887,7 @@ index 0000000000000..88ff587393019
 +#include <string>
 +#include <string_view>
 +#include <utility>
++#include <vector>
 +
 +#include "base/files/file.h"
 +#include "base/files/file_path.h"
@@ -2754,6 +2896,7 @@ index 0000000000000..88ff587393019
 +#include "base/functional/callback_helpers.h"
 +#include "base/memory/self_deleting.h"
 +#include "base/no_destructor.h"
++#include "base/strings/escape.h"
 +#include "base/strings/string_number_conversions.h"
 +#include "base/task/thread_pool.h"
 +#include "chrome/browser/app_swap/app_swap_apps_service.h"
@@ -2763,20 +2906,33 @@ index 0000000000000..88ff587393019
 +#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_update_checker.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
++#include "chrome/browser/net/system_network_context_manager.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/navigation_entry.h"
 +#include "content/public/browser/render_frame_host.h"
 +#include "content/public/browser/web_contents.h"
++#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 +#include "mojo/public/cpp/system/data_pipe.h"
 +#include "mojo/public/cpp/system/data_pipe_producer.h"
 +#include "mojo/public/cpp/system/file_data_source.h"
++#include "mojo/public/cpp/system/string_data_source.h"
++#include "net/base/isolation_info.h"
 +#include "net/base/mime_util.h"
 +#include "net/base/net_errors.h"
++#include "net/base/url_util.h"
++#include "net/cookies/site_for_cookies.h"
 +#include "net/http/http_request_headers.h"
 +#include "net/http/http_response_headers.h"
++#include "net/url_request/redirect_info.h"
 +#include "services/network/public/cpp/parsed_headers.h"
 +#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
++#include "services/network/public/cpp/url_loader_completion_status.h"
++#include "services/network/public/mojom/early_hints.mojom.h"
 +#include "services/network/public/mojom/url_loader.mojom.h"
 +#include "services/network/public/mojom/url_response_head.mojom.h"
 +#include "url/gurl.h"
++#include "url/origin.h"
 +
 +namespace {
 +
@@ -3010,10 +3166,324 @@ index 0000000000000..88ff587393019
 +                     accepts_html, std::move(loader), std::move(client)));
 +}
 +
-+// Continuation after an npm artifact is resolved (downloaded + extracted).
-+void ServeAfterResolve(
++// A URLLoader+URLLoaderClient pair for a matched AppSwapRewriteRule: fetches
++// `request_` (the rewritten URL) via a cloned real network factory and
++// relays the response back to the original client verbatim -- a proper
++// reverse proxy at the network level, so the renderer/DevTools only ever
++// see ONE request/response, for the *original* URL, never the rewritten
++// one. (An earlier attempt issued a real HTTP redirect to the rewritten URL
++// instead -- necessary to avoid a site-isolation cross-origin rejection
++// when just swapping network::ResourceRequest::url and forwarding directly,
++// since a navigation's renderer process/SiteInstance is already selected
++// based on the *original* URL before this factory ever runs -- but a
++// redirect inherently surfaces the rewritten URL as a second, visible
++// request, which isn't what a reverse proxy is supposed to look like. This
++// class avoids that: it makes its own outbound request from the browser
++// process using the system network context -- like
++// AppSwapArtifactProvider's tarball/metadata fetches do, and *not* a clone
++// of the frame's own scoped `target_factory_` -- so there's neither a
++// renderer-visible cross-origin hop for site isolation to react to, nor any
++// dependency on whatever trust boundaries (NetworkIsolationKey, CORS
++// assumptions, etc.) that per-frame factory carries for the *original*
++// URL's origin, which have no reason to permit fetching a completely
++// different origin (confirmed by testing: cloning and using
++// `target_factory_` for the rewritten URL fails outright).
++class AppSwapRewriteProxyLoader : public network::mojom::URLLoader,
++                                  public network::mojom::URLLoaderClient {
++ public:
++  AppSwapRewriteProxyLoader(
++      int32_t request_id,
++      uint32_t options,
++      network::ResourceRequest rewritten_request,
++      mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
++      : client_(std::move(client)),
++        request_id_(request_id),
++        options_(options),
++        request_(std::move(rewritten_request)),
++        traffic_annotation_(traffic_annotation) {
++    scoped_refptr<network::SharedURLLoaderFactory> factory =
++        SystemNetworkContextManager::GetInstance()->GetSharedURLLoaderFactory();
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client_remote;
++    client_receiver_.Bind(client_remote.InitWithNewPipeAndPassReceiver());
++    factory->CreateLoaderAndStart(
++        target_loader_.BindNewPipeAndPassReceiver(), request_id_, options_,
++        request_, std::move(client_remote), traffic_annotation_);
++  }
++
++  AppSwapRewriteProxyLoader(const AppSwapRewriteProxyLoader&) = delete;
++  AppSwapRewriteProxyLoader& operator=(const AppSwapRewriteProxyLoader&) =
++      delete;
++
++  ~AppSwapRewriteProxyLoader() override = default;
++
++  // network::mojom::URLLoader (downstream: what the original caller, e.g.
++  // the navigation loader, controls):
++  void FollowRedirect(
++      network::HttpRequestHeadersUpdateParams headers_update_params,
++      const std::optional<GURL>& new_url) override {
++    if (target_loader_) {
++      target_loader_->FollowRedirect(std::move(headers_update_params), new_url);
++    }
++  }
++  void SetPriority(net::RequestPriority priority,
++                   int32_t intra_priority_value) override {
++    if (target_loader_) {
++      target_loader_->SetPriority(priority, intra_priority_value);
++    }
++  }
++
++  // network::mojom::URLLoaderClient (upstream: what the cloned real
++  // factory's loader for the rewritten URL calls back into):
++  void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override {
++    client_->OnReceiveEarlyHints(std::move(early_hints));
++  }
++  void OnReceiveResponse(
++      network::mojom::URLResponseHeadPtr head,
++      mojo::ScopedDataPipeConsumerHandle body,
++      std::optional<mojo_base::BigBuffer> cached_metadata) override {
++    client_->OnReceiveResponse(std::move(head), std::move(body),
++                               std::move(cached_metadata));
++  }
++  void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
++                         network::mojom::URLResponseHeadPtr head) override {
++    // The rewritten target itself redirected somewhere; relay it as-is
++    // rather than trying to keep it hidden behind the original URL -- doing
++    // that properly would mean rewriting the Location header's origin too,
++    // which needs its own AppSwapRewriteRule match against the redirect
++    // target to be correct, not a blind rewrite of whatever it points to.
++    client_->OnReceiveRedirect(redirect_info, std::move(head));
++  }
++  void OnUploadProgress(int64_t current_position,
++                        int64_t total_size,
++                        base::OnceCallback<void()> callback) override {
++    client_->OnUploadProgress(current_position, total_size,
++                              std::move(callback));
++  }
++  void OnTransferSizeUpdated(int32_t transfer_size_diff) override {
++    client_->OnTransferSizeUpdated(transfer_size_diff);
++  }
++  void OnComplete(const network::URLLoaderCompletionStatus& status) override {
++    client_->OnComplete(status);
++  }
++
++ private:
++  mojo::Remote<network::mojom::URLLoaderClient> client_;
++  int32_t request_id_;
++  uint32_t options_;
++  network::ResourceRequest request_;
++  net::MutableNetworkTrafficAnnotationTag traffic_annotation_;
++
++  mojo::Receiver<network::mojom::URLLoaderClient> client_receiver_{this};
++  mojo::Remote<network::mojom::URLLoader> target_loader_;
++};
++
++// Self-owned URLLoader that streams an in-memory string as the response --
++// used only for the small generated "registry unreachable" recovery page,
++// never for real app content (which always comes from disk via
++// AppSwapFileLoader above). Unlike that class, this doesn't need the serve
++// task runner: there's no blocking file I/O involved.
++class AppSwapStringLoader : public network::mojom::URLLoader {
++ public:
++  static void CreateAndStart(
++      std::string body,
++      GURL url,
++      mojo::PendingReceiver<network::mojom::URLLoader> loader,
++      mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
++    // Owns itself; deleted once both bindings are closed.
++    auto* string_loader = new AppSwapStringLoader();
++    string_loader->Start(std::move(body), std::move(url), std::move(loader),
++                         std::move(client));
++  }
++
++  AppSwapStringLoader(const AppSwapStringLoader&) = delete;
++  AppSwapStringLoader& operator=(const AppSwapStringLoader&) = delete;
++
++  // network::mojom::URLLoader:
++  void FollowRedirect(
++      network::HttpRequestHeadersUpdateParams /*headers_update_params*/,
++      const std::optional<GURL>& /*new_url*/) override {}
++  void SetPriority(net::RequestPriority /*priority*/,
++                   int32_t /*intra_priority_value*/) override {}
++
++ private:
++  AppSwapStringLoader() = default;
++  ~AppSwapStringLoader() override = default;
++
++  void Start(std::string body,
++             GURL url,
++             mojo::PendingReceiver<network::mojom::URLLoader> loader,
++             mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
++    receiver_.Bind(std::move(loader));
++    receiver_.set_disconnect_handler(base::BindOnce(
++        &AppSwapStringLoader::OnMojoDisconnect, base::Unretained(this)));
++    client_.Bind(std::move(client));
++
++    auto head = network::mojom::URLResponseHead::New();
++    head->response_type = network::mojom::FetchResponseType::kBasic;
++    head->headers =
++        base::MakeRefCounted<net::HttpResponseHeaders>("HTTP/1.1 200 OK");
++    head->mime_type = "text/html";
++    head->headers->AddHeader(net::HttpRequestHeaders::kContentType,
++                             "text/html; charset=utf-8");
++    head->headers->AddHeader(net::HttpRequestHeaders::kContentLength,
++                             base::NumberToString(body.size()));
++    head->headers->AddHeader(net::HttpRequestHeaders::kCacheControl,
++                             "no-store");
++    head->content_length = body.size();
++    content_length_ = static_cast<int64_t>(body.size());
++    head->parsed_headers =
++        network::PopulateParsedHeaders(head->headers.get(), url);
++    const base::TimeTicks now_ticks = base::TimeTicks::Now();
++    const base::Time now_time = base::Time::Now();
++    head->request_time = now_time;
++    head->request_start = now_ticks;
++    head->response_time = now_time;
++    head->response_start = now_ticks;
++    head->load_timing.request_start_time = now_time;
++    head->load_timing.request_start = now_ticks;
++    head->load_timing.receive_headers_start = now_ticks;
++    head->load_timing.receive_headers_end = now_ticks;
++
++    mojo::ScopedDataPipeProducerHandle producer_handle;
++    mojo::ScopedDataPipeConsumerHandle consumer_handle;
++    if (mojo::CreateDataPipe(/*options=*/nullptr, producer_handle,
++                             consumer_handle) != MOJO_RESULT_OK) {
++      OnClientComplete(net::ERR_FAILED);
++      return;
++    }
++
++    client_->OnReceiveResponse(std::move(head), std::move(consumer_handle),
++                               std::nullopt);
++
++    if (body.empty()) {
++      OnClientComplete(net::OK);
++      return;
++    }
++
++    data_producer_ = std::make_unique<mojo::DataPipeProducer>(
++        std::move(producer_handle));
++    data_producer_->Write(
++        std::make_unique<mojo::StringDataSource>(
++            base::span(body),
++            mojo::StringDataSource::AsyncWritingMode::
++                STRING_MAY_BE_INVALIDATED_BEFORE_COMPLETION),
++        base::BindOnce(&AppSwapStringLoader::OnWritten,
++                       base::Unretained(this)));
++  }
++
++  void OnWritten(MojoResult result) {
++    data_producer_.reset();
++    OnClientComplete(result == MOJO_RESULT_OK ? net::OK : net::ERR_FAILED);
++  }
++
++  void OnClientComplete(net::Error error) {
++    network::URLLoaderCompletionStatus status(error);
++    if (error == net::OK) {
++      const auto size = static_cast<uint64_t>(content_length_);
++      status.encoded_data_length = base::ByteSize(size);
++      status.encoded_body_length = base::ByteSize(size);
++      status.decoded_body_length = base::ByteSize(size);
++    }
++    client_->OnComplete(status);
++    client_.reset();
++    MaybeDeleteSelf();
++  }
++
++  void OnMojoDisconnect() {
++    data_producer_.reset();
++    receiver_.reset();
++    client_.reset();
++    MaybeDeleteSelf();
++  }
++
++  void MaybeDeleteSelf() {
++    if (!receiver_.is_bound() && !client_.is_bound()) {
++      delete this;
++    }
++  }
++
++  mojo::Receiver<network::mojom::URLLoader> receiver_{this};
++  mojo::Remote<network::mojom::URLLoaderClient> client_;
++  std::unique_ptr<mojo::DataPipeProducer> data_producer_;
++  int64_t content_length_ = 0;
++};
++
++// Builds the body of the recovery page shown in place of a navigation that
++// failed to resolve because the registry is unreachable and this tab has no
++// version of its own to fall back to (e.g. a brand-new tab). Offers
++// whatever versions of this package are already on disk from other tabs or
++// past sessions, if any -- `cached_versions` is never empty when this is
++// called (see the call site).
++std::string BuildRegistryUnreachableHtml(
++    const GURL& app_url,
++    const std::vector<std::string>& cached_versions) {
++  std::string rows;
++  for (const std::string& version : cached_versions) {
++    GURL link = net::AppendOrReplaceQueryParameter(app_url, kAppSwapUseVersionQueryKey,
++                                                    version);
++    base::StrAppend(
++        &rows, {"<li><a href=\"", base::EscapeForHTML(link.spec()), "\">",
++                base::EscapeForHTML(version), "</a></li>"});
++  }
++  return base::StrCat(
++      {"<!doctype html><meta charset=utf-8>"
++       "<title>Can't reach the registry</title>"
++       "<style>body{font:14px/1.5 system-ui,sans-serif;max-width:420px;"
++       "margin:15vh auto 0;padding:0 20px;color:#3c4043}"
++       "h1{font-size:17px}ul{padding-left:20px}"
++       "a{color:#1a73e8;text-decoration:none}a:hover{text-decoration:"
++       "underline}</style>"
++       "<h1>Can&rsquo;t reach the package registry</h1>"
++       "<p>AppSwap couldn&rsquo;t resolve this app&rsquo;s latest version. "
++       "You can load a version that&rsquo;s already downloaded instead:</p>"
++       "<ul>",
++       rows, "</ul>"});
++}
++
++// Posts a request to serve `body` as the response, for the recovery page
++// above -- no serve-task-runner hop needed, unlike ServeFromDir(), since
++// there's no file I/O.
++void ServeHtml(std::string body,
++               GURL url,
++               mojo::PendingReceiver<network::mojom::URLLoader> loader,
++               mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
++  AppSwapStringLoader::CreateAndStart(std::move(body), std::move(url),
++                                      std::move(loader), std::move(client));
++}
++
++// Records the exact version a navigation actually resolved to, so the
++// chip/Page Info/checker for *this* tab reflect it rather than whatever
++// AppSwapArtifactProvider's shared per-tag cache happens to hold right now
++// (which another tab's own navigation could have moved on since), then
++// serves it. Only ever called for a navigation, not a subresource -- a
++// page's own scripts/styles/images resolve the same source and would just
++// overwrite this with the same value repeatedly.
++void SetCommittedVersionAndServe(
 +    GURL url,
-+    bool accepts_html,
++    content::GlobalRenderFrameHostId frame_id,
++    mojo::PendingReceiver<network::mojom::URLLoader> loader,
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++    base::FilePath dir) {
++  if (content::RenderFrameHost* frame =
++          content::RenderFrameHost::FromID(frame_id)) {
++    if (content::WebContents* web_contents =
++            content::WebContents::FromRenderFrameHost(frame)) {
++      if (AppSwapUpdateAvailableTabHelper* helper =
++              AppSwapUpdateAvailableTabHelper::FromWebContents(
++                  web_contents)) {
++        helper->SetCommittedVersion(dir.BaseName().AsUTF8Unsafe());
++      }
++    }
++  }
++  ServeFromDir(dir, std::move(url), /*accepts_html=*/true, std::move(loader),
++               std::move(client));
++}
++
++// Terminal continuation for the committed-version fallback below -- doesn't
++// retry again on failure, just serves or fails.
++void ServeAfterFallbackResolve(
++    GURL url,
 +    content::GlobalRenderFrameHostId frame_id,
 +    mojo::PendingReceiver<network::mojom::URLLoader> loader,
 +    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
@@ -3023,25 +3493,84 @@ index 0000000000000..88ff587393019
 +        ->OnComplete(network::URLLoaderCompletionStatus(net::ERR_FAILED));
 +    return;
 +  }
-+  // Record the exact version this navigation actually resolved to, so the
-+  // chip/Page Info/checker for *this* tab reflect it rather than whatever
-+  // AppSwapArtifactProvider's shared per-tag cache happens to hold right
-+  // now (which another tab's own navigation could have moved on since).
-+  // Only for the navigation itself, not subresources -- a page's own
-+  // scripts/styles/images resolve the same source and would just overwrite
-+  // this with the same value repeatedly.
-+  if (accepts_html) {
-+    if (content::RenderFrameHost* frame =
-+            content::RenderFrameHost::FromID(frame_id)) {
-+      if (content::WebContents* web_contents =
-+              content::WebContents::FromRenderFrameHost(frame)) {
-+        if (AppSwapUpdateAvailableTabHelper* helper =
-+                AppSwapUpdateAvailableTabHelper::FromWebContents(
-+                    web_contents)) {
-+          helper->SetCommittedVersion(dir.BaseName().AsUTF8Unsafe());
++  SetCommittedVersionAndServe(std::move(url), frame_id, std::move(loader),
++                              std::move(client), std::move(dir));
++}
++
++// Terminal continuation for a tab with no committed version of its own
++// (e.g. a brand-new tab) whose navigation failed to resolve -- offers
++// whatever's cached on disk, if anything, instead of failing outright.
++void ServeCachedVersionsOrFail(
++    GURL url,
++    mojo::PendingReceiver<network::mojom::URLLoader> loader,
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++    std::vector<std::string> cached_versions) {
++  if (cached_versions.empty()) {
++    mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
++        ->OnComplete(network::URLLoaderCompletionStatus(net::ERR_FAILED));
++    return;
++  }
++  std::string html = BuildRegistryUnreachableHtml(url, cached_versions);
++  ServeHtml(std::move(html), std::move(url), std::move(loader),
++           std::move(client));
++}
++
++// Continuation after an npm artifact is resolved (downloaded + extracted).
++void ServeAfterResolve(
++    AppSwapSource source,
++    GURL url,
++    bool accepts_html,
++    content::GlobalRenderFrameHostId frame_id,
++    mojo::PendingReceiver<network::mojom::URLLoader> loader,
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++    base::FilePath dir) {
++  if (dir.empty()) {
++    // For a navigation, fall back rather than failing outright -- most
++    // commonly hit when the registry is unreachable and a dist-tag can't
++    // be re-resolved. Subresources of an already-loading page don't get
++    // this treatment; a failure there is real (e.g. a genuinely missing
++    // file), not a registry hiccup worth working around.
++    if (accepts_html) {
++      if (content::RenderFrameHost* frame =
++              content::RenderFrameHost::FromID(frame_id)) {
++        if (content::WebContents* web_contents =
++                content::WebContents::FromRenderFrameHost(frame)) {
++          if (AppSwapUpdateAvailableTabHelper* helper =
++                  AppSwapUpdateAvailableTabHelper::FromWebContents(
++                      web_contents)) {
++            // First choice: whatever exact version this tab is already
++            // showing, presumably still on disk from when it was first
++            // loaded. AppSwapArtifactProvider::GetOrDownload() checks disk
++            // before the network for an exact version, so this succeeds
++            // without needing connectivity.
++            if (std::optional<std::string> committed =
++                    helper->committed_version()) {
++              source.version = *committed;
++              AppSwapArtifactProvider::GetInstance()->GetOrDownload(
++                  source, base::BindOnce(&ServeAfterFallbackResolve,
++                                         std::move(url), frame_id,
++                                         std::move(loader), std::move(client)));
++              return;
++            }
++          }
++          // No committed version for this tab -- e.g. a brand-new tab that
++          // has never loaded this app before. Offer whatever's cached on
++          // disk from any tab or past session instead of failing outright.
++          AppSwapArtifactProvider::GetInstance()->GetCachedVersions(
++              source, base::BindOnce(&ServeCachedVersionsOrFail, url,
++                                     std::move(loader), std::move(client)));
++          return;
 +        }
 +      }
 +    }
++    mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
++        ->OnComplete(network::URLLoaderCompletionStatus(net::ERR_FAILED));
++    return;
++  }
++  if (accepts_html) {
++    SetCommittedVersionAndServe(std::move(url), frame_id, std::move(loader),
++                                std::move(client), std::move(dir));
++    return;
 +  }
 +  ServeFromDir(dir, std::move(url), accepts_html, std::move(loader),
 +               std::move(client));
@@ -3066,6 +3595,7 @@ index 0000000000000..88ff587393019
 +  // an unconfigured route.
 +  AppSwapRoutesService::GetInstance()->GetRoutes(base::DoNothing());
 +  AppSwapAppsService::GetInstance()->GetApps(base::DoNothing());
++  AppSwapRewriteRulesService::GetInstance()->GetRules(base::DoNothing());
 +  AppSwapUpdateChecker::GetInstance()->EnsureStarted();
 +
 +  auto [receiver, remote] = builder.Append();
@@ -3099,11 +3629,52 @@ index 0000000000000..88ff587393019
 +    const network::ResourceRequest& request,
 +    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
 +    const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
-+  // Only static GET/HEAD requests are served from disk; everything else is
-+  // forwarded to the network.
-+  if (request.method == net::HttpRequestHeaders::kGetMethod ||
-+      request.method == net::HttpRequestHeaders::kHeadMethod) {
-+    if (const AppSwapRoute* route = FindAppSwapRouteForUrl(request.url)) {
++  // Rewrite rules are checked independently of, and before, app routes --
++  // they have no notion of "app" at all (see AppSwapRewriteRule), and apply
++  // to every HTTP method, not just GET/HEAD, since this is a URL-level
++  // proxy (e.g. an API prefix), not served file content.
++  if (const AppSwapRewriteRule* rule =
++          FindAppSwapRewriteRuleForUrl(request.url)) {
++    network::ResourceRequest rewritten_request = request;
++    rewritten_request.url = ComputeAppSwapRewriteUrl(
++        request.url, rule->url_pattern, rule->target);
++    // The site/isolation info on `request` describes the original URL (e.g.
++    // for a main-frame navigation, site_for_cookies is scoped to it). Since
++    // the actual bytes are now being fetched from a different origin, that
++    // info must be updated to match -- the network service DCHECKs that a
++    // main-frame navigation's site_for_cookies is same-site with the URL
++    // actually being fetched. This mirrors what happens on a real redirect.
++    url::Origin rewritten_origin = url::Origin::Create(rewritten_request.url);
++    rewritten_request.site_for_cookies =
++        net::SiteForCookies::FromUrl(rewritten_request.url);
++    if (rewritten_request.trusted_params) {
++      rewritten_request.trusted_params->isolation_info =
++          rewritten_request.trusted_params->isolation_info.CreateForRedirect(
++              rewritten_origin);
++    }
++    // Subresource requests (e.g. a font fetched in CORS mode) carry the
++    // page's own origin as `request_initiator`. Left pointing at the
++    // original origin, the network service sees a genuine cross-origin
++    // fetch to the rewritten URL and requires an Access-Control-Allow-Origin
++    // header the target server has no reason to send. Rewriting it to match
++    // the fetched origin makes the fetch same-origin from CORS's point of
++    // view, matching the site_for_cookies/isolation_info treatment above.
++    if (rewritten_request.request_initiator) {
++      rewritten_request.request_initiator = rewritten_origin;
++    }
++    mojo::MakeSelfOwnedReceiver(
++        std::make_unique<AppSwapRewriteProxyLoader>(
++            request_id, options, std::move(rewritten_request),
++            std::move(client), traffic_annotation),
++        std::move(loader));
++    return;
++  }
++
++  if (const AppSwapRoute* route = FindAppSwapRouteForUrl(request.url)) {
++    // Only static GET/HEAD requests are served from disk; everything else
++    // falls through to the real network below.
++    if (request.method == net::HttpRequestHeaders::kGetMethod ||
++        request.method == net::HttpRequestHeaders::kHeadMethod) {
 +      const AppSwapApp* app = FindAppSwapAppById(route->app_id);
 +      if (!app) {
 +        // The route points at an app that no longer exists (e.g. deleted
@@ -3128,6 +3699,27 @@ index 0000000000000..88ff587393019
 +              content::RenderFrameHost::FromID(frame_id_)) {
 +        if (content::WebContents* web_contents =
 +                content::WebContents::FromRenderFrameHost(frame)) {
++          // A click on the "registry unreachable" recovery page's list of
++          // cached versions (see BuildRegistryUnreachableHtml()) carries
++          // this query param -- pin the tab to it now, before the pin
++          // lookup right below, so it takes effect immediately for this
++          // very navigation rather than only on the next one. The address
++          // bar still briefly shows the full URL with this parameter while
++          // the navigation is in flight; overriding the pending entry's
++          // virtual URL here makes it settle on the clean version once the
++          // navigation commits, same trick chrome://newtab-style pages use
++          // to display a URL other than the one actually requested.
++          if (std::string use_version;
++              net::GetValueForKeyInQuery(request.url, kAppSwapUseVersionQueryKey,
++                                         &use_version)) {
++            AppSwapVersionPinTabHelper::GetOrCreateForWebContents(web_contents)
++                ->SetPinnedVersion(app->id, use_version);
++            if (content::NavigationEntry* entry =
++                    web_contents->GetController().GetPendingEntry()) {
++              entry->SetVirtualURL(net::AppendOrReplaceQueryParameter(
++                  request.url, kAppSwapUseVersionQueryKey, std::nullopt));
++            }
++          }
 +          if (AppSwapVersionPinTabHelper* pin_helper =
 +                  AppSwapVersionPinTabHelper::FromWebContents(web_contents)) {
 +            if (std::optional<std::string> pinned_version =
@@ -3145,7 +3737,7 @@ index 0000000000000..88ff587393019
 +      // Reload button's "Update" click just a plain reload: any refresh is a
 +      // navigation, so it already re-resolves the tag here.
 +      auto resolve_callback = base::BindOnce(
-+          &ServeAfterResolve, request.url, accepts_html, frame_id_,
++          &ServeAfterResolve, source, request.url, accepts_html, frame_id_,
 +          std::move(loader), std::move(client));
 +      if (accepts_html) {
 +        AppSwapArtifactProvider::GetInstance()->EnsureFreshThenGetOrDownload(
@@ -3165,10 +3757,10 @@ index 0000000000000..88ff587393019
 +}
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.h b/chrome/browser/app_swap/app_swap_url_loader_factory.h
 new file mode 100644
-index 0000000000000..4b82b1280f454
+index 0000000000000..69a1915491baa
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.h
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,70 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3186,6 +3778,15 @@ index 0000000000000..4b82b1280f454
 +namespace content {
 +class RenderFrameHost;
 +}  // namespace content
++
++// A request for an AppSwap-routed URL carrying this query parameter pins
++// the tab to the given exact version and serves it directly (no registry
++// round-trip, since it must already be on disk to be named this way) --
++// used both by the "registry unreachable" recovery page's list of cached
++// versions and by the "Copy link to this version" action in Page Info, so
++// the resulting link is bookmarkable/shareable and reproduces the exact
++// version when opened later.
++inline constexpr char kAppSwapUseVersionQueryKey[] = "__appswap_use_version";
 +
 +// A URLLoaderFactory interceptor that serves AppSwap-routed requests from disk
 +// and forwards everything else to the wrapped network factory.
@@ -3319,26 +3920,28 @@ index 17a9289e00ac8..857fec92189da 100644
        "//chrome/browser/ui/webui/color_pipeline_internals",
        "//chrome/browser/ui/webui/history",
 diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-index 7a947c092bfaf..c05b3331b7a1b 100644
+index 7a947c092bfaf..419a09b974a08 100644
 --- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-@@ -13,6 +13,10 @@
+@@ -13,6 +13,11 @@
  #include "chrome/browser/optimization_guide/optimization_guide_internals_ui.h"
  #include "chrome/browser/ui/webui/about/about_ui.h"
  #include "chrome/browser/ui/webui/accessibility/accessibility_ui.h"
 +#include "chrome/browser/app_swap/app_swap_apps_ui.h"
 +#include "chrome/browser/app_swap/app_swap_profiles_ui.h"
++#include "chrome/browser/app_swap/app_swap_rewrite_rules_ui.h"
 +#include "chrome/browser/app_swap/app_swap_routes_ui.h"
 +#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h"
  #include "chrome/browser/ui/webui/actor_internals/actor_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/autofill_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/password_manager_internals_ui.h"
-@@ -252,6 +256,10 @@ void RegisterChromeWebUIConfigs() {
+@@ -252,6 +257,11 @@ void RegisterChromeWebUIConfigs() {
  
    auto& map = content::WebUIConfigMap::GetInstance();
    map.AddWebUIConfig(std::make_unique<AccessibilityUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapAppsUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapRoutesUIConfig>());
++  map.AddWebUIConfig(std::make_unique<AppSwapRewriteRulesUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapProfilesUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapVersionPickerUIConfig>());
    map.AddWebUIConfig(std::make_unique<AutofillInternalsUIConfig>());

@@ -269,6 +269,22 @@ gen 0014-npm-version-picker-webui.patch \
   tools/gritsettings/resource_ids.spec \
   third_party/lit/v3_0/BUILD.gn
 
+# Offline fallback (serve the tab's currently-committed version from disk
+# cache when the registry is unreachable, plus a static recovery page
+# listing cached versions to pick from), "Copy link to this version" in Page
+# Info, and named/reusable URL rewrite rules (appswap://rewrites) that proxy
+# matching requests to a different origin at the network level. Changes to
+# already-covered files this work also touches (app_swap_artifact_provider.*,
+# app_swap_url_loader_factory.*, app_swap_route_matcher.*, page_info_bubble_view.cc,
+# app_swap_apps_ui.cc, app_swap_profiles_ui.cc, app_swap_routes_ui.cc, and the
+# app_swap BUILD.gn) are picked up automatically by 0005/0007/0008 above.
+# app_swap_rewrite_rules_service.* and app_swap_rewrite_rules_ui.* are new.
+gen 0015-rewrite-rules-and-offline-fallback.patch \
+  chrome/browser/app_swap/app_swap_rewrite_rules_service.cc \
+  chrome/browser/app_swap/app_swap_rewrite_rules_service.h \
+  chrome/browser/app_swap/app_swap_rewrite_rules_ui.cc \
+  chrome/browser/app_swap/app_swap_rewrite_rules_ui.h
+
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."
 for f in $(git status --porcelain --untracked-files=no | cut -c4-); do
