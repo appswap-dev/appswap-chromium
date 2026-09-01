@@ -21,6 +21,6 @@ if [[ ! -f "$ROOT/.gclient" ]]; then
 fi
 
 echo "Syncing Chromium to $REV ..."
-gclient sync --with_branch_heads --nohooks --revision "src@$REV"
+gclient sync --no-history --nohooks --revision "src@$REV"
 gclient runhooks
 echo "Done: Chromium is now at $REV"

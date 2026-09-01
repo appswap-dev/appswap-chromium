@@ -11,7 +11,7 @@ for patch in "$ROOT"/patches/*.patch; do
   name="$(basename "$patch")"
   echo "==> applying $name"
   case "$name" in
-    *devtools-frontend*)
+    *devtools-frontend*|*devtools-disable-paste-guard*)
       apply_dir="$ROOT/src/third_party/devtools-frontend/src"
       ;;
     *)
