@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/browser_about_handler.cc b/chrome/browser/browser_about_handler.cc
-index 08949a69415df..3040c8368aec8 100644
+index 08949a69415df..342b6f2f780ec 100644
 --- a/chrome/browser/browser_about_handler.cc
 +++ b/chrome/browser/browser_about_handler.cc
-@@ -71,6 +71,31 @@ bool HandleChromeAboutAndChromeSyncRewrite(
+@@ -71,6 +71,26 @@ bool HandleChromeAboutAndChromeSyncRewrite(
    return false;
  }
  
@@ -16,16 +16,11 @@ index 08949a69415df..3040c8368aec8 100644
 +
 +  GURL::Replacements replacements;
 +  replacements.SetSchemeStr(content::kChromeUIScheme);
-+  // The apps catalog and route configuration each have their own WebUI;
-+  // route them there instead of the stock chrome://apps page.
-+  if (url->host() == "apps") {
-+    replacements.SetHostStr("appswap-apps");
-+  } else if (url->host() == "routes") {
-+    replacements.SetHostStr("appswap-routes");
-+  } else if (url->host() == "rewrites") {
-+    replacements.SetHostStr("appswap-rewrites");
-+  } else if (url->host() == "profiles") {
-+    replacements.SetHostStr("appswap-profiles");
++  // The project (== this Chromium Profile)'s admin UI -- General/Apps/
++  // Routes/Profiles tabs, all in one page -- has its own WebUI; route it
++  // there instead of the stock chrome://apps page.
++  if (url->host() == "projects") {
++    replacements.SetHostStr("appswap-projects");
 +  }
 +  *url = url->ReplaceComponents(replacements);
 +  return true;
@@ -64,7 +59,7 @@ index 080e9b0e43c70..174f4c96b9500 100644
  #if BUILDFLAG(IS_CHROMEOS)
        content::kExternalFileScheme,
 diff --git a/chrome/chrome_paks.gni b/chrome/chrome_paks.gni
-index 6008e03a8997c..fa4ce11690652 100644
+index 6008e03a8997c..984daa361baab 100644
 --- a/chrome/chrome_paks.gni
 +++ b/chrome/chrome_paks.gni
 @@ -106,7 +106,7 @@ template("chrome_repack_percent") {
@@ -76,18 +71,20 @@ index 6008e03a8997c..fa4ce11690652 100644
    }
  }
  
-@@ -207,6 +207,7 @@ template("chrome_extra_paks") {
+@@ -207,6 +207,8 @@ template("chrome_extra_paks") {
          "$root_gen_dir/chrome/access_code_cast_resources.pak",
          "$root_gen_dir/chrome/actor_overlay_resources.pak",
          "$root_gen_dir/chrome/app_service_internals_resources.pak",
++        "$root_gen_dir/chrome/app_swap_projects_resources.pak",
 +        "$root_gen_dir/chrome/app_swap_version_picker_resources.pak",
          "$root_gen_dir/chrome/autofill_ml_internals_resources.pak",
          "$root_gen_dir/chrome/bookmarks_resources.pak",
          "$root_gen_dir/chrome/browser/actor/resources/actor_browser_resources.pak",
-@@ -268,6 +269,7 @@ template("chrome_extra_paks") {
+@@ -268,6 +270,8 @@ template("chrome_extra_paks") {
        deps += [
          "//chrome/browser/actor/resources:browser_resources",
          "//chrome/browser/indigo/resources:browser_resources",
++        "//chrome/browser/resources/app_swap_projects:resources_grit",
 +        "//chrome/browser/resources/app_swap_version_picker:resources_grit",
          "//chrome/browser/resources/contextual_cueing/internals:resources",
          "//chrome/browser/resources/geic:resources",

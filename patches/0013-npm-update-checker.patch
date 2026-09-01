@@ -53,10 +53,10 @@ index 0000000000000..56d1ba88fffd2
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PREFS_H_
 diff --git a/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc b/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc
 new file mode 100644
-index 0000000000000..b37d28c0a0af7
+index 0000000000000..85ca0702ccfaf
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,75 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -64,6 +64,7 @@ index 0000000000000..b37d28c0a0af7
 +#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
 +
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
++#include "chrome/browser/profiles/profile.h"
 +#include "content/public/browser/web_contents.h"
 +
 +AppSwapUpdateAvailableTabHelper::AppSwapUpdateAvailableTabHelper(
@@ -112,9 +113,10 @@ index 0000000000000..b37d28c0a0af7
 +  // schedule if this new page also turns out to be update-checkable.
 +  available_version_.reset();
 +
-+  if (const AppSwapRoute* route =
-+          FindAppSwapRouteForUrl(web_contents()->GetLastCommittedURL())) {
-+    app_id_ = route->app_id;
++  if (const AppSwapApp* app = FindAppSwapAppForUrl(
++          Profile::FromBrowserContext(web_contents()->GetBrowserContext()),
++          web_contents()->GetLastCommittedURL())) {
++    app_id_ = app->id;
 +    // committed_version_ is deliberately left alone here: for an
 +    // AppSwap-routed page, the URL loader factory already set it to the
 +    // version it actually resolved and served for *this* navigation, and
@@ -244,7 +246,7 @@ index 0000000000000..9ec98b53f9cf5
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_AVAILABLE_TAB_HELPER_H_
 diff --git a/chrome/browser/app_swap/app_swap_update_checker.cc b/chrome/browser/app_swap/app_swap_update_checker.cc
 new file mode 100644
-index 0000000000000..9dde13df9beb7
+index 0000000000000..4cf2953e84b02
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_checker.cc
 @@ -0,0 +1,146 @@
@@ -265,6 +267,7 @@ index 0000000000000..9dde13df9beb7
 +#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
 +#include "chrome/browser/browser_process.h"
++#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -330,10 +333,9 @@ index 0000000000000..9dde13df9beb7
 +          content::WebContents* web_contents =
 +              tab_strip_model->GetWebContentsAt(i);
 +
-+          const AppSwapRoute* route =
-+              FindAppSwapRouteForUrl(web_contents->GetLastCommittedURL());
-+          const AppSwapApp* app =
-+              route ? FindAppSwapAppById(route->app_id) : nullptr;
++          const AppSwapApp* app = FindAppSwapAppForUrl(
++              Profile::FromBrowserContext(web_contents->GetBrowserContext()),
++              web_contents->GetLastCommittedURL());
 +          if (!app) {
 +            continue;
 +          }

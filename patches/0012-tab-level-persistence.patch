@@ -589,10 +589,10 @@ index 0000000000000..762bbc577ec3c
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_PIN_TAB_HELPER_H_
 diff --git a/chrome/browser/ui/browser_tabrestore.cc b/chrome/browser/ui/browser_tabrestore.cc
-index fa43dd782cdb8..cdc2113644798 100644
+index fa43dd782cdb8..5dd5d62545135 100644
 --- a/chrome/browser/ui/browser_tabrestore.cc
 +++ b/chrome/browser/ui/browser_tabrestore.cc
-@@ -4,12 +4,15 @@
+@@ -4,12 +4,16 @@
  
  #include "chrome/browser/ui/browser_tabrestore.h"
  
@@ -604,11 +604,12 @@ index fa43dd782cdb8..cdc2113644798 100644
  #include "base/containers/span.h"
  #include "build/build_config.h"
 +#include "chrome/browser/app_swap/app_swap_profile_session_restore_util.h"
++#include "chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
  #include "chrome/browser/apps/app_service/web_contents_app_id_utils.h"
  #include "chrome/browser/glic/glic_tab_restore_helper.h"
  #include "chrome/browser/profiles/profile.h"
-@@ -76,6 +79,23 @@ std::unique_ptr<WebContents> CreateRestoredTab(
+@@ -76,6 +80,23 @@ std::unique_ptr<WebContents> CreateRestoredTab(
        WebContents::CreateParams::kNoRendererProcess;
    create_params.last_active_time_ticks = last_active_time_ticks;
    create_params.last_active_time = last_active_time;
@@ -632,34 +633,38 @@ index fa43dd782cdb8..cdc2113644798 100644
    std::unique_ptr<WebContents> web_contents =
        WebContents::CreateWithSessionStorage(create_params,
                                              session_storage_namespace_map);
-@@ -85,6 +105,8 @@ std::unique_ptr<WebContents> CreateRestoredTab(
+@@ -85,6 +106,10 @@ std::unique_ptr<WebContents> CreateRestoredTab(
    glic::RestoreGlicStateFromExtraData(web_contents.get(), extra_data);
    send_tab_to_self::SendTabToSelfActivationTracker::RestoreFromExtraData(
        web_contents.get(), extra_data);
 +  AppSwapVersionPinTabHelper::RestoreFromExtraData(web_contents.get(),
 +                                                   extra_data);
++  AppSwapRouteGroupPinTabHelper::RestoreFromExtraData(web_contents.get(),
++                                                      extra_data);
  
    std::vector<std::unique_ptr<NavigationEntry>> entries =
        ContentSerializedNavigationBuilder::ToNavigationEntries(
 diff --git a/chrome/browser/ui/tab_helpers.cc b/chrome/browser/ui/tab_helpers.cc
-index dcf66fff381ea..f122f28e36285 100644
+index dcf66fff381ea..12a188bac7ce3 100644
 --- a/chrome/browser/ui/tab_helpers.cc
 +++ b/chrome/browser/ui/tab_helpers.cc
-@@ -15,6 +15,9 @@
+@@ -15,6 +15,10 @@
  #include "base/time/default_tick_clock.h"
  #include "base/trace_event/trace_event.h"
  #include "build/build_config.h"
 +#include "chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
  #include "chrome/browser/bookmarks/bookmark_model_factory.h"
  #include "chrome/browser/breadcrumbs/breadcrumb_manager_tab_helper.h"
  #include "chrome/browser/browser_process.h"
-@@ -446,6 +449,9 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents,
+@@ -446,6 +450,10 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents,
    content_settings::PageSpecificContentSettings::CreateForWebContents(
        web_contents,
        std::make_unique<PageSpecificContentSettingsDelegate>(web_contents));
 +  AppSwapProfilePinTabHelper::CreateForWebContents(web_contents);
++  AppSwapRouteGroupPinTabHelper::CreateForWebContents(web_contents);
 +  AppSwapUpdateAvailableTabHelper::CreateForWebContents(web_contents);
 +  AppSwapVersionPinTabHelper::CreateForWebContents(web_contents);
    CoreTabHelper::CreateForWebContents(web_contents);

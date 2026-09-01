@@ -1,0 +1,2300 @@
+diff --git a/chrome/browser/app_swap/app_swap_apps_service_factory.cc b/chrome/browser/app_swap/app_swap_apps_service_factory.cc
+new file mode 100644
+index 0000000000000..7b5d6ef0a92fc
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_apps_service_factory.cc
+@@ -0,0 +1,34 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_apps_service_factory.h"
++
++#include <memory>
++
++#include "chrome/browser/app_swap/app_swap_apps_service.h"
++#include "chrome/browser/profiles/profile.h"
++
++// static
++AppSwapAppsService* AppSwapAppsServiceFactory::GetForProfile(
++    Profile* profile) {
++  return static_cast<AppSwapAppsService*>(
++      GetInstance()->GetServiceForBrowserContext(profile, true));
++}
++
++// static
++AppSwapAppsServiceFactory* AppSwapAppsServiceFactory::GetInstance() {
++  static base::NoDestructor<AppSwapAppsServiceFactory> instance;
++  return instance.get();
++}
++
++AppSwapAppsServiceFactory::AppSwapAppsServiceFactory()
++    : ProfileKeyedServiceFactory("AppSwapAppsService") {}
++
++AppSwapAppsServiceFactory::~AppSwapAppsServiceFactory() = default;
++
++std::unique_ptr<KeyedService>
++AppSwapAppsServiceFactory::BuildServiceInstanceForBrowserContext(
++    content::BrowserContext* context) const {
++  return std::make_unique<AppSwapAppsService>(context);
++}
+diff --git a/chrome/browser/app_swap/app_swap_apps_service_factory.h b/chrome/browser/app_swap/app_swap_apps_service_factory.h
+new file mode 100644
+index 0000000000000..a1dc0cf5ed732
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_apps_service_factory.h
+@@ -0,0 +1,33 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_FACTORY_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_FACTORY_H_
++
++#include "base/no_destructor.h"
++#include "chrome/browser/profiles/profile_keyed_service_factory.h"
++
++class AppSwapAppsService;
++class Profile;
++
++// Owns one AppSwapAppsService per Project (== Chromium Profile) -- a
++// Project's apps are exactly its own profile's AppSwap config, so there's no
++// separate "project id" anywhere in this data model.
++class AppSwapAppsServiceFactory : public ProfileKeyedServiceFactory {
++ public:
++  static AppSwapAppsService* GetForProfile(Profile* profile);
++  static AppSwapAppsServiceFactory* GetInstance();
++
++ private:
++  friend base::NoDestructor<AppSwapAppsServiceFactory>;
++
++  AppSwapAppsServiceFactory();
++  ~AppSwapAppsServiceFactory() override;
++
++  // BrowserContextKeyedServiceFactory:
++  std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
++      content::BrowserContext* context) const override;
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_FACTORY_H_
+diff --git a/chrome/browser/app_swap/app_swap_profiles_service_factory.cc b/chrome/browser/app_swap/app_swap_profiles_service_factory.cc
+new file mode 100644
+index 0000000000000..57abd356a914e
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_profiles_service_factory.cc
+@@ -0,0 +1,34 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_profiles_service_factory.h"
++
++#include <memory>
++
++#include "chrome/browser/app_swap/app_swap_profiles_service.h"
++#include "chrome/browser/profiles/profile.h"
++
++// static
++AppSwapProfilesService* AppSwapProfilesServiceFactory::GetForProfile(
++    Profile* profile) {
++  return static_cast<AppSwapProfilesService*>(
++      GetInstance()->GetServiceForBrowserContext(profile, true));
++}
++
++// static
++AppSwapProfilesServiceFactory* AppSwapProfilesServiceFactory::GetInstance() {
++  static base::NoDestructor<AppSwapProfilesServiceFactory> instance;
++  return instance.get();
++}
++
++AppSwapProfilesServiceFactory::AppSwapProfilesServiceFactory()
++    : ProfileKeyedServiceFactory("AppSwapProfilesService") {}
++
++AppSwapProfilesServiceFactory::~AppSwapProfilesServiceFactory() = default;
++
++std::unique_ptr<KeyedService>
++AppSwapProfilesServiceFactory::BuildServiceInstanceForBrowserContext(
++    content::BrowserContext* context) const {
++  return std::make_unique<AppSwapProfilesService>(context);
++}
+diff --git a/chrome/browser/app_swap/app_swap_profiles_service_factory.h b/chrome/browser/app_swap/app_swap_profiles_service_factory.h
+new file mode 100644
+index 0000000000000..3c8f63d8f3db3
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_profiles_service_factory.h
+@@ -0,0 +1,33 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILES_SERVICE_FACTORY_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILES_SERVICE_FACTORY_H_
++
++#include "base/no_destructor.h"
++#include "chrome/browser/profiles/profile_keyed_service_factory.h"
++
++class AppSwapProfilesService;
++class Profile;
++
++// Owns one AppSwapProfilesService per Project (== Chromium Profile) -- the
++// storage-partition "AppSwap Profile" sub-identity is nested inside a
++// project rather than being a single browser-wide list.
++class AppSwapProfilesServiceFactory : public ProfileKeyedServiceFactory {
++ public:
++  static AppSwapProfilesService* GetForProfile(Profile* profile);
++  static AppSwapProfilesServiceFactory* GetInstance();
++
++ private:
++  friend base::NoDestructor<AppSwapProfilesServiceFactory>;
++
++  AppSwapProfilesServiceFactory();
++  ~AppSwapProfilesServiceFactory() override;
++
++  // BrowserContextKeyedServiceFactory:
++  std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
++      content::BrowserContext* context) const override;
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILES_SERVICE_FACTORY_H_
+diff --git a/chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.cc b/chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.cc
+new file mode 100644
+index 0000000000000..9967a78cd8a9f
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.cc
+@@ -0,0 +1,104 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h"
++
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/sessions/session_service.h"
++#include "chrome/browser/sessions/session_service_factory.h"
++#include "components/sessions/content/session_tab_helper.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/web_contents.h"
++
++namespace {
++
++constexpr char kAppSwapRouteGroupPinExtraDataKey[] = "appswap.route_group_pin";
++
++}  // namespace
++
++AppSwapRouteGroupPinTabHelper::AppSwapRouteGroupPinTabHelper(
++    content::WebContents* web_contents)
++    : content::WebContentsObserver(web_contents),
++      content::WebContentsUserData<AppSwapRouteGroupPinTabHelper>(
++          *web_contents) {
++  // New tabs opened from an existing tab (link click, Ctrl+click, "open in
++  // new tab", window.open()) inherit the opener's pinned route group -- e.g.
++  // opening an API link from a tab pinned to "Beta" should keep testing
++  // "Beta" in the new tab, not silently fall back to unpinned/direct. This
++  // has no equivalent in AppSwapVersionPinTabHelper (which starts every new
++  // tab unpinned) or in AppSwapProfilesService (whose "inheritance" is
++  // actually a side effect of a single global active-profile pointer, not
++  // real per-tab copying) -- see GetStoragePartitionConfigForSite.
++  if (content::RenderFrameHost* opener = web_contents->GetOpener()) {
++    if (content::WebContents* opener_contents =
++            content::WebContents::FromRenderFrameHost(opener)) {
++      if (AppSwapRouteGroupPinTabHelper* opener_helper =
++              AppSwapRouteGroupPinTabHelper::FromWebContents(
++                  opener_contents)) {
++        pinned_group_id_ = opener_helper->pinned_group_id_;
++      }
++    }
++  }
++}
++
++AppSwapRouteGroupPinTabHelper::~AppSwapRouteGroupPinTabHelper() = default;
++
++void AppSwapRouteGroupPinTabHelper::SetPinnedGroup(
++    const std::string& group_id) {
++  if (group_id.empty()) {
++    pinned_group_id_.reset();
++  } else {
++    pinned_group_id_ = group_id;
++  }
++  Persist();
++}
++
++std::optional<std::string> AppSwapRouteGroupPinTabHelper::GetPinnedGroup()
++    const {
++  return pinned_group_id_;
++}
++
++void AppSwapRouteGroupPinTabHelper::PrimaryPageChanged(content::Page& page) {
++  // Re-persist on every commit, mirroring
++  // AppSwapVersionPinTabHelper::PrimaryPageChanged -- see its comment for
++  // why (a tab whose pin was populated via RestoreFromExtraData or opener
++  // inheritance, rather than a direct SetPinnedGroup() call, still needs to
++  // land in *this* session's own SessionService log).
++  Persist();
++}
++
++// static
++void AppSwapRouteGroupPinTabHelper::RestoreFromExtraData(
++    content::WebContents* web_contents,
++    const std::map<std::string, std::string>& extra_data) {
++  auto it = extra_data.find(kAppSwapRouteGroupPinExtraDataKey);
++  if (it == extra_data.end() || it->second.empty()) {
++    return;
++  }
++  AppSwapRouteGroupPinTabHelper* helper =
++      GetOrCreateForWebContents(web_contents);
++  helper->pinned_group_id_ = it->second;
++}
++
++void AppSwapRouteGroupPinTabHelper::Persist() {
++  content::WebContents* contents = web_contents();
++  Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
++  SessionService* session_service = SessionServiceFactory::GetForProfile(profile);
++  if (!session_service) {
++    return;
++  }
++  SessionID window_id =
++      sessions::SessionTabHelper::IdForWindowContainingTab(contents);
++  SessionID tab_id = sessions::SessionTabHelper::IdForTab(contents);
++  if (!window_id.is_valid() || !tab_id.is_valid()) {
++    return;
++  }
++  session_service->AddTabExtraData(window_id, tab_id,
++                                   kAppSwapRouteGroupPinExtraDataKey,
++                                   pinned_group_id_.value_or(std::string()));
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapRouteGroupPinTabHelper);
+diff --git a/chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h b/chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h
+new file mode 100644
+index 0000000000000..851ef77bf79a9
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h
+@@ -0,0 +1,75 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_PIN_TAB_HELPER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_PIN_TAB_HELPER_H_
++
++#include <map>
++#include <optional>
++#include <string>
++
++#include "content/public/browser/web_contents_observer.h"
++#include "content/public/browser/web_contents_user_data.h"
++
++namespace content {
++class Page;
++class WebContents;
++}  // namespace content
++
++// Lets a single tab pin a specific AppSwap Route Group (a named set of URL
++// rewrite rules -- see AppSwapRouteGroup), so different tabs on the same
++// project can test different environments (e.g. one tab pinned to "Beta",
++// another to "Prod") at once. No group pinned means no rewriting applies at
++// all, functionally identical to an explicit empty group -- there's no
++// separate "default" concept.
++//
++// New tabs opened from an existing tab inherit that tab's pin (see the
++// constructor) -- unlike AppSwapVersionPinTabHelper, which starts every new
++// tab with an empty pin, and unlike AppSwapProfilesService's active-profile
++// pointer, which is a single global switch rather than real per-tab state.
++//
++// Persisted per-tab via SessionService::AddTabExtraData so a pin survives a
++// session restore -- see RestoreFromExtraData(). Re-persisted on every
++// navigation commit (PrimaryPageChanged), not just when SetPinnedGroup() is
++// called directly, mirroring AppSwapVersionPinTabHelper.
++class AppSwapRouteGroupPinTabHelper
++    : public content::WebContentsObserver,
++      public content::WebContentsUserData<AppSwapRouteGroupPinTabHelper> {
++ public:
++  ~AppSwapRouteGroupPinTabHelper() override;
++
++  AppSwapRouteGroupPinTabHelper(const AppSwapRouteGroupPinTabHelper&) =
++      delete;
++  AppSwapRouteGroupPinTabHelper& operator=(
++      const AppSwapRouteGroupPinTabHelper&) = delete;
++
++  // Pins this tab to `group_id`. An empty id clears the pin (no rewriting
++  // applies).
++  void SetPinnedGroup(const std::string& group_id);
++
++  // Returns the route group id pinned for this tab, or nullopt if unpinned.
++  std::optional<std::string> GetPinnedGroup() const;
++
++  // Rebuilds this tab's pin from persisted session-restore extra data. Call
++  // before the tab's first navigation request, mirroring
++  // AppSwapVersionPinTabHelper::RestoreFromExtraData().
++  static void RestoreFromExtraData(
++      content::WebContents* web_contents,
++      const std::map<std::string, std::string>& extra_data);
++
++ private:
++  friend class content::WebContentsUserData<AppSwapRouteGroupPinTabHelper>;
++  explicit AppSwapRouteGroupPinTabHelper(content::WebContents* web_contents);
++
++  // content::WebContentsObserver:
++  void PrimaryPageChanged(content::Page& page) override;
++
++  void Persist();
++
++  std::optional<std::string> pinned_group_id_;
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_PIN_TAB_HELPER_H_
+diff --git a/chrome/browser/app_swap/app_swap_route_group_service.cc b/chrome/browser/app_swap/app_swap_route_group_service.cc
+new file mode 100644
+index 0000000000000..ccc2472272ca0
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_route_group_service.cc
+@@ -0,0 +1,283 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_route_group_service.h"
++
++#include <optional>
++#include <string>
++#include <utility>
++
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/no_destructor.h"
++#include "base/task/thread_pool.h"
++#include "base/uuid.h"
++#include "base/values.h"
++#include "content/public/browser/browser_context.h"
++
++namespace {
++
++base::DictValue RuleToDict(const AppSwapRouteGroupRule& rule) {
++  base::DictValue dict;
++  dict.Set("id", rule.id);
++  dict.Set("url_pattern", rule.url_pattern);
++  dict.Set("target", rule.target);
++  return dict;
++}
++
++std::optional<AppSwapRouteGroupRule> RuleFromDict(const base::DictValue& dict) {
++  const std::string* id = dict.FindString("id");
++  const std::string* url_pattern = dict.FindString("url_pattern");
++  const std::string* target = dict.FindString("target");
++  if (!id || !url_pattern || !target) {
++    return std::nullopt;
++  }
++  AppSwapRouteGroupRule rule;
++  rule.id = *id;
++  rule.url_pattern = *url_pattern;
++  rule.target = *target;
++  return rule;
++}
++
++base::DictValue GroupToDict(const AppSwapRouteGroup& group) {
++  base::DictValue dict;
++  dict.Set("id", group.id);
++  dict.Set("name", group.name);
++  base::ListValue rules_list;
++  for (const AppSwapRouteGroupRule& rule : group.rules) {
++    rules_list.Append(RuleToDict(rule));
++  }
++  dict.Set("rules", std::move(rules_list));
++  return dict;
++}
++
++std::optional<AppSwapRouteGroup> GroupFromDict(const base::DictValue& dict) {
++  const std::string* id = dict.FindString("id");
++  const std::string* name = dict.FindString("name");
++  if (!id || !name) {
++    return std::nullopt;
++  }
++  AppSwapRouteGroup group;
++  group.id = *id;
++  group.name = *name;
++  if (const base::ListValue* rules_list = dict.FindList("rules")) {
++    for (const base::Value& value : *rules_list) {
++      if (!value.is_dict()) {
++        continue;
++      }
++      if (std::optional<AppSwapRouteGroupRule> rule =
++              RuleFromDict(value.GetDict())) {
++        group.rules.push_back(std::move(*rule));
++      }
++    }
++  }
++  return group;
++}
++
++// Reads and parses the config file. Runs on a MayBlock task runner.
++std::vector<AppSwapRouteGroup> ReadConfigFile(const base::FilePath& path) {
++  std::vector<AppSwapRouteGroup> groups;
++  std::string json;
++  if (!base::ReadFileToString(path, &json)) {
++    return groups;
++  }
++  std::optional<base::DictValue> parsed =
++      base::JSONReader::ReadDict(json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
++  if (!parsed) {
++    return groups;
++  }
++  const base::ListValue* groups_list = parsed->FindList("route_groups");
++  if (!groups_list) {
++    return groups;
++  }
++  for (size_t i = 0; i < groups_list->size(); ++i) {
++    const base::Value& value = (*groups_list)[i];
++    if (!value.is_dict()) {
++      continue;
++    }
++    if (std::optional<AppSwapRouteGroup> group =
++            GroupFromDict(value.GetDict())) {
++      groups.push_back(std::move(*group));
++    }
++  }
++  return groups;
++}
++
++}  // namespace
++
++AppSwapRouteGroupService::AppSwapRouteGroupService(
++    content::BrowserContext* browser_context)
++    : profile_path_(browser_context->GetPath()) {}
++AppSwapRouteGroupService::~AppSwapRouteGroupService() = default;
++
++base::FilePath AppSwapRouteGroupService::ConfigPath() const {
++  return profile_path_.Append(FILE_PATH_LITERAL("AppSwap"))
++      .Append(FILE_PATH_LITERAL("route_groups.json"));
++}
++
++void AppSwapRouteGroupService::GetRouteGroups(
++    base::OnceCallback<void(std::vector<AppSwapRouteGroup>)> callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  if (loaded_) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(std::move(callback), groups_));
++    return;
++  }
++
++  pending_load_.push_back(base::BindOnce(
++      [](AppSwapRouteGroupService* self,
++         base::OnceCallback<void(std::vector<AppSwapRouteGroup>)> callback) {
++        self->GetRouteGroups(std::move(callback));
++      },
++      base::Unretained(this), std::move(callback)));
++
++  if (loading_) {
++    return;
++  }
++  loading_ = true;
++
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&ReadConfigFile, ConfigPath()),
++      base::BindOnce(&AppSwapRouteGroupService::OnConfigLoaded,
++                     base::Unretained(this)));
++}
++
++const std::vector<AppSwapRouteGroup>&
++AppSwapRouteGroupService::GetRouteGroupsIfLoaded() const {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  static const base::NoDestructor<std::vector<AppSwapRouteGroup>> kEmpty;
++  return loaded_ ? groups_ : *kEmpty;
++}
++
++void AppSwapRouteGroupService::OnConfigLoaded(
++    std::vector<AppSwapRouteGroup> groups) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  groups_ = std::move(groups);
++  loaded_ = true;
++  loading_ = false;
++
++  std::vector<base::OnceClosure> pending = std::move(pending_load_);
++  pending_load_.clear();
++  for (base::OnceClosure& callback : pending) {
++    std::move(callback).Run();
++  }
++}
++
++void AppSwapRouteGroupService::AddRouteGroup(AppSwapRouteGroup group) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  DCHECK(loaded_);
++  if (group.id.empty()) {
++    group.id = base::Uuid::GenerateRandomV4().AsLowercaseString();
++  }
++  groups_.push_back(std::move(group));
++  ScheduleSave();
++}
++
++void AppSwapRouteGroupService::UpdateRouteGroup(AppSwapRouteGroup group) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  DCHECK(loaded_);
++  for (AppSwapRouteGroup& existing : groups_) {
++    if (existing.id == group.id) {
++      existing = std::move(group);
++      ScheduleSave();
++      return;
++    }
++  }
++}
++
++void AppSwapRouteGroupService::RemoveRouteGroup(const std::string& id) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  DCHECK(loaded_);
++  for (auto it = groups_.begin(); it != groups_.end(); ++it) {
++    if (it->id == id) {
++      groups_.erase(it);
++      ScheduleSave();
++      return;
++    }
++  }
++}
++
++void AppSwapRouteGroupService::AddRule(const std::string& group_id,
++                                        AppSwapRouteGroupRule rule) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  DCHECK(loaded_);
++  for (AppSwapRouteGroup& group : groups_) {
++    if (group.id == group_id) {
++      if (rule.id.empty()) {
++        rule.id = base::Uuid::GenerateRandomV4().AsLowercaseString();
++      }
++      group.rules.push_back(std::move(rule));
++      ScheduleSave();
++      return;
++    }
++  }
++}
++
++void AppSwapRouteGroupService::UpdateRule(const std::string& group_id,
++                                           AppSwapRouteGroupRule rule) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  DCHECK(loaded_);
++  for (AppSwapRouteGroup& group : groups_) {
++    if (group.id != group_id) {
++      continue;
++    }
++    for (AppSwapRouteGroupRule& existing : group.rules) {
++      if (existing.id == rule.id) {
++        existing = std::move(rule);
++        ScheduleSave();
++        return;
++      }
++    }
++    return;
++  }
++}
++
++void AppSwapRouteGroupService::RemoveRule(const std::string& group_id,
++                                           const std::string& rule_id) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  DCHECK(loaded_);
++  for (AppSwapRouteGroup& group : groups_) {
++    if (group.id != group_id) {
++      continue;
++    }
++    for (auto it = group.rules.begin(); it != group.rules.end(); ++it) {
++      if (it->id == rule_id) {
++        group.rules.erase(it);
++        ScheduleSave();
++        return;
++      }
++    }
++    return;
++  }
++}
++
++void AppSwapRouteGroupService::ScheduleSave() {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  base::DictValue root;
++  base::ListValue groups_list;
++  for (const AppSwapRouteGroup& group : groups_) {
++    groups_list.Append(GroupToDict(group));
++  }
++  root.Set("route_groups", std::move(groups_list));
++
++  std::string json;
++  if (!base::JSONWriter::Write(root, &json)) {
++    return;
++  }
++
++  const base::FilePath path = ConfigPath();
++  base::ThreadPool::PostTask(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
++      base::BindOnce(
++          [](base::FilePath path, std::string json) {
++            base::CreateDirectory(path.DirName());
++            base::WriteFile(path, json);
++          },
++          std::move(path), std::move(json)));
++}
+diff --git a/chrome/browser/app_swap/app_swap_route_group_service.h b/chrome/browser/app_swap/app_swap_route_group_service.h
+new file mode 100644
+index 0000000000000..9ea4a3d29b2ea
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_route_group_service.h
+@@ -0,0 +1,99 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_SERVICE_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_SERVICE_H_
++
++#include <string>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/functional/callback.h"
++#include "base/sequence_checker.h"
++#include "components/keyed_service/core/keyed_service.h"
++
++namespace content {
++class BrowserContext;
++}  // namespace content
++
++// A single URL rewrite entry within an AppSwapRouteGroup: requests whose URL
++// matches `url_pattern` (see AppSwapUrlMatchesPattern) are forwarded to the
++// real network with the URL rewritten -- the portion of the request path
++// beyond `url_pattern`'s own path is appended to `target`'s path unchanged,
++// so e.g. a pattern of "https://example.com/api" with a target of
++// "https://beta.example.com/api" turns a request for
++// "https://example.com/api/users?x=1" into
++// "https://beta.example.com/api/users?x=1" (see
++// ComputeAppSwapRewriteUrl()). Applies to every HTTP method, not just
++// GET/HEAD -- it's a URL-level proxy, not served file content.
++struct AppSwapRouteGroupRule {
++  std::string id;           // GUID, generated on creation.
++  std::string url_pattern;  // e.g. "https://my-website.com/api"
++  std::string target;       // e.g. "https://beta.my-website.com/api"
++};
++
++// A named, app-independent set of rewrite rules a tab can be pinned to (see
++// AppSwapRouteGroupPinTabHelper) -- e.g. "Beta" rewrites a project's api/cdn
++// hosts to their beta counterparts, "Prod" has zero rules (a normal, real,
++// selectable group; not a special case). A rule has no notion of "app" at
++// all: rules apply purely by URL pattern, independent of any one app's own
++// hosts.
++struct AppSwapRouteGroup {
++  std::string id;    // GUID, generated on creation.
++  std::string name;   // e.g. "Beta", "Prod"
++  std::vector<AppSwapRouteGroupRule> rules;
++};
++
++// Owns the persistent route-group configuration for one Project (== Chromium
++// Profile), stored as JSON under that profile's own directory. The file is
++// read/written on a background (MayBlock) task runner. See
++// AppSwapRouteGroupServiceFactory for how to reach the instance for a given
++// Profile.
++class AppSwapRouteGroupService : public KeyedService {
++ public:
++  AppSwapRouteGroupService(content::BrowserContext* browser_context);
++  ~AppSwapRouteGroupService() override;
++
++  AppSwapRouteGroupService(const AppSwapRouteGroupService&) = delete;
++  AppSwapRouteGroupService& operator=(const AppSwapRouteGroupService&) =
++      delete;
++
++  // Loads the config from disk (on first call) and invokes |callback| with
++  // the groups on the UI thread.
++  void GetRouteGroups(
++      base::OnceCallback<void(std::vector<AppSwapRouteGroup>)> callback);
++
++  // Returns the loaded groups synchronously, or an empty list if the config
++  // hasn't finished loading yet. See AppSwapAppsService::GetAppsIfLoaded for
++  // why this exists alongside GetRouteGroups().
++  const std::vector<AppSwapRouteGroup>& GetRouteGroupsIfLoaded() const;
++
++  // Group mutations. Must only be called after the config has been loaded
++  // (i.e. after a GetRouteGroups callback has run). They update the
++  // in-memory list and schedule an asynchronous save.
++  void AddRouteGroup(AppSwapRouteGroup group);
++  void UpdateRouteGroup(AppSwapRouteGroup group);
++  void RemoveRouteGroup(const std::string& id);
++
++  // Rule mutations, nested within the group identified by `group_id`. No-op
++  // if `group_id` doesn't match any loaded group.
++  void AddRule(const std::string& group_id, AppSwapRouteGroupRule rule);
++  void UpdateRule(const std::string& group_id, AppSwapRouteGroupRule rule);
++  void RemoveRule(const std::string& group_id, const std::string& rule_id);
++
++ private:
++  void OnConfigLoaded(std::vector<AppSwapRouteGroup> groups);
++  void ScheduleSave();
++
++  base::FilePath ConfigPath() const;
++
++  const base::FilePath profile_path_;
++  std::vector<AppSwapRouteGroup> groups_;
++  bool loaded_ = false;
++  bool loading_ = false;
++  std::vector<base::OnceClosure> pending_load_;
++  SEQUENCE_CHECKER(sequence_checker_);
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_SERVICE_H_
+diff --git a/chrome/browser/app_swap/app_swap_route_group_service_factory.cc b/chrome/browser/app_swap/app_swap_route_group_service_factory.cc
+new file mode 100644
+index 0000000000000..1ef38f496451e
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_route_group_service_factory.cc
+@@ -0,0 +1,35 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_route_group_service_factory.h"
++
++#include <memory>
++
++#include "chrome/browser/app_swap/app_swap_route_group_service.h"
++#include "chrome/browser/profiles/profile.h"
++
++// static
++AppSwapRouteGroupService* AppSwapRouteGroupServiceFactory::GetForProfile(
++    Profile* profile) {
++  return static_cast<AppSwapRouteGroupService*>(
++      GetInstance()->GetServiceForBrowserContext(profile, true));
++}
++
++// static
++AppSwapRouteGroupServiceFactory*
++AppSwapRouteGroupServiceFactory::GetInstance() {
++  static base::NoDestructor<AppSwapRouteGroupServiceFactory> instance;
++  return instance.get();
++}
++
++AppSwapRouteGroupServiceFactory::AppSwapRouteGroupServiceFactory()
++    : ProfileKeyedServiceFactory("AppSwapRouteGroupService") {}
++
++AppSwapRouteGroupServiceFactory::~AppSwapRouteGroupServiceFactory() = default;
++
++std::unique_ptr<KeyedService>
++AppSwapRouteGroupServiceFactory::BuildServiceInstanceForBrowserContext(
++    content::BrowserContext* context) const {
++  return std::make_unique<AppSwapRouteGroupService>(context);
++}
+diff --git a/chrome/browser/app_swap/app_swap_route_group_service_factory.h b/chrome/browser/app_swap/app_swap_route_group_service_factory.h
+new file mode 100644
+index 0000000000000..7ff8ae95bde33
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_route_group_service_factory.h
+@@ -0,0 +1,31 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_SERVICE_FACTORY_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_SERVICE_FACTORY_H_
++
++#include "base/no_destructor.h"
++#include "chrome/browser/profiles/profile_keyed_service_factory.h"
++
++class AppSwapRouteGroupService;
++class Profile;
++
++// Owns one AppSwapRouteGroupService per Project (== Chromium Profile).
++class AppSwapRouteGroupServiceFactory : public ProfileKeyedServiceFactory {
++ public:
++  static AppSwapRouteGroupService* GetForProfile(Profile* profile);
++  static AppSwapRouteGroupServiceFactory* GetInstance();
++
++ private:
++  friend base::NoDestructor<AppSwapRouteGroupServiceFactory>;
++
++  AppSwapRouteGroupServiceFactory();
++  ~AppSwapRouteGroupServiceFactory() override;
++
++  // BrowserContextKeyedServiceFactory:
++  std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
++      content::BrowserContext* context) const override;
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_SERVICE_FACTORY_H_
+diff --git a/chrome/browser/profiles/BUILD.gn b/chrome/browser/profiles/BUILD.gn
+index 867d41c79c658..39608f5ae9ca7 100644
+--- a/chrome/browser/profiles/BUILD.gn
++++ b/chrome/browser/profiles/BUILD.gn
+@@ -723,6 +723,7 @@ source_set("profiles_extra_parts_impl") {
+     "//chrome/browser/account_settings",
+     "//chrome/browser/affiliations",
+     "//chrome/browser/ai",
++    "//chrome/browser/app_swap",
+     "//chrome/browser/autocomplete",
+     "//chrome/browser/autocomplete:aim_eligibility_service",
+     "//chrome/browser/autofill",
+diff --git a/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc b/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
+index bbcce8ce57f44..f75449829a5c9 100644
+--- a/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
++++ b/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
+@@ -15,6 +15,9 @@
+ #include "chrome/browser/accessibility/page_colors_controller_factory.h"
+ #include "chrome/browser/account_settings/account_setting_service_factory.h"
+ #include "chrome/browser/actor/actor_keyed_service_factory.h"
++#include "chrome/browser/app_swap/app_swap_apps_service_factory.h"
++#include "chrome/browser/app_swap/app_swap_profiles_service_factory.h"
++#include "chrome/browser/app_swap/app_swap_route_group_service_factory.h"
+ #include "chrome/browser/affiliations/affiliation_service_factory.h"
+ #include "chrome/browser/ai/ai_data_keyed_service_factory.h"
+ #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
+@@ -740,6 +743,9 @@ void ChromeBrowserMainExtraPartsProfiles::
+   AccountPreviewDataServiceFactory::GetInstance();
+   AccountReconcilorFactory::GetInstance();
+   AccountSettingServiceFactory::GetInstance();
++  AppSwapAppsServiceFactory::GetInstance();
++  AppSwapProfilesServiceFactory::GetInstance();
++  AppSwapRouteGroupServiceFactory::GetInstance();
+   AtMemoryQueryServiceFactory::GetInstance();
+ #if !BUILDFLAG(IS_ANDROID)
+   AutoPictureInPictureHatsServiceFactory::GetInstance();
+diff --git a/chrome/browser/resources/app_swap_projects/BUILD.gn b/chrome/browser/resources/app_swap_projects/BUILD.gn
+new file mode 100644
+index 0000000000000..c4c96e22fc0b9
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_projects/BUILD.gn
+@@ -0,0 +1,36 @@
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//ui/webui/resources/tools/build_webui.gni")
++
++assert(!is_android)
++
++build_webui("build") {
++  grd_prefix = "app_swap_projects"
++
++  static_files = [ "app_swap_projects.html" ]
++
++  ts_files = [
++    "app.html.ts",
++    "app.ts",
++    "browser_proxy.ts",
++  ]
++
++  css_files = [ "app.css" ]
++
++  mojo_files_deps =
++      [ "//chrome/browser/ui/webui/app_swap_projects:mojo_bindings_ts__generator" ]
++  mojo_files = [
++    "$root_gen_dir/chrome/browser/ui/webui/app_swap_projects/app_swap_projects.mojom-webui.ts",
++  ]
++
++  ts_deps = [
++    "//third_party/lit/v3_0:build_ts",
++    "//ui/webui/resources/cr_elements:build_ts",
++    "//ui/webui/resources/js:build_ts",
++    "//ui/webui/resources/mojo:build_ts",
++  ]
++
++  webui_context_type = "trusted"
++}
+diff --git a/chrome/browser/resources/app_swap_projects/app.css b/chrome/browser/resources/app_swap_projects/app.css
+new file mode 100644
+index 0000000000000..9f2264a470493
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_projects/app.css
+@@ -0,0 +1,118 @@
++/* Copyright 2026 The AppSwap Authors
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++/* #css_wrapper_metadata_start
++ * #type=style-lit
++ * #scheme=relative
++ * #css_wrapper_metadata_end */
++
++:host {
++  background: var(--color-sys-surface, white);
++  box-sizing: border-box;
++  color: var(--color-sys-on-surface, black);
++  display: block;
++  font-family: inherit;
++  min-height: 100vh;
++  padding: 16px 24px;
++  width: 100%;
++}
++
++h1 {
++  font-size: 20px;
++  margin: 0 0 12px;
++}
++
++h2 {
++  font-size: 16px;
++  margin: 20px 0 8px;
++}
++
++h3 {
++  font-size: 13px;
++  margin: 12px 0 6px;
++}
++
++.hint {
++  color: var(--cr-secondary-text-color, #5f6368);
++  font-size: 0.9em;
++}
++
++section {
++  max-width: 640px;
++}
++
++.row {
++  align-items: center;
++  border-bottom: 1px solid var(--cr-separator-color, #e0e0e0);
++  display: flex;
++  gap: 12px;
++  justify-content: space-between;
++  padding: 8px 4px;
++}
++
++.row-main {
++  display: flex;
++  flex-direction: column;
++  min-width: 0;
++}
++
++.primary {
++  font-weight: 500;
++}
++
++.secondary {
++  color: var(--cr-secondary-text-color, #5f6368);
++  font-size: 0.85em;
++}
++
++.badge {
++  background: var(--color-sys-primary-container, rgba(66, 133, 244, 0.12));
++  border-radius: 4px;
++  font-size: 0.75em;
++  margin-inline-start: 8px;
++  padding: 2px 6px;
++}
++
++.group {
++  border: 1px solid var(--cr-separator-color, #e0e0e0);
++  border-radius: 8px;
++  margin: 8px 0;
++  padding: 8px 12px;
++}
++
++.group-header {
++  align-items: center;
++  display: flex;
++  justify-content: space-between;
++  padding-bottom: 4px;
++}
++
++.form {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  margin-top: 8px;
++  max-width: 360px;
++}
++
++.form input {
++  border: 1px solid var(--cr-separator-color, #c0c0c0);
++  border-radius: 4px;
++  font: inherit;
++  padding: 6px 8px;
++}
++
++button {
++  background: none;
++  border: 1px solid var(--cr-separator-color, #c0c0c0);
++  border-radius: 4px;
++  cursor: pointer;
++  font: inherit;
++  padding: 6px 10px;
++  white-space: nowrap;
++}
++
++button:hover {
++  background: var(--cr-hover-background-color, rgba(0, 0, 0, 0.06));
++}
+diff --git a/chrome/browser/resources/app_swap_projects/app.html.ts b/chrome/browser/resources/app_swap_projects/app.html.ts
+new file mode 100644
+index 0000000000000..415dd8f3dd1d0
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_projects/app.html.ts
+@@ -0,0 +1,133 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {html} from 'chrome://resources/lit/v3_0/lit.rollup.js';
++
++import type {AppSwapProjectsAppElement} from './app.js';
++
++export function getHtml(this: AppSwapProjectsAppElement) {
++  // clang-format off
++  return html`
++    <h1>${this.projectName_ || 'Project settings'}</h1>
++    <cr-tabs .tabNames="${this.tabNames_}" .selected="${this.selectedTab_}"
++        @selected-changed="${this.onTabsSelectedChanged_}">
++    </cr-tabs>
++
++    ${this.selectedTab_ === 0 ? html`
++      <section>
++        <h2>General</h2>
++        <p>Project name: <strong>${this.projectName_}</strong></p>
++        <p class="hint">Rename or delete this project from the browser's
++          profile menu -- a Project is a Chromium Profile, so its identity
++          is managed there.</p>
++      </section>
++    ` : ''}
++
++    ${this.selectedTab_ === 1 ? html`
++      <section>
++        <h2>Apps</h2>
++        ${this.apps_.length === 0 ? html`<p class="hint">No apps yet.</p>` : ''}
++        ${this.apps_.map(app => html`
++          <div class="row">
++            <div class="row-main">
++              <div class="primary">${app.title}</div>
++              <div class="secondary">${app.packageName}@${app.version}
++                &middot; ${app.registry}</div>
++              <div class="secondary">Hosts: ${app.hosts.join(', ') || '(none)'}</div>
++            </div>
++            <button data-id="${app.id}" @click="${this.onRemoveAppClick_}">Remove</button>
++          </div>
++        `)}
++        <div class="form">
++          <h3>Add app</h3>
++          <input placeholder="Title" data-field="newAppTitle_"
++              .value="${this.newAppTitle_}" @input="${this.onFieldInput_}">
++          <input placeholder="Package name (e.g. @org/app)" data-field="newAppPackage_"
++              .value="${this.newAppPackage_}" @input="${this.onFieldInput_}">
++          <input placeholder="Version (exact or dist-tag)" data-field="newAppVersion_"
++              .value="${this.newAppVersion_}" @input="${this.onFieldInput_}">
++          <input placeholder="Registry (e.g. https://registry.npmjs.org)"
++              data-field="newAppRegistry_" .value="${this.newAppRegistry_}"
++              @input="${this.onFieldInput_}">
++          <input placeholder="Token (optional)" data-field="newAppToken_"
++              .value="${this.newAppToken_}" @input="${this.onFieldInput_}">
++          <input placeholder="Hosts, comma-separated (e.g. https://my-app.dev)"
++              data-field="newAppHosts_" .value="${this.newAppHosts_}"
++              @input="${this.onFieldInput_}">
++          <button @click="${this.onAddAppClick_}">Add app</button>
++        </div>
++      </section>
++    ` : ''}
++
++    ${this.selectedTab_ === 2 ? html`
++      <section>
++        <h2>Routes</h2>
++        ${this.routeGroups_.length === 0 ? html`<p class="hint">No route groups yet.</p>` : ''}
++        ${this.routeGroups_.map(group => html`
++          <div class="group">
++            <div class="group-header">
++              <strong>${group.name}</strong>
++              <button data-id="${group.id}" @click="${this.onRemoveRouteGroupClick_}">Remove group</button>
++            </div>
++            ${group.rules.length === 0 ? html`<p class="hint">No rules -- direct calls.</p>` : ''}
++            ${group.rules.map(rule => html`
++              <div class="row">
++                <div class="row-main">
++                  <span class="primary">${rule.urlPattern}</span>
++                  <span class="secondary">&rarr; ${rule.target}</span>
++                </div>
++                <button data-group-id="${group.id}" data-rule-id="${rule.id}"
++                    @click="${this.onRemoveRuleClick_}">Remove</button>
++              </div>
++            `)}
++            <div class="form">
++              <input placeholder="URL pattern (e.g. https://api.my-app.dev)"
++                  data-group-id="${group.id}" data-rule-field="pattern"
++                  .value="${this.getPendingRule_(group.id).pattern}"
++                  @input="${this.onRuleFieldInput_}">
++              <input placeholder="Rewrite target (e.g. https://api.beta.my-app.dev)"
++                  data-group-id="${group.id}" data-rule-field="target"
++                  .value="${this.getPendingRule_(group.id).target}"
++                  @input="${this.onRuleFieldInput_}">
++              <button data-group-id="${group.id}" @click="${this.onAddRuleClick_}">Add rule</button>
++            </div>
++          </div>
++        `)}
++        <div class="form">
++          <h3>Add route group</h3>
++          <input placeholder="Name (e.g. Beta, Prod)" data-field="newGroupName_"
++              .value="${this.newGroupName_}" @input="${this.onFieldInput_}">
++          <button @click="${this.onAddRouteGroupClick_}">Add group</button>
++        </div>
++      </section>
++    ` : ''}
++
++    ${this.selectedTab_ === 3 ? html`
++      <section>
++        <h2>Profiles</h2>
++        <p class="hint">A separate storage identity within this project --
++          e.g. testing two logged-in accounts against the same app.</p>
++        ${this.profiles_.length === 0 ? html`<p class="hint">No profiles yet.</p>` : ''}
++        ${this.profiles_.map(profile => html`
++          <div class="row">
++            <div class="row-main">
++              <span class="primary">${profile.name}</span>
++              ${profile.id === this.activeProfileId_ ? html`<span class="badge">Active</span>` : ''}
++            </div>
++            ${profile.id !== this.activeProfileId_ ? html`
++              <button data-id="${profile.id}" @click="${this.onSetActiveProfileClick_}">Set active</button>
++            ` : ''}
++            <button data-id="${profile.id}" @click="${this.onRemoveProfileClick_}">Remove</button>
++          </div>
++        `)}
++        <div class="form">
++          <h3>Add profile</h3>
++          <input placeholder="Name" data-field="newProfileName_"
++              .value="${this.newProfileName_}" @input="${this.onFieldInput_}">
++          <button @click="${this.onAddProfileClick_}">Add profile</button>
++        </div>
++      </section>
++    ` : ''}`;
++  // clang-format on
++}
+diff --git a/chrome/browser/resources/app_swap_projects/app.ts b/chrome/browser/resources/app_swap_projects/app.ts
+new file mode 100644
+index 0000000000000..eff1f543cb5af
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_projects/app.ts
+@@ -0,0 +1,231 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
++import 'chrome://resources/cr_elements/cr_tabs/cr_tabs.js';
++
++import {getCss} from './app.css.js';
++import {getHtml} from './app.html.js';
++import type {BrowserProxy} from './browser_proxy.js';
++import {BrowserProxyImpl} from './browser_proxy.js';
++import type {AppInfo, AppSwapProfileInfo, RouteGroupInfo} from './app_swap_projects.mojom-webui.js';
++
++export class AppSwapProjectsAppElement extends CrLitElement {
++  static get is() {
++    return 'app-swap-projects-app';
++  }
++
++  static override get styles() {
++    return getCss();
++  }
++
++  override render() {
++    return getHtml.bind(this)();
++  }
++
++  static override get properties() {
++    return {
++      selectedTab_: {type: Number},
++      tabNames_: {type: Array},
++      projectName_: {type: String},
++      apps_: {type: Array},
++      routeGroups_: {type: Array},
++      profiles_: {type: Array},
++      activeProfileId_: {type: String},
++      newAppTitle_: {type: String},
++      newAppPackage_: {type: String},
++      newAppVersion_: {type: String},
++      newAppRegistry_: {type: String},
++      newAppToken_: {type: String},
++      newAppHosts_: {type: String},
++      newGroupName_: {type: String},
++      pendingRules_: {type: Object},
++      newProfileName_: {type: String},
++    };
++  }
++
++  private apiProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
++
++  protected accessor selectedTab_: number = 0;
++  protected accessor tabNames_: string[] = ['General', 'Apps', 'Routes', 'Profiles'];
++  protected accessor projectName_: string = '';
++  protected accessor apps_: AppInfo[] = [];
++  protected accessor routeGroups_: RouteGroupInfo[] = [];
++  protected accessor profiles_: AppSwapProfileInfo[] = [];
++  protected accessor activeProfileId_: string|null = null;
++
++  protected accessor newAppTitle_: string = '';
++  protected accessor newAppPackage_: string = '';
++  protected accessor newAppVersion_: string = '';
++  protected accessor newAppRegistry_: string = '';
++  protected accessor newAppToken_: string = '';
++  protected accessor newAppHosts_: string = '';
++
++  protected accessor newGroupName_: string = '';
++  // Keyed by group id -- each route group renders its own "add rule" mini
++  // form, and they must not share pending state (a single pair of
++  // newRulePattern_/newRuleTarget_ properties made every group's form mirror
++  // whatever was typed into any one of them).
++  protected accessor pendingRules_: Record<string, {pattern: string, target: string}> = {};
++
++  protected accessor newProfileName_: string = '';
++
++  override connectedCallback() {
++    super.connectedCallback();
++    this.refreshAll_();
++  }
++
++  private async refreshAll_() {
++    const {name} = await this.apiProxy_.handler.getProjectName();
++    this.projectName_ = name;
++    await Promise.all([
++      this.refreshApps_(),
++      this.refreshRouteGroups_(),
++      this.refreshProfiles_(),
++    ]);
++  }
++
++  private async refreshApps_() {
++    const {apps} = await this.apiProxy_.handler.getApps();
++    this.apps_ = apps;
++  }
++
++  private async refreshRouteGroups_() {
++    const {groups} = await this.apiProxy_.handler.getRouteGroups();
++    this.routeGroups_ = groups;
++  }
++
++  private async refreshProfiles_() {
++    const {profiles, activeProfileId} =
++        await this.apiProxy_.handler.getAppSwapProfiles();
++    this.profiles_ = profiles;
++    this.activeProfileId_ = activeProfileId ?? null;
++  }
++
++  protected onTabsSelectedChanged_(e: CustomEvent<{value: number}>) {
++    this.selectedTab_ = e.detail.value;
++  }
++
++  // Generic text-field binding: every plain <input> in this page carries
++  // data-field="<propertyName>" and routes through here rather than a
++  // separate handler per field -- there are ten near-identical fields across
++  // the four tabs' forms, and a dedicated handler per field would just be
++  // that same three-line body copy-pasted ten times.
++  protected onFieldInput_(e: Event) {
++    const input = e.target as HTMLInputElement;
++    const field = input.dataset['field']!;
++    (this as unknown as Record<string, string>)[field] = input.value;
++  }
++
++  protected async onAddAppClick_() {
++    const hosts = this.newAppHosts_.split(',')
++                      .map(h => h.trim())
++                      .filter(h => h.length > 0);
++    await this.apiProxy_.handler.addApp({
++      id: '',
++      title: this.newAppTitle_,
++      packageName: this.newAppPackage_,
++      version: this.newAppVersion_,
++      registry: this.newAppRegistry_,
++      token: this.newAppToken_,
++      hosts,
++    });
++    this.newAppTitle_ = '';
++    this.newAppPackage_ = '';
++    this.newAppVersion_ = '';
++    this.newAppRegistry_ = '';
++    this.newAppToken_ = '';
++    this.newAppHosts_ = '';
++    await this.refreshApps_();
++  }
++
++  protected async onRemoveAppClick_(e: Event) {
++    const id = (e.currentTarget as HTMLElement).dataset['id']!;
++    await this.apiProxy_.handler.removeApp(id);
++    await this.refreshApps_();
++  }
++
++  protected async onAddRouteGroupClick_() {
++    if (!this.newGroupName_.trim()) {
++      return;
++    }
++    await this.apiProxy_.handler.addRouteGroup(this.newGroupName_);
++    this.newGroupName_ = '';
++    await this.refreshRouteGroups_();
++  }
++
++  protected async onRemoveRouteGroupClick_(e: Event) {
++    const id = (e.currentTarget as HTMLElement).dataset['id']!;
++    await this.apiProxy_.handler.removeRouteGroup(id);
++    await this.refreshRouteGroups_();
++  }
++
++  // Returns the in-progress "add rule" field values for `groupId`'s own
++  // form, never another group's -- see pendingRules_.
++  protected getPendingRule_(groupId: string): {pattern: string, target: string} {
++    return this.pendingRules_[groupId] || {pattern: '', target: ''};
++  }
++
++  protected onRuleFieldInput_(e: Event) {
++    const input = e.target as HTMLInputElement;
++    const groupId = input.dataset['groupId']!;
++    const field = input.dataset['ruleField'] as 'pattern' | 'target';
++    const current = this.getPendingRule_(groupId);
++    this.pendingRules_ = {
++      ...this.pendingRules_,
++      [groupId]: {...current, [field]: input.value},
++    };
++  }
++
++  protected async onAddRuleClick_(e: Event) {
++    const groupId = (e.currentTarget as HTMLElement).dataset['groupId']!;
++    const pending = this.getPendingRule_(groupId);
++    if (!pending.pattern.trim() || !pending.target.trim()) {
++      return;
++    }
++    await this.apiProxy_.handler.addRule(groupId, pending.pattern, pending.target);
++    const rest = {...this.pendingRules_};
++    delete rest[groupId];
++    this.pendingRules_ = rest;
++    await this.refreshRouteGroups_();
++  }
++
++  protected async onRemoveRuleClick_(e: Event) {
++    const target = e.currentTarget as HTMLElement;
++    const groupId = target.dataset['groupId']!;
++    const ruleId = target.dataset['ruleId']!;
++    await this.apiProxy_.handler.removeRule(groupId, ruleId);
++    await this.refreshRouteGroups_();
++  }
++
++  protected async onAddProfileClick_() {
++    if (!this.newProfileName_.trim()) {
++      return;
++    }
++    await this.apiProxy_.handler.addAppSwapProfile(this.newProfileName_);
++    this.newProfileName_ = '';
++    await this.refreshProfiles_();
++  }
++
++  protected async onRemoveProfileClick_(e: Event) {
++    const id = (e.currentTarget as HTMLElement).dataset['id']!;
++    await this.apiProxy_.handler.removeAppSwapProfile(id);
++    await this.refreshProfiles_();
++  }
++
++  protected async onSetActiveProfileClick_(e: Event) {
++    const id = (e.currentTarget as HTMLElement).dataset['id']!;
++    await this.apiProxy_.handler.setActiveAppSwapProfile(id);
++    await this.refreshProfiles_();
++  }
++}
++
++declare global {
++  interface HTMLElementTagNameMap {
++    'app-swap-projects-app': AppSwapProjectsAppElement;
++  }
++}
++
++customElements.define(
++    AppSwapProjectsAppElement.is, AppSwapProjectsAppElement);
+diff --git a/chrome/browser/resources/app_swap_projects/app_swap_projects.html b/chrome/browser/resources/app_swap_projects/app_swap_projects.html
+new file mode 100644
+index 0000000000000..e7210de5c6d34
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_projects/app_swap_projects.html
+@@ -0,0 +1,20 @@
++<!doctype html>
++<html dir="$i18n{textdirection}" lang="$i18n{language}">
++<head>
++  <meta charset="utf-8">
++  <title>Project settings</title>
++  <link rel="stylesheet" href="chrome://theme/colors.css?sets=ui,chrome">
++  <link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
++  <style>
++    html,
++    body {
++      margin: 0;
++      height: 100%;
++    }
++  </style>
++</head>
++<body>
++  <app-swap-projects-app></app-swap-projects-app>
++  <script type="module" src="app.js"></script>
++</body>
++</html>
+diff --git a/chrome/browser/resources/app_swap_projects/browser_proxy.ts b/chrome/browser/resources/app_swap_projects/browser_proxy.ts
+new file mode 100644
+index 0000000000000..608b86770dbc1
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_projects/browser_proxy.ts
+@@ -0,0 +1,28 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {PageHandlerFactory, PageHandlerRemote} from './app_swap_projects.mojom-webui.js';
++
++export interface BrowserProxy {
++  handler: PageHandlerRemote;
++}
++
++export class BrowserProxyImpl implements BrowserProxy {
++  handler: PageHandlerRemote = new PageHandlerRemote();
++
++  constructor() {
++    const factory = PageHandlerFactory.getRemote();
++    factory.createPageHandler(this.handler.$.bindNewPipeAndPassReceiver());
++  }
++
++  static getInstance(): BrowserProxy {
++    return instance || (instance = new BrowserProxyImpl());
++  }
++
++  static setInstance(obj: BrowserProxy) {
++    instance = obj;
++  }
++}
++
++let instance: BrowserProxy|null = null;
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.cc b/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.cc
+new file mode 100644
+index 0000000000000..ba198e0bfd26c
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.cc
+@@ -0,0 +1,237 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.h"
++
++#include <iterator>
++#include <optional>
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/hash/hash.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_route_group_service_factory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/mojom/menu_source_type.mojom.h"
++#include "ui/base/models/menu_separator_types.h"
++#include "ui/base/window_open_disposition.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
++#include "ui/gfx/color_utils.h"
++#include "ui/gfx/geometry/insets.h"
++#include "ui/views/background.h"
++#include "ui/views/border.h"
++#include "ui/views/controls/menu/menu_item_view.h"
++#include "ui/views/controls/menu/menu_model_adapter.h"
++#include "ui/views/controls/menu/menu_runner.h"
++#include "url/gurl.h"
++
++namespace {
++
++// Command ids for the route-group menu. Purely local to this menu's own
++// ExecuteCommand -- not part of chrome's global command-id space.
++constexpr int kDirectCommandId = 1;
++constexpr int kManageCommandId = 2;
++constexpr int kGroupCommandBase = 3;
++
++constexpr float kBadgeCornerRadius = 6.0f;
++
++// Same curated palette as AppSwapProfileTabStripButton -- see its comment
++// for why these specific hues (avoids washed-out yellows, spans hues that
++// stay distinct under red-green color blindness).
++constexpr double kBadgeHues[] = {
++    210.0,  // blue
++    175.0,  // teal
++    150.0,  // blue-leaning green (not yellow-green)
++    265.0,  // purple
++    330.0,  // magenta / pink
++    25.0,   // orange
++    245.0,  // indigo
++    355.0,  // pink-leaning red
++};
++
++double HueForGroupName(const std::string& name) {
++  return kBadgeHues[base::PersistentHash(name) % std::size(kBadgeHues)];
++}
++
++SkColor ComputeBadgeBackgroundColor(const std::string& name, bool dark_theme) {
++  color_utils::HSL hsl;
++  hsl.h = HueForGroupName(name) / 360.0;
++  hsl.s = dark_theme ? 0.40 : 0.62;
++  hsl.l = dark_theme ? 0.28 : 0.80;
++  return color_utils::HSLToSkColor(hsl, SK_AlphaOPAQUE);
++}
++
++SkColor ComputeBadgeTextColor(SkColor background) {
++  return color_utils::BlendForMinContrast(SK_ColorBLACK, background).color;
++}
++
++}  // namespace
++
++AppSwapRouteGroupTabStripButton::AppSwapRouteGroupTabStripButton(
++    BrowserWindowInterface* browser)
++    : views::MenuButton(base::BindRepeating(
++          &AppSwapRouteGroupTabStripButton::ButtonPressed,
++          base::Unretained(this))),
++      browser_(browser) {
++  SetVisible(false);
++  browser_->GetTabStripModel()->AddObserver(this);
++  UpdateForActiveTab();
++}
++
++AppSwapRouteGroupTabStripButton::~AppSwapRouteGroupTabStripButton() {
++  browser_->GetTabStripModel()->RemoveObserver(this);
++}
++
++void AppSwapRouteGroupTabStripButton::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  if (selection.active_tab_changed()) {
++    UpdateForActiveTab();
++  }
++}
++
++void AppSwapRouteGroupTabStripButton::OnTabChangedAt(
++    tabs::TabInterface* tab,
++    TabChangeType change_type) {
++  UpdateForActiveTab();
++}
++
++void AppSwapRouteGroupTabStripButton::UpdateForActiveTab() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++
++  if (!web_contents ||
++      !web_contents->GetLastCommittedURL().SchemeIsHTTPOrHTTPS()) {
++    SetVisible(false);
++    return;
++  }
++
++  if (AppSwapRouteGroupPinTabHelper* pin_helper =
++          AppSwapRouteGroupPinTabHelper::FromWebContents(web_contents)) {
++    if (std::optional<std::string> group_id = pin_helper->GetPinnedGroup()) {
++      Profile* profile = browser_->GetProfile();
++      for (const AppSwapRouteGroup& group :
++           AppSwapRouteGroupServiceFactory::GetForProfile(profile)
++               ->GetRouteGroupsIfLoaded()) {
++        if (group.id == *group_id) {
++          SetText(base::UTF8ToUTF16(group.name));
++          ApplyBadgeStyle(group.name);
++          SetVisible(true);
++          return;
++        }
++      }
++      // The pinned group has since been removed -- fall through to the
++      // "unpinned" placeholder below.
++    }
++  }
++
++  SetText(u"Routes");
++  ApplyBadgeStyle("Routes");
++  SetVisible(true);
++}
++
++void AppSwapRouteGroupTabStripButton::ApplyBadgeStyle(
++    const std::string& group_name) {
++  bool dark_theme = false;
++  if (const ui::ColorProvider* color_provider = GetColorProvider()) {
++    dark_theme =
++        color_utils::IsDark(color_provider->GetColor(ui::kColorWindowBackground));
++  }
++
++  const SkColor background_color =
++      ComputeBadgeBackgroundColor(group_name, dark_theme);
++  const SkColor text_color = ComputeBadgeTextColor(background_color);
++
++  SetBackground(
++      views::CreateRoundedRectBackground(background_color, kBadgeCornerRadius));
++  SetEnabledTextColors(text_color);
++  SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(4, 10)));
++}
++
++void AppSwapRouteGroupTabStripButton::OnThemeChanged() {
++  views::MenuButton::OnThemeChanged();
++  UpdateForActiveTab();
++}
++
++void AppSwapRouteGroupTabStripButton::ButtonPressed() {
++  // Tear down any previous menu before rebuilding -- see
++  // AppSwapProfileTabStripButton::ButtonPressed for why this ordering
++  // (menu_runner_ first) matters.
++  menu_runner_.reset();
++  menu_model_adapter_.reset();
++  menu_model_.reset();
++
++  Profile* profile = browser_->GetProfile();
++  menu_groups_ = AppSwapRouteGroupServiceFactory::GetForProfile(profile)
++                     ->GetRouteGroupsIfLoaded();
++
++  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
++  menu_model_->AddItem(kDirectCommandId, u"Direct (no rewriting)");
++  if (!menu_groups_.empty()) {
++    menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
++    for (size_t i = 0; i < menu_groups_.size(); ++i) {
++      const AppSwapRouteGroup& group = menu_groups_[i];
++      menu_model_->AddItem(kGroupCommandBase + static_cast<int>(i),
++                           base::UTF8ToUTF16(group.name));
++    }
++  }
++  menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
++  menu_model_->AddItem(kManageCommandId, u"Manage route groups");
++
++  menu_model_adapter_ = std::make_unique<views::MenuModelAdapter>(
++      menu_model_.get());
++  std::unique_ptr<views::MenuItemView> root = menu_model_adapter_->CreateMenu();
++  menu_runner_ = std::make_unique<views::MenuRunner>(
++      std::move(root), views::MenuRunner::HAS_MNEMONICS);
++  menu_runner_->RunMenuAt(GetWidget(), nullptr, GetAnchorBoundsInScreen(),
++                          views::MenuAnchorPosition::kTopLeft,
++                          ui::mojom::MenuSourceType::kNone);
++}
++
++void AppSwapRouteGroupTabStripButton::ExecuteCommand(int command_id,
++                                                      int event_flags) {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  if (!web_contents) {
++    return;
++  }
++
++  if (command_id == kManageCommandId) {
++    browser_->OpenGURL(GURL("appswap://projects"),
++                       WindowOpenDisposition::NEW_FOREGROUND_TAB);
++    return;
++  }
++
++  std::string group_id;  // Empty means "unpin".
++  if (command_id != kDirectCommandId) {
++    const size_t index =
++        static_cast<size_t>(command_id - kGroupCommandBase);
++    if (index >= menu_groups_.size()) {
++      return;
++    }
++    group_id = menu_groups_[index].id;
++  }
++
++  AppSwapRouteGroupPinTabHelper::GetOrCreateForWebContents(web_contents)
++      ->SetPinnedGroup(group_id);
++  // Unlike a Profile switch (which needs a whole new WebContents pinned to a
++  // different SiteInstance/storage partition), a route group pin doesn't
++  // change storage identity -- a plain reload is enough for the new pin to
++  // take effect on the next request this tab makes.
++  web_contents->GetController().Reload(content::ReloadType::NORMAL,
++                                       /*check_for_repost=*/false);
++  UpdateForActiveTab();
++}
++
++BEGIN_METADATA(AppSwapRouteGroupTabStripButton)
++END_METADATA
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.h b/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.h
+new file mode 100644
+index 0000000000000..be480ec55be7e
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.h
+@@ -0,0 +1,94 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_ROUTE_GROUP_TAB_STRIP_BUTTON_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_ROUTE_GROUP_TAB_STRIP_BUTTON_H_
++
++#include <memory>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/app_swap/app_swap_route_group_service.h"
++#include "chrome/browser/ui/tabs/tab_change_type.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/menus/simple_menu_model.h"
++#include "ui/views/controls/button/menu_button.h"
++
++class BrowserWindowInterface;
++class TabStripModel;
++
++namespace tabs {
++class TabInterface;
++}  // namespace tabs
++
++namespace views {
++class MenuModelAdapter;
++class MenuRunner;
++}  // namespace views
++
++// A location-bar-trailing button showing the Route Group the *active tab* is
++// currently pinned to -- unlike AppSwapProfileTabStripButton (a single
++// browser-wide active identity), a Route Group pin is real per-tab state
++// (see AppSwapRouteGroupPinTabHelper), so this button re-reads the active
++// tab's own pin rather than a shared pointer. Shows the pinned group's name
++// once pinned; before that, shows a neutral "Routes" placeholder on any
++// ordinary web page so the switcher is discoverable even before any group
++// has been picked. Clicking it opens a menu listing every route group
++// configured for the current project (== Chromium Profile), plus a "Direct
++// (no rewriting)" entry to unpin, plus a link to manage groups; picking one
++// pins the active tab and reloads it -- no WebContents replacement needed
++// (unlike AppSwapProfileTabStripButton's profile switch), since a route
++// group pin doesn't change storage partition or SiteInstance.
++class AppSwapRouteGroupTabStripButton : public views::MenuButton,
++                                        public TabStripModelObserver,
++                                        public ui::SimpleMenuModel::Delegate {
++  METADATA_HEADER(AppSwapRouteGroupTabStripButton, views::MenuButton)
++
++ public:
++  explicit AppSwapRouteGroupTabStripButton(BrowserWindowInterface* browser);
++  AppSwapRouteGroupTabStripButton(const AppSwapRouteGroupTabStripButton&) =
++      delete;
++  AppSwapRouteGroupTabStripButton& operator=(
++      const AppSwapRouteGroupTabStripButton&) = delete;
++  ~AppSwapRouteGroupTabStripButton() override;
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      TabChangeType change_type) override;
++
++  // ui::SimpleMenuModel::Delegate:
++  void ExecuteCommand(int command_id, int event_flags) override;
++
++  // views::View:
++  void OnThemeChanged() override;
++
++ private:
++  // Recomputes visibility and label text from the active tab's own pin.
++  void UpdateForActiveTab();
++
++  // Same badge-coloring approach as AppSwapProfileTabStripButton::
++  // ApplyBadgeStyle -- see its comment.
++  void ApplyBadgeStyle(const std::string& group_name);
++
++  // Builds and runs the route-group menu.
++  void ButtonPressed();
++
++  raw_ptr<BrowserWindowInterface> browser_;
++
++  // The groups menu currently shown -- kept in sync with the menu so
++  // ExecuteCommand's command ids resolve against the same list the user
++  // picked from.
++  std::vector<AppSwapRouteGroup> menu_groups_;
++
++  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
++  std::unique_ptr<views::MenuModelAdapter> menu_model_adapter_;
++  std::unique_ptr<views::MenuRunner> menu_runner_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_ROUTE_GROUP_TAB_STRIP_BUTTON_H_
+diff --git a/chrome/browser/ui/webui/app_swap_projects/BUILD.gn b/chrome/browser/ui/webui/app_swap_projects/BUILD.gn
+new file mode 100644
+index 0000000000000..60b2bc966e1f2
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_projects/BUILD.gn
+@@ -0,0 +1,33 @@
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//mojo/public/tools/bindings/mojom.gni")
++
++assert(!is_android)
++
++mojom("mojo_bindings") {
++  sources = [ "app_swap_projects.mojom" ]
++  webui_module_path = "/"
++}
++
++source_set("app_swap_projects") {
++  sources = [
++    "app_swap_projects_page_handler.cc",
++    "app_swap_projects_page_handler.h",
++    "app_swap_projects_ui.cc",
++    "app_swap_projects_ui.h",
++  ]
++
++  deps = [
++    ":mojo_bindings",
++    "//base",
++    "//chrome/browser/app_swap",
++    "//chrome/browser:browser_process",
++    "//chrome/browser/profiles:profile",
++    "//chrome/browser/resources/app_swap_projects:resources",
++    "//content/public/browser",
++    "//mojo/public/cpp/bindings",
++    "//ui/webui",
++  ]
++}
+diff --git a/chrome/browser/ui/webui/app_swap_projects/app_swap_projects.mojom b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects.mojom
+new file mode 100644
+index 0000000000000..66c1244b19f48
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects.mojom
+@@ -0,0 +1,68 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++module app_swap_projects.mojom;
++
++// Mirrors AppSwapApp (chrome/browser/app_swap/app_swap_apps_service.h).
++struct AppInfo {
++  string id;
++  string title;
++  string package_name;
++  string version;
++  string registry;
++  string token;
++  array<string> hosts;
++};
++
++// Mirrors AppSwapRouteGroupRule.
++struct RouteGroupRuleInfo {
++  string id;
++  string url_pattern;
++  string target;
++};
++
++// Mirrors AppSwapRouteGroup.
++struct RouteGroupInfo {
++  string id;
++  string name;
++  array<RouteGroupRuleInfo> rules;
++};
++
++// Mirrors AppSwapProfile (the storage-partition sub-identity, not this page
++// itself -- see the Profiles tab).
++struct AppSwapProfileInfo {
++  string id;
++  string name;
++};
++
++interface PageHandlerFactory {
++  CreatePageHandler(pending_receiver<PageHandler> handler);
++};
++
++// Every method resolves against the Profile (== Project) this page was
++// opened in -- there is no project id anywhere in this interface, see
++// AppSwapProjectsUI.
++interface PageHandler {
++  // General tab.
++  GetProjectName() => (string name);
++
++  // Apps tab.
++  GetApps() => (array<AppInfo> apps);
++  AddApp(AppInfo app) => ();
++  RemoveApp(string id) => ();
++
++  // Routes tab.
++  GetRouteGroups() => (array<RouteGroupInfo> groups);
++  AddRouteGroup(string name) => ();
++  RemoveRouteGroup(string id) => ();
++  AddRule(string group_id, string url_pattern, string target) => ();
++  RemoveRule(string group_id, string rule_id) => ();
++
++  // Profiles tab (the storage-partition sub-identity).
++  GetAppSwapProfiles() => (array<AppSwapProfileInfo> profiles,
++                           string? active_profile_id);
++  AddAppSwapProfile(string name) => ();
++  RemoveAppSwapProfile(string id) => ();
++  SetActiveAppSwapProfile(string id) => ();
++};
+diff --git a/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.cc b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.cc
+new file mode 100644
+index 0000000000000..ba7854f6c1de1
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.cc
+@@ -0,0 +1,188 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h"
++
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/app_swap/app_swap_apps_service.h"
++#include "chrome/browser/app_swap/app_swap_apps_service_factory.h"
++#include "chrome/browser/app_swap/app_swap_profile_removal_util.h"
++#include "chrome/browser/app_swap/app_swap_profiles_service.h"
++#include "chrome/browser/app_swap/app_swap_profiles_service_factory.h"
++#include "chrome/browser/app_swap/app_swap_route_group_service.h"
++#include "chrome/browser/app_swap/app_swap_route_group_service_factory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_attributes_entry.h"
++#include "chrome/browser/profiles/profile_attributes_storage.h"
++#include "chrome/browser/profiles/profile_manager.h"
++#include "chrome/browser/browser_process.h"
++
++AppSwapProjectsPageHandler::AppSwapProjectsPageHandler(
++    mojo::PendingReceiver<app_swap_projects::mojom::PageHandler> handler,
++    Profile* profile)
++    : profile_(profile), receiver_(this, std::move(handler)) {}
++
++AppSwapProjectsPageHandler::~AppSwapProjectsPageHandler() = default;
++
++void AppSwapProjectsPageHandler::GetProjectName(
++    GetProjectNameCallback callback) {
++  ProfileAttributesEntry* entry =
++      g_browser_process->profile_manager()
++          ->GetProfileAttributesStorage()
++          .GetProfileAttributesWithPath(profile_->GetPath());
++  std::move(callback).Run(entry ? base::UTF16ToUTF8(entry->GetName())
++                                : std::string());
++}
++
++void AppSwapProjectsPageHandler::GetApps(GetAppsCallback callback) {
++  AppSwapAppsServiceFactory::GetForProfile(profile_)->GetApps(base::BindOnce(
++      [](GetAppsCallback callback, std::vector<AppSwapApp> apps) {
++        std::vector<app_swap_projects::mojom::AppInfoPtr> result;
++        for (const AppSwapApp& app : apps) {
++          result.push_back(app_swap_projects::mojom::AppInfo::New(
++              app.id, app.title, app.package_name, app.version, app.registry,
++              app.token, app.hosts));
++        }
++        std::move(callback).Run(std::move(result));
++      },
++      std::move(callback)));
++}
++
++void AppSwapProjectsPageHandler::AddApp(
++    app_swap_projects::mojom::AppInfoPtr app,
++    AddAppCallback callback) {
++  AppSwapApp new_app;
++  new_app.id = app->id;
++  new_app.title = app->title;
++  new_app.package_name = app->package_name;
++  new_app.version = app->version;
++  new_app.registry = app->registry;
++  new_app.token = app->token;
++  new_app.hosts = app->hosts;
++  AppSwapAppsServiceFactory::GetForProfile(profile_)->AddApp(
++      std::move(new_app));
++  std::move(callback).Run();
++}
++
++void AppSwapProjectsPageHandler::RemoveApp(const std::string& id,
++                                           RemoveAppCallback callback) {
++  AppSwapAppsServiceFactory::GetForProfile(profile_)->RemoveApp(id);
++  std::move(callback).Run();
++}
++
++void AppSwapProjectsPageHandler::GetRouteGroups(
++    GetRouteGroupsCallback callback) {
++  AppSwapRouteGroupServiceFactory::GetForProfile(profile_)->GetRouteGroups(
++      base::BindOnce(
++          [](GetRouteGroupsCallback callback,
++             std::vector<AppSwapRouteGroup> groups) {
++            std::vector<app_swap_projects::mojom::RouteGroupInfoPtr> result;
++            for (const AppSwapRouteGroup& group : groups) {
++              std::vector<app_swap_projects::mojom::RouteGroupRuleInfoPtr>
++                  rules;
++              for (const AppSwapRouteGroupRule& rule : group.rules) {
++                rules.push_back(
++                    app_swap_projects::mojom::RouteGroupRuleInfo::New(
++                        rule.id, rule.url_pattern, rule.target));
++              }
++              result.push_back(app_swap_projects::mojom::RouteGroupInfo::New(
++                  group.id, group.name, std::move(rules)));
++            }
++            std::move(callback).Run(std::move(result));
++          },
++          std::move(callback)));
++}
++
++void AppSwapProjectsPageHandler::AddRouteGroup(
++    const std::string& name,
++    AddRouteGroupCallback callback) {
++  AppSwapRouteGroup group;
++  group.name = name;
++  AppSwapRouteGroupServiceFactory::GetForProfile(profile_)->AddRouteGroup(
++      std::move(group));
++  std::move(callback).Run();
++}
++
++void AppSwapProjectsPageHandler::RemoveRouteGroup(
++    const std::string& id,
++    RemoveRouteGroupCallback callback) {
++  AppSwapRouteGroupServiceFactory::GetForProfile(profile_)->RemoveRouteGroup(
++      id);
++  std::move(callback).Run();
++}
++
++void AppSwapProjectsPageHandler::AddRule(const std::string& group_id,
++                                         const std::string& url_pattern,
++                                         const std::string& target,
++                                         AddRuleCallback callback) {
++  AppSwapRouteGroupRule rule;
++  rule.url_pattern = url_pattern;
++  rule.target = target;
++  AppSwapRouteGroupServiceFactory::GetForProfile(profile_)->AddRule(
++      group_id, std::move(rule));
++  std::move(callback).Run();
++}
++
++void AppSwapProjectsPageHandler::RemoveRule(const std::string& group_id,
++                                            const std::string& rule_id,
++                                            RemoveRuleCallback callback) {
++  AppSwapRouteGroupServiceFactory::GetForProfile(profile_)->RemoveRule(
++      group_id, rule_id);
++  std::move(callback).Run();
++}
++
++void AppSwapProjectsPageHandler::GetAppSwapProfiles(
++    GetAppSwapProfilesCallback callback) {
++  AppSwapProfilesServiceFactory::GetForProfile(profile_)->GetProfiles(
++      base::BindOnce(
++          [](Profile* profile, GetAppSwapProfilesCallback callback,
++             std::vector<AppSwapProfile> profiles) {
++            std::vector<app_swap_projects::mojom::AppSwapProfileInfoPtr>
++                result;
++            for (const AppSwapProfile& profile_info : profiles) {
++              result.push_back(
++                  app_swap_projects::mojom::AppSwapProfileInfo::New(
++                      profile_info.id, profile_info.name));
++            }
++            std::optional<std::string> active_id =
++                AppSwapProfilesServiceFactory::GetForProfile(profile)
++                    ->GetActiveProfileIdIfLoaded();
++            std::move(callback).Run(std::move(result), active_id);
++          },
++          profile_.get(), std::move(callback)));
++}
++
++void AppSwapProjectsPageHandler::AddAppSwapProfile(
++    const std::string& name,
++    AddAppSwapProfileCallback callback) {
++  AppSwapProfile profile;
++  profile.name = name;
++  AppSwapProfilesServiceFactory::GetForProfile(profile_)->AddProfile(
++      std::move(profile));
++  std::move(callback).Run();
++}
++
++void AppSwapProjectsPageHandler::RemoveAppSwapProfile(
++    const std::string& id,
++    RemoveAppSwapProfileCallback callback) {
++  // Reassign any tab currently running under this profile's partition back
++  // to the default partition before removing it, so nothing is left
++  // pointing at a partition that's about to be cleared out from under it --
++  // same ordering appswap://profiles used to follow.
++  SwitchTabsOffAppSwapProfile(id);
++  ClearAppSwapProfileData(id, profile_);
++  AppSwapProfilesServiceFactory::GetForProfile(profile_)->RemoveProfile(id);
++  std::move(callback).Run();
++}
++
++void AppSwapProjectsPageHandler::SetActiveAppSwapProfile(
++    const std::string& id,
++    SetActiveAppSwapProfileCallback callback) {
++  AppSwapProfilesServiceFactory::GetForProfile(profile_)->SetActiveProfile(
++      id);
++  std::move(callback).Run();
++}
+diff --git a/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h
+new file mode 100644
+index 0000000000000..6a061b832576c
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h
+@@ -0,0 +1,60 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_APP_SWAP_PROJECTS_APP_SWAP_PROJECTS_PAGE_HANDLER_H_
++#define CHROME_BROWSER_UI_WEBUI_APP_SWAP_PROJECTS_APP_SWAP_PROJECTS_PAGE_HANDLER_H_
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/ui/webui/app_swap_projects/app_swap_projects.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++
++class Profile;
++
++// Implements the Projects page's PageHandler. Every method resolves the
++// Apps/Route Groups/AppSwap-Profiles services for `profile_` -- the Profile
++// (== Project) this page was opened in, fixed for the handler's lifetime.
++class AppSwapProjectsPageHandler : public app_swap_projects::mojom::PageHandler {
++ public:
++  AppSwapProjectsPageHandler(
++      mojo::PendingReceiver<app_swap_projects::mojom::PageHandler> handler,
++      Profile* profile);
++  AppSwapProjectsPageHandler(const AppSwapProjectsPageHandler&) = delete;
++  AppSwapProjectsPageHandler& operator=(const AppSwapProjectsPageHandler&) =
++      delete;
++  ~AppSwapProjectsPageHandler() override;
++
++  // app_swap_projects::mojom::PageHandler:
++  void GetProjectName(GetProjectNameCallback callback) override;
++  void GetApps(GetAppsCallback callback) override;
++  void AddApp(app_swap_projects::mojom::AppInfoPtr app,
++             AddAppCallback callback) override;
++  void RemoveApp(const std::string& id, RemoveAppCallback callback) override;
++  void GetRouteGroups(GetRouteGroupsCallback callback) override;
++  void AddRouteGroup(const std::string& name,
++                     AddRouteGroupCallback callback) override;
++  void RemoveRouteGroup(const std::string& id,
++                        RemoveRouteGroupCallback callback) override;
++  void AddRule(const std::string& group_id,
++              const std::string& url_pattern,
++              const std::string& target,
++              AddRuleCallback callback) override;
++  void RemoveRule(const std::string& group_id,
++                  const std::string& rule_id,
++                  RemoveRuleCallback callback) override;
++  void GetAppSwapProfiles(GetAppSwapProfilesCallback callback) override;
++  void AddAppSwapProfile(const std::string& name,
++                         AddAppSwapProfileCallback callback) override;
++  void RemoveAppSwapProfile(const std::string& id,
++                            RemoveAppSwapProfileCallback callback) override;
++  void SetActiveAppSwapProfile(
++      const std::string& id,
++      SetActiveAppSwapProfileCallback callback) override;
++
++ private:
++  const raw_ptr<Profile> profile_;
++  mojo::Receiver<app_swap_projects::mojom::PageHandler> receiver_;
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_PROJECTS_APP_SWAP_PROJECTS_PAGE_HANDLER_H_
+diff --git a/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.cc b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.cc
+new file mode 100644
+index 0000000000000..f6f404ae58da0
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.cc
+@@ -0,0 +1,51 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.h"
++
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h"
++#include "chrome/grit/app_swap_projects_resources.h"
++#include "chrome/grit/app_swap_projects_resources_map.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++#include "content/public/common/url_constants.h"
++#include "ui/webui/webui_util.h"
++
++AppSwapProjectsUIConfig::AppSwapProjectsUIConfig()
++    : DefaultWebUIConfig(content::kChromeUIScheme, "appswap-projects") {}
++
++AppSwapProjectsUI::AppSwapProjectsUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  Profile* profile = Profile::FromWebUI(web_ui);
++  content::WebUIDataSource* source =
++      content::WebUIDataSource::CreateAndAdd(profile, "appswap-projects");
++  webui::SetupWebUIDataSource(source, kAppSwapProjectsResources,
++                              IDR_APP_SWAP_PROJECTS_APP_SWAP_PROJECTS_HTML);
++}
++
++AppSwapProjectsUI::~AppSwapProjectsUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(AppSwapProjectsUI)
++
++void AppSwapProjectsUI::WebUIRenderFrameCreated(
++    content::RenderFrameHost* rfh) {
++  rfh->EnableMojoJsBindings(nullptr);
++}
++
++void AppSwapProjectsUI::BindInterface(
++    mojo::PendingReceiver<app_swap_projects::mojom::PageHandlerFactory>
++        receiver) {
++  page_factory_receiver_.reset();
++  page_factory_receiver_.Bind(std::move(receiver));
++}
++
++void AppSwapProjectsUI::CreatePageHandler(
++    mojo::PendingReceiver<app_swap_projects::mojom::PageHandler> handler) {
++  page_handler_ = std::make_unique<AppSwapProjectsPageHandler>(
++      std::move(handler), Profile::FromWebUI(web_ui()));
++}
+diff --git a/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.h b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.h
+new file mode 100644
+index 0000000000000..c40b9d84e75a4
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.h
+@@ -0,0 +1,62 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_APP_SWAP_PROJECTS_APP_SWAP_PROJECTS_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_APP_SWAP_PROJECTS_APP_SWAP_PROJECTS_UI_H_
++
++#include <memory>
++
++#include "chrome/browser/ui/webui/app_swap_projects/app_swap_projects.mojom.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++
++class AppSwapProjectsPageHandler;
++class AppSwapProjectsUI;
++
++namespace content {
++class RenderFrameHost;
++}  // namespace content
++
++class AppSwapProjectsUIConfig
++    : public content::DefaultWebUIConfig<AppSwapProjectsUI> {
++ public:
++  AppSwapProjectsUIConfig();
++};
++
++// appswap://projects (chrome://appswap-projects under the hood): the single
++// admin page for a Project -- General/Apps/Routes/Profiles tabs. Always
++// scoped to whichever Profile's window it's opened in (Project == Chromium
++// Profile, see the "Projects" plan) -- no project id ever crosses Mojo, the
++// PageHandler just resolves Profile::FromWebUI(web_ui()).
++class AppSwapProjectsUI : public content::WebUIController,
++                          public app_swap_projects::mojom::PageHandlerFactory {
++ public:
++  explicit AppSwapProjectsUI(content::WebUI* web_ui);
++  AppSwapProjectsUI(const AppSwapProjectsUI&) = delete;
++  AppSwapProjectsUI& operator=(const AppSwapProjectsUI&) = delete;
++  ~AppSwapProjectsUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<app_swap_projects::mojom::PageHandlerFactory>
++          receiver);
++
++ private:
++  // content::WebUIController:
++  void WebUIRenderFrameCreated(content::RenderFrameHost* rfh) override;
++
++  // app_swap_projects::mojom::PageHandlerFactory:
++  void CreatePageHandler(
++      mojo::PendingReceiver<app_swap_projects::mojom::PageHandler> handler)
++      override;
++
++  std::unique_ptr<AppSwapProjectsPageHandler> page_handler_;
++  mojo::Receiver<app_swap_projects::mojom::PageHandlerFactory>
++      page_factory_receiver_{this};
++
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_PROJECTS_APP_SWAP_PROJECTS_UI_H_

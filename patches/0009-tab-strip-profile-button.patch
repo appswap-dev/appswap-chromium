@@ -14,10 +14,10 @@ index 50920511caf57..4ef3547d2c046 100644
      "//chrome/browser/ui/views/file_system_access:impl",
 diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..1b36a9e870483
+index 0000000000000..62abcd555125a
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/BUILD.gn
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,42 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -30,6 +30,8 @@ index 0000000000000..1b36a9e870483
 +    "app_swap_profile_tab_strip_button.h",
 +    "app_swap_reload_button_controller.cc",
 +    "app_swap_reload_button_controller.h",
++    "app_swap_route_group_tab_strip_button.cc",
++    "app_swap_route_group_tab_strip_button.h",
 +    "app_swap_version_picker_dialog.cc",
 +    "app_swap_version_picker_dialog.h",
 +  ]
@@ -60,10 +62,10 @@ index 0000000000000..1b36a9e870483
 +}
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc
 new file mode 100644
-index 0000000000000..b9960e3537a24
+index 0000000000000..9a97efa3d61ce
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,69 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -75,6 +77,8 @@ index 0000000000000..b9960e3537a24
 +#include <utility>
 +
 +#include "chrome/browser/app_swap/app_swap_profiles_service.h"
++#include "chrome/browser/app_swap/app_swap_profiles_service_factory.h"
++#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/page_info/chrome_page_info_delegate.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -87,7 +91,9 @@ index 0000000000000..b9960e3537a24
 +
 +void SwitchActiveAppSwapProfile(const std::string& new_profile_id,
 +                                content::WebContents* web_contents) {
-+  AppSwapProfilesService::GetInstance()->SetActiveProfile(new_profile_id);
++  AppSwapProfilesServiceFactory::GetForProfile(
++      Profile::FromBrowserContext(web_contents->GetBrowserContext()))
++      ->SetActiveProfile(new_profile_id);
 +
 +  BrowserWindowInterface* browser =
 +      ChromePageInfoDelegate::DefaultGetBrowserCallback().Run(web_contents);
@@ -165,10 +171,10 @@ index 0000000000000..ec577ad5edf3e
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_SWITCH_UTIL_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc
 new file mode 100644
-index 0000000000000..22a5c9c5cec83
+index 0000000000000..a1d8c56597495
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc
-@@ -0,0 +1,263 @@
+@@ -0,0 +1,264 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -183,6 +189,7 @@ index 0000000000000..22a5c9c5cec83
 +#include "base/functional/bind.h"
 +#include "base/hash/hash.h"
 +#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/app_swap/app_swap_profiles_service_factory.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
 +#include "chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h"
@@ -275,7 +282,7 @@ index 0000000000000..22a5c9c5cec83
 +  SetVisible(false);
 +  browser_->GetTabStripModel()->AddObserver(this);
 +  profiles_change_subscription_ =
-+      AppSwapProfilesService::GetInstance()->AddChangeCallback(
++      AppSwapProfilesServiceFactory::GetForProfile(browser_->GetProfile())->AddChangeCallback(
 +          base::BindRepeating(
 +              &AppSwapProfileTabStripButton::UpdateForActiveTab,
 +              base::Unretained(this)));
@@ -321,7 +328,7 @@ index 0000000000000..22a5c9c5cec83
 +    if (config.partition_domain() == kAppSwapProfilePartitionDomain) {
 +      const std::string profile_id = config.partition_name();
 +      for (const AppSwapProfile& profile :
-+           AppSwapProfilesService::GetInstance()->GetProfilesIfLoaded()) {
++           AppSwapProfilesServiceFactory::GetForProfile(browser_->GetProfile())->GetProfilesIfLoaded()) {
 +        if (profile.id == profile_id) {
 +          SetText(base::UTF8ToUTF16(profile.name));
 +          ApplyBadgeStyle(profile.name);
@@ -387,7 +394,7 @@ index 0000000000000..22a5c9c5cec83
 +  // List every configured profile, not just the current page's app -- the
 +  // active profile is a global identity, so switching can pick any of them
 +  // regardless of what site the button happens to be showing on right now.
-+  menu_profiles_ = AppSwapProfilesService::GetInstance()->GetProfilesIfLoaded();
++  menu_profiles_ = AppSwapProfilesServiceFactory::GetForProfile(browser_->GetProfile())->GetProfilesIfLoaded();
 +
 +  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
 +  for (size_t i = 0; i < menu_profiles_.size(); ++i) {
@@ -417,7 +424,7 @@ index 0000000000000..22a5c9c5cec83
 +  }
 +
 +  if (command_id == kCreateProfileCommandId) {
-+    browser_->OpenGURL(GURL("appswap://profiles"),
++    browser_->OpenGURL(GURL("appswap://projects"),
 +                       WindowOpenDisposition::NEW_FOREGROUND_TAB);
 +    return;
 +  }
@@ -539,18 +546,19 @@ index 0000000000000..852a232574e1d
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_TAB_STRIP_BUTTON_H_
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-index f97b92504ba81..c8f9697c758dc 100644
+index f97b92504ba81..ac4d827d90431 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-@@ -56,6 +56,7 @@
+@@ -56,6 +56,8 @@
  #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
  #include "chrome/browser/ui/tabs/tab_strip_model.h"
  #include "chrome/browser/ui/ui_features.h"
 +#include "chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.h"
  #include "chrome/browser/ui/views/bubble_anchor_util_views.h"
  #include "chrome/browser/ui/views/chrome_layout_provider.h"
  #include "chrome/browser/ui/views/chrome_typography.h"
-@@ -464,6 +465,12 @@ void LocationBarView::Init() {
+@@ -464,6 +466,14 @@ void LocationBarView::Init() {
            page_action_items, page_actions::PageActionPropertiesProvider(),
            page_action_params));
  
@@ -558,12 +566,14 @@ index f97b92504ba81..c8f9697c758dc 100644
 +      browser_->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
 +    app_swap_profile_button_ = AddChildView(
 +        std::make_unique<AppSwapProfileTabStripButton>(browser_));
++    app_swap_route_group_button_ = AddChildView(
++        std::make_unique<AppSwapRouteGroupTabStripButton>(browser_));
 +  }
 +
    auto clear_all_button = views::CreateVectorImageButton(base::BindRepeating(
        static_cast<void (OmniboxView::*)(const std::u16string&)>(
            &OmniboxView::SetUserText),
-@@ -842,6 +849,15 @@ void LocationBarView::Layout(PassKey) {
+@@ -842,6 +852,20 @@ void LocationBarView::Layout(PassKey) {
      }
    };
  
@@ -575,23 +585,29 @@ index f97b92504ba81..c8f9697c758dc 100644
 +    add_trailing_decoration(app_swap_profile_button_, /*intra_item_padding=*/0,
 +                            /*edge_padding=*/trailing_decorations_edge_padding);
 +  }
++  if (app_swap_route_group_button_) {
++    add_trailing_decoration(app_swap_route_group_button_,
++                            /*intra_item_padding=*/0,
++                            /*edge_padding=*/trailing_decorations_edge_padding);
++  }
 +
    if (features::IsPageActionsElevatedToolbarEnabled()) {
      if (page_action_container_ && page_action_container_->GetVisible()) {
        const bool is_capsule_active = page_action_container_->IsCapsuleActive();
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.h b/chrome/browser/ui/views/location_bar/location_bar_view.h
-index 2796ee6d49b16..b7c94e1d2ea08 100644
+index 2796ee6d49b16..0c958de475857 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.h
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.h
-@@ -52,6 +52,7 @@
+@@ -52,6 +52,8 @@
  #include "services/device/public/cpp/geolocation/geolocation_system_permission_manager.h"
  #endif  // BUILDFLAG(OS_LEVEL_GEOLOCATION_PERMISSION_SUPPORTED)
  
 +class AppSwapProfileTabStripButton;
++class AppSwapRouteGroupTabStripButton;
  class BrowserWindowInterface;
  class CommandUpdater;
  class ContentSettingBubbleModelDelegate;
-@@ -581,6 +582,12 @@ class LocationBarView
+@@ -581,6 +583,18 @@ class LocationBarView
    raw_ptr<page_actions::PageActionContainerView> page_action_container_ =
        nullptr;
  
@@ -600,6 +616,12 @@ index 2796ee6d49b16..b7c94e1d2ea08 100644
 +  // the outermost trailing decoration so it reads like a persistent identity
 +  // indicator rather than a transient page action.
 +  raw_ptr<AppSwapProfileTabStripButton> app_swap_profile_button_ = nullptr;
++
++  // Shows the Route Group the active tab is pinned to, if any; see
++  // AppSwapRouteGroupTabStripButton's own comment. Placed right after the
++  // AppSwap Profile button for the same "persistent indicator" reason.
++  raw_ptr<AppSwapRouteGroupTabStripButton> app_swap_route_group_button_ =
++      nullptr;
 +
    // An [x] that appears in touch mode (when the OSK is visible) and allows the
    // user to clear all text.

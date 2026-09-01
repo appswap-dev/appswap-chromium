@@ -271,19 +271,59 @@ gen 0014-npm-version-picker-webui.patch \
 
 # Offline fallback (serve the tab's currently-committed version from disk
 # cache when the registry is unreachable, plus a static recovery page
-# listing cached versions to pick from), "Copy link to this version" in Page
-# Info, and named/reusable URL rewrite rules (appswap://rewrites) that proxy
-# matching requests to a different origin at the network level. Changes to
-# already-covered files this work also touches (app_swap_artifact_provider.*,
-# app_swap_url_loader_factory.*, app_swap_route_matcher.*, page_info_bubble_view.cc,
-# app_swap_apps_ui.cc, app_swap_profiles_ui.cc, app_swap_routes_ui.cc, and the
-# app_swap BUILD.gn) are picked up automatically by 0005/0007/0008 above.
-# app_swap_rewrite_rules_service.* and app_swap_rewrite_rules_ui.* are new.
-gen 0015-rewrite-rules-and-offline-fallback.patch \
-  chrome/browser/app_swap/app_swap_rewrite_rules_service.cc \
-  chrome/browser/app_swap/app_swap_rewrite_rules_service.h \
-  chrome/browser/app_swap/app_swap_rewrite_rules_ui.cc \
-  chrome/browser/app_swap/app_swap_rewrite_rules_ui.h
+# listing cached versions to pick from) and "Copy link to this version" in
+# Page Info added no new files -- every file they touch
+# (app_swap_artifact_provider.*, app_swap_url_loader_factory.*,
+# page_info_bubble_view.cc) is already covered by 0005/0007 above, so there's
+# no patch entry of their own here.
+
+# "Projects": a Project is a real Chromium Profile (not a new lightweight
+# entity) -- Apps/Route Groups/the AppSwap Profile (storage-partition)
+# sub-identity all become per-Profile KeyedServices (see the *_service.h
+# comments) instead of global base::NoDestructor singletons with one shared
+# JSON file, registered in chrome_browser_main_extra_parts_profiles.cc as
+# Chromium's KeyedService dependency graph requires. AppSwapRoute (origin ->
+# app_id) is folded into AppSwapApp.hosts; the old flat, app-independent
+# AppSwapRewriteRule becomes AppSwapRouteGroupRule, nested inside a named,
+# reusable AppSwapRouteGroup a tab can pin to (see
+# app_swap_route_group_pin_tab_helper.h) -- replacing appswap://rewrites and
+# the four old chrome.send()-based admin pages (apps/routes/rewrites/
+# profiles) with one Mojo+Lit SPA at appswap://projects (General/Apps/
+# Routes/Profiles tabs), always scoped to whichever profile's window it's
+# opened in. AppSwapRouteGroupTabStripButton (in the location bar, next to
+# the existing AppSwap Profile button) shows/switches the active tab's
+# pinned Route Group live, mirroring that button's own shape but reading
+# real per-tab state rather than a single global active pointer. Changes to
+# already-covered files this also touches (app_swap_apps_service.*,
+# app_swap_profiles_service.*, app_swap_route_matcher.*,
+# app_swap_url_loader_factory.*, app_swap/BUILD.gn, chrome_web_ui_configs.cc,
+# browser_about_handler.cc, chrome_browser_interface_binders_webui_parts_desktop.cc,
+# ui/webui/BUILD.gn, ui/views/app_swap/BUILD.gn, ui/views/app_swap/BUILD.gn,
+# location_bar_view.*, page_info_main_view.cc, page_info_bubble_view.cc,
+# location_icon_state_helper.cc, chrome_location_bar_model_delegate.cc,
+# tab_helpers.cc, browser_tabrestore.cc, chrome_content_browser_client.cc,
+# tools/gritsettings/resource_ids.spec, chrome_paks.gni) are picked up
+# automatically by 0004/0005/0007/0009/0013/0014 above. Everything below is
+# new: the *_service_factory.* files, the new route-group service/pin-helper,
+# the profiles KeyedService registration, the whole appswap://projects
+# WebUI, and the new tab-strip button.
+gen 0015-projects.patch \
+  chrome/browser/app_swap/app_swap_apps_service_factory.cc \
+  chrome/browser/app_swap/app_swap_apps_service_factory.h \
+  chrome/browser/app_swap/app_swap_profiles_service_factory.cc \
+  chrome/browser/app_swap/app_swap_profiles_service_factory.h \
+  chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.cc \
+  chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h \
+  chrome/browser/app_swap/app_swap_route_group_service.cc \
+  chrome/browser/app_swap/app_swap_route_group_service.h \
+  chrome/browser/app_swap/app_swap_route_group_service_factory.cc \
+  chrome/browser/app_swap/app_swap_route_group_service_factory.h \
+  chrome/browser/profiles/BUILD.gn \
+  chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc \
+  chrome/browser/resources/app_swap_projects \
+  chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.cc \
+  chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.h \
+  chrome/browser/ui/webui/app_swap_projects
 
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."

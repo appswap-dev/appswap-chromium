@@ -1,23 +1,27 @@
 diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
-index a89c1a8c9fe16..774871f7d8d94 100644
+index a89c1a8c9fe16..6580d5f4867ae 100644
 --- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
 +++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
-@@ -30,6 +30,8 @@
+@@ -30,6 +30,9 @@
  #include "chrome/browser/ui/webui/access_code_cast/access_code_cast_ui.h"
  #include "chrome/browser/ui/webui/app_service_internals/app_service_internals.mojom.h"
  #include "chrome/browser/ui/webui/app_service_internals/app_service_internals_ui.h"
 +#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom.h"
++#include "chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.h"
 +#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h"
  #include "chrome/browser/ui/webui/autofill_ml_internals/autofill_ml_internals_ui.h"
  #include "chrome/browser/ui/webui/bookmarks/bookmarks_ui.h"
  #include "chrome/browser/ui/webui/color_pipeline_internals/color_pipeline_internals_ui.h"
-@@ -637,6 +639,10 @@ void PopulateChromeWebUIFrameBindersPartsDesktop(
+@@ -637,6 +640,13 @@ void PopulateChromeWebUIFrameBindersPartsDesktop(
    RegisterWebUIControllerInterfaceBinder<
        feedback::report_unsafe_site::mojom::PageHandlerFactory, FeedbackUI>(map);
  
 +  RegisterWebUIControllerInterfaceBinder<
 +      app_swap_version_picker::mojom::PageHandlerFactory,
 +      AppSwapVersionPickerUI>(map);
++
++  RegisterWebUIControllerInterfaceBinder<
++      app_swap_projects::mojom::PageHandlerFactory, AppSwapProjectsUI>(map);
 +
    RegisterWebUIControllerInterfaceBinder<
        contextual_cueing_internals::mojom::PageHandler,
@@ -1074,19 +1078,20 @@ index 0000000000000..5b8b57da99c93
 +
 +#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_UI_H_
 diff --git a/third_party/lit/v3_0/BUILD.gn b/third_party/lit/v3_0/BUILD.gn
-index 087c776b3a90d..ecf7f9562d025 100644
+index 087c776b3a90d..91585f0e0db8f 100644
 --- a/third_party/lit/v3_0/BUILD.gn
 +++ b/third_party/lit/v3_0/BUILD.gn
-@@ -30,6 +30,7 @@ ts_library("build_ts") {
+@@ -30,6 +30,8 @@ ts_library("build_ts") {
      "//chrome/browser/resources/app_home:build_ts",
      "//chrome/browser/resources/app_service_internals:build_ts",
      "//chrome/browser/resources/app_settings:build_ts",
++    "//chrome/browser/resources/app_swap_projects:build_ts",
 +    "//chrome/browser/resources/app_swap_version_picker:build_ts",
      "//chrome/browser/resources/autofill_ml_internals:build_ts",
      "//chrome/browser/resources/bookmarks:build_ts",
      "//chrome/browser/resources/browser_switch:build_ts",
 diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_ids.spec
-index b5503c48ce1c4..ce0b2489171b6 100644
+index b5503c48ce1c4..aee17f467d8cd 100644
 --- a/tools/gritsettings/resource_ids.spec
 +++ b/tools/gritsettings/resource_ids.spec
 @@ -228,6 +228,10 @@
@@ -1100,3 +1105,14 @@ index b5503c48ce1c4..ce0b2489171b6 100644
    "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/ash/extended_updates/resources.grd": {
      "META": {"sizes": {"includes": [20]}},
      "includes": [2820],
+@@ -236,6 +240,10 @@
+     "META": {"sizes": {"includes": [20]}},
+     "includes": [2840],
+   },
++  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/app_swap_projects/resources.grd": {
++    "META": {"sizes": {"includes": [20]}},
++    "includes": [2845],
++  },
+   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/ash/print_preview/resources.grd": {
+     "META": {"sizes": {"includes": [500]}},
+     "includes": [2850],
