@@ -2872,10 +2872,10 @@ index 0000000000000..707f425096a7c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000000..9752f4f2ecb0e
+index 0000000000000..62f4224312318
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,879 @@
+@@ -0,0 +1,886 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3582,9 +3582,16 @@ index 0000000000000..9752f4f2ecb0e
 +void AppSwapProxyingURLLoaderFactory::MaybeProxyRequest(
 +    content::RenderFrameHost* frame,
 +    network::URLLoaderFactoryBuilder& builder) {
-+  if (!frame) {
-+    return;
-+  }
++  // `frame` is null for factories not tied to a single frame -- notably
++  // service worker script fetches (URLLoaderFactoryType::kServiceWorkerScript,
++  // see ServiceWorkerContextWrapper::GetLoaderFactoryForUpdateCheck), which
++  // still need to go through rewrite-rule matching. The resulting
++  // GlobalRenderFrameHostId is simply invalid, and every frame_id_ use below
++  // already null-checks RenderFrameHost::FromID() (the same as a tab closing
++  // mid-request), so app-route serving degrades gracefully instead of
++  // matching.
++  content::GlobalRenderFrameHostId frame_id =
++      frame ? frame->GetGlobalId() : content::GlobalRenderFrameHostId();
 +
 +  // Kick off (or continue) loading the route/app configuration as early as
 +  // possible, so it's likely ready by the time a request needs to be
@@ -3600,7 +3607,7 @@ index 0000000000000..9752f4f2ecb0e
 +
 +  auto [receiver, remote] = builder.Append();
 +  base::MakeSelfDeleting<AppSwapProxyingURLLoaderFactory>(
-+      std::move(receiver), std::move(remote), frame->GetGlobalId());
++      std::move(receiver), std::move(remote), frame_id);
 +}
 +
 +AppSwapProxyingURLLoaderFactory::AppSwapProxyingURLLoaderFactory(
