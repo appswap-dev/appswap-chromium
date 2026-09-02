@@ -1459,10 +1459,10 @@ index 0000000000000..608b86770dbc1
 +let instance: BrowserProxy|null = null;
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.cc b/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.cc
 new file mode 100644
-index 0000000000000..ba198e0bfd26c
+index 0000000000000..00a2887001110
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.cc
-@@ -0,0 +1,237 @@
+@@ -0,0 +1,252 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1572,6 +1572,20 @@ index 0000000000000..ba198e0bfd26c
 +}
 +
 +void AppSwapRouteGroupTabStripButton::UpdateForActiveTab() {
++  // Route Groups don't apply to Incognito/Guest/System windows --
++  // AppSwapRouteGroupServiceFactory only builds an instance for regular
++  // profiles (ProfileKeyedServiceFactory's default ProfileSelections), so
++  // this button just stays permanently hidden there instead of crashing
++  // (see the matching guard in ButtonPressed(), and
++  // AppSwapProfileTabStripButton's constructor for how this was actually
++  // discovered -- a real crash dump from opening an Incognito window).
++  AppSwapRouteGroupService* service =
++      AppSwapRouteGroupServiceFactory::GetForProfile(browser_->GetProfile());
++  if (!service) {
++    SetVisible(false);
++    return;
++  }
++
 +  content::WebContents* web_contents =
 +      browser_->GetTabStripModel()->GetActiveWebContents();
 +
@@ -1584,10 +1598,7 @@ index 0000000000000..ba198e0bfd26c
 +  if (AppSwapRouteGroupPinTabHelper* pin_helper =
 +          AppSwapRouteGroupPinTabHelper::FromWebContents(web_contents)) {
 +    if (std::optional<std::string> group_id = pin_helper->GetPinnedGroup()) {
-+      Profile* profile = browser_->GetProfile();
-+      for (const AppSwapRouteGroup& group :
-+           AppSwapRouteGroupServiceFactory::GetForProfile(profile)
-+               ->GetRouteGroupsIfLoaded()) {
++      for (const AppSwapRouteGroup& group : service->GetRouteGroupsIfLoaded()) {
 +        if (group.id == *group_id) {
 +          SetText(base::UTF8ToUTF16(group.name));
 +          ApplyBadgeStyle(group.name);
@@ -1629,6 +1640,12 @@ index 0000000000000..ba198e0bfd26c
 +}
 +
 +void AppSwapRouteGroupTabStripButton::ButtonPressed() {
++  AppSwapRouteGroupService* service =
++      AppSwapRouteGroupServiceFactory::GetForProfile(browser_->GetProfile());
++  if (!service) {
++    return;
++  }
++
 +  // Tear down any previous menu before rebuilding -- see
 +  // AppSwapProfileTabStripButton::ButtonPressed for why this ordering
 +  // (menu_runner_ first) matters.
@@ -1636,9 +1653,7 @@ index 0000000000000..ba198e0bfd26c
 +  menu_model_adapter_.reset();
 +  menu_model_.reset();
 +
-+  Profile* profile = browser_->GetProfile();
-+  menu_groups_ = AppSwapRouteGroupServiceFactory::GetForProfile(profile)
-+                     ->GetRouteGroupsIfLoaded();
++  menu_groups_ = service->GetRouteGroupsIfLoaded();
 +
 +  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
 +  menu_model_->AddItem(kDirectCommandId, u"Direct (no rewriting)");
@@ -1915,10 +1930,10 @@ index 0000000000000..66c1244b19f48
 +};
 diff --git a/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.cc b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.cc
 new file mode 100644
-index 0000000000000..ba7854f6c1de1
+index 0000000000000..3367cae164d63
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.cc
-@@ -0,0 +1,188 @@
+@@ -0,0 +1,227 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1949,6 +1964,18 @@ index 0000000000000..ba7854f6c1de1
 +
 +AppSwapProjectsPageHandler::~AppSwapProjectsPageHandler() = default;
 +
++AppSwapAppsService* AppSwapProjectsPageHandler::apps_service() {
++  return AppSwapAppsServiceFactory::GetForProfile(profile_);
++}
++
++AppSwapRouteGroupService* AppSwapProjectsPageHandler::route_group_service() {
++  return AppSwapRouteGroupServiceFactory::GetForProfile(profile_);
++}
++
++AppSwapProfilesService* AppSwapProjectsPageHandler::profiles_service() {
++  return AppSwapProfilesServiceFactory::GetForProfile(profile_);
++}
++
 +void AppSwapProjectsPageHandler::GetProjectName(
 +    GetProjectNameCallback callback) {
 +  ProfileAttributesEntry* entry =
@@ -1960,7 +1987,12 @@ index 0000000000000..ba7854f6c1de1
 +}
 +
 +void AppSwapProjectsPageHandler::GetApps(GetAppsCallback callback) {
-+  AppSwapAppsServiceFactory::GetForProfile(profile_)->GetApps(base::BindOnce(
++  AppSwapAppsService* service = apps_service();
++  if (!service) {
++    std::move(callback).Run({});
++    return;
++  }
++  service->GetApps(base::BindOnce(
 +      [](GetAppsCallback callback, std::vector<AppSwapApp> apps) {
 +        std::vector<app_swap_projects::mojom::AppInfoPtr> result;
 +        for (const AppSwapApp& app : apps) {
@@ -1976,6 +2008,11 @@ index 0000000000000..ba7854f6c1de1
 +void AppSwapProjectsPageHandler::AddApp(
 +    app_swap_projects::mojom::AppInfoPtr app,
 +    AddAppCallback callback) {
++  AppSwapAppsService* service = apps_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
++  }
 +  AppSwapApp new_app;
 +  new_app.id = app->id;
 +  new_app.title = app->title;
@@ -1984,55 +2021,63 @@ index 0000000000000..ba7854f6c1de1
 +  new_app.registry = app->registry;
 +  new_app.token = app->token;
 +  new_app.hosts = app->hosts;
-+  AppSwapAppsServiceFactory::GetForProfile(profile_)->AddApp(
-+      std::move(new_app));
++  service->AddApp(std::move(new_app));
 +  std::move(callback).Run();
 +}
 +
 +void AppSwapProjectsPageHandler::RemoveApp(const std::string& id,
 +                                           RemoveAppCallback callback) {
-+  AppSwapAppsServiceFactory::GetForProfile(profile_)->RemoveApp(id);
++  if (AppSwapAppsService* service = apps_service()) {
++    service->RemoveApp(id);
++  }
 +  std::move(callback).Run();
 +}
 +
 +void AppSwapProjectsPageHandler::GetRouteGroups(
 +    GetRouteGroupsCallback callback) {
-+  AppSwapRouteGroupServiceFactory::GetForProfile(profile_)->GetRouteGroups(
-+      base::BindOnce(
-+          [](GetRouteGroupsCallback callback,
-+             std::vector<AppSwapRouteGroup> groups) {
-+            std::vector<app_swap_projects::mojom::RouteGroupInfoPtr> result;
-+            for (const AppSwapRouteGroup& group : groups) {
-+              std::vector<app_swap_projects::mojom::RouteGroupRuleInfoPtr>
-+                  rules;
-+              for (const AppSwapRouteGroupRule& rule : group.rules) {
-+                rules.push_back(
-+                    app_swap_projects::mojom::RouteGroupRuleInfo::New(
-+                        rule.id, rule.url_pattern, rule.target));
-+              }
-+              result.push_back(app_swap_projects::mojom::RouteGroupInfo::New(
-+                  group.id, group.name, std::move(rules)));
-+            }
-+            std::move(callback).Run(std::move(result));
-+          },
-+          std::move(callback)));
++  AppSwapRouteGroupService* service = route_group_service();
++  if (!service) {
++    std::move(callback).Run({});
++    return;
++  }
++  service->GetRouteGroups(base::BindOnce(
++      [](GetRouteGroupsCallback callback,
++         std::vector<AppSwapRouteGroup> groups) {
++        std::vector<app_swap_projects::mojom::RouteGroupInfoPtr> result;
++        for (const AppSwapRouteGroup& group : groups) {
++          std::vector<app_swap_projects::mojom::RouteGroupRuleInfoPtr> rules;
++          for (const AppSwapRouteGroupRule& rule : group.rules) {
++            rules.push_back(app_swap_projects::mojom::RouteGroupRuleInfo::New(
++                rule.id, rule.url_pattern, rule.target));
++          }
++          result.push_back(app_swap_projects::mojom::RouteGroupInfo::New(
++              group.id, group.name, std::move(rules)));
++        }
++        std::move(callback).Run(std::move(result));
++      },
++      std::move(callback)));
 +}
 +
 +void AppSwapProjectsPageHandler::AddRouteGroup(
 +    const std::string& name,
 +    AddRouteGroupCallback callback) {
++  AppSwapRouteGroupService* service = route_group_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
++  }
 +  AppSwapRouteGroup group;
 +  group.name = name;
-+  AppSwapRouteGroupServiceFactory::GetForProfile(profile_)->AddRouteGroup(
-+      std::move(group));
++  service->AddRouteGroup(std::move(group));
 +  std::move(callback).Run();
 +}
 +
 +void AppSwapProjectsPageHandler::RemoveRouteGroup(
 +    const std::string& id,
 +    RemoveRouteGroupCallback callback) {
-+  AppSwapRouteGroupServiceFactory::GetForProfile(profile_)->RemoveRouteGroup(
-+      id);
++  if (AppSwapRouteGroupService* service = route_group_service()) {
++    service->RemoveRouteGroup(id);
++  }
 +  std::move(callback).Run();
 +}
 +
@@ -2040,79 +2085,88 @@ index 0000000000000..ba7854f6c1de1
 +                                         const std::string& url_pattern,
 +                                         const std::string& target,
 +                                         AddRuleCallback callback) {
-+  AppSwapRouteGroupRule rule;
-+  rule.url_pattern = url_pattern;
-+  rule.target = target;
-+  AppSwapRouteGroupServiceFactory::GetForProfile(profile_)->AddRule(
-+      group_id, std::move(rule));
++  if (AppSwapRouteGroupService* service = route_group_service()) {
++    AppSwapRouteGroupRule rule;
++    rule.url_pattern = url_pattern;
++    rule.target = target;
++    service->AddRule(group_id, std::move(rule));
++  }
 +  std::move(callback).Run();
 +}
 +
 +void AppSwapProjectsPageHandler::RemoveRule(const std::string& group_id,
 +                                            const std::string& rule_id,
 +                                            RemoveRuleCallback callback) {
-+  AppSwapRouteGroupServiceFactory::GetForProfile(profile_)->RemoveRule(
-+      group_id, rule_id);
++  if (AppSwapRouteGroupService* service = route_group_service()) {
++    service->RemoveRule(group_id, rule_id);
++  }
 +  std::move(callback).Run();
 +}
 +
 +void AppSwapProjectsPageHandler::GetAppSwapProfiles(
 +    GetAppSwapProfilesCallback callback) {
-+  AppSwapProfilesServiceFactory::GetForProfile(profile_)->GetProfiles(
-+      base::BindOnce(
-+          [](Profile* profile, GetAppSwapProfilesCallback callback,
-+             std::vector<AppSwapProfile> profiles) {
-+            std::vector<app_swap_projects::mojom::AppSwapProfileInfoPtr>
-+                result;
-+            for (const AppSwapProfile& profile_info : profiles) {
-+              result.push_back(
-+                  app_swap_projects::mojom::AppSwapProfileInfo::New(
-+                      profile_info.id, profile_info.name));
-+            }
-+            std::optional<std::string> active_id =
-+                AppSwapProfilesServiceFactory::GetForProfile(profile)
-+                    ->GetActiveProfileIdIfLoaded();
-+            std::move(callback).Run(std::move(result), active_id);
-+          },
-+          profile_.get(), std::move(callback)));
++  AppSwapProfilesService* service = profiles_service();
++  if (!service) {
++    std::move(callback).Run({}, std::nullopt);
++    return;
++  }
++  service->GetProfiles(base::BindOnce(
++      [](AppSwapProfilesService* service, GetAppSwapProfilesCallback callback,
++         std::vector<AppSwapProfile> profiles) {
++        std::vector<app_swap_projects::mojom::AppSwapProfileInfoPtr> result;
++        for (const AppSwapProfile& profile_info : profiles) {
++          result.push_back(app_swap_projects::mojom::AppSwapProfileInfo::New(
++              profile_info.id, profile_info.name));
++        }
++        std::move(callback).Run(std::move(result),
++                                service->GetActiveProfileIdIfLoaded());
++      },
++      service, std::move(callback)));
 +}
 +
 +void AppSwapProjectsPageHandler::AddAppSwapProfile(
 +    const std::string& name,
 +    AddAppSwapProfileCallback callback) {
++  AppSwapProfilesService* service = profiles_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
++  }
 +  AppSwapProfile profile;
 +  profile.name = name;
-+  AppSwapProfilesServiceFactory::GetForProfile(profile_)->AddProfile(
-+      std::move(profile));
++  service->AddProfile(std::move(profile));
 +  std::move(callback).Run();
 +}
 +
 +void AppSwapProjectsPageHandler::RemoveAppSwapProfile(
 +    const std::string& id,
 +    RemoveAppSwapProfileCallback callback) {
-+  // Reassign any tab currently running under this profile's partition back
-+  // to the default partition before removing it, so nothing is left
-+  // pointing at a partition that's about to be cleared out from under it --
-+  // same ordering appswap://profiles used to follow.
-+  SwitchTabsOffAppSwapProfile(id);
-+  ClearAppSwapProfileData(id, profile_);
-+  AppSwapProfilesServiceFactory::GetForProfile(profile_)->RemoveProfile(id);
++  if (AppSwapProfilesService* service = profiles_service()) {
++    // Reassign any tab currently running under this profile's partition back
++    // to the default partition before removing it, so nothing is left
++    // pointing at a partition that's about to be cleared out from under it --
++    // same ordering appswap://profiles used to follow.
++    SwitchTabsOffAppSwapProfile(id);
++    ClearAppSwapProfileData(id, profile_);
++    service->RemoveProfile(id);
++  }
 +  std::move(callback).Run();
 +}
 +
 +void AppSwapProjectsPageHandler::SetActiveAppSwapProfile(
 +    const std::string& id,
 +    SetActiveAppSwapProfileCallback callback) {
-+  AppSwapProfilesServiceFactory::GetForProfile(profile_)->SetActiveProfile(
-+      id);
++  if (AppSwapProfilesService* service = profiles_service()) {
++    service->SetActiveProfile(id);
++  }
 +  std::move(callback).Run();
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h
 new file mode 100644
-index 0000000000000..6a061b832576c
+index 0000000000000..6a95777ea966f
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,72 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2125,11 +2179,19 @@ index 0000000000000..6a061b832576c
 +#include "mojo/public/cpp/bindings/pending_receiver.h"
 +#include "mojo/public/cpp/bindings/receiver.h"
 +
++class AppSwapAppsService;
++class AppSwapProfilesService;
++class AppSwapRouteGroupService;
 +class Profile;
 +
 +// Implements the Projects page's PageHandler. Every method resolves the
 +// Apps/Route Groups/AppSwap-Profiles services for `profile_` -- the Profile
 +// (== Project) this page was opened in, fixed for the handler's lifetime.
++// None of those factories build an instance for a non-regular profile
++// (Incognito/Guest/System) -- appswap://projects can still be navigated to
++// in one, so every method goes through the apps_service()/route_group_
++// service()/profiles_service() accessors below and no-ops (rather than
++// crashing) when the relevant one is null.
 +class AppSwapProjectsPageHandler : public app_swap_projects::mojom::PageHandler {
 + public:
 +  AppSwapProjectsPageHandler(
@@ -2168,6 +2230,10 @@ index 0000000000000..6a061b832576c
 +      SetActiveAppSwapProfileCallback callback) override;
 +
 + private:
++  AppSwapAppsService* apps_service();
++  AppSwapRouteGroupService* route_group_service();
++  AppSwapProfilesService* profiles_service();
++
 +  const raw_ptr<Profile> profile_;
 +  mojo::Receiver<app_swap_projects::mojom::PageHandler> receiver_;
 +};

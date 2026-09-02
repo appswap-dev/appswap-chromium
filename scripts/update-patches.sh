@@ -356,6 +356,28 @@ gen 0015-projects.patch \
 # the *existing* ids from the current Russian translations before trusting
 # the new ones), not hand-derived, since grit's fingerprint depends on the
 # exact processed message content.
+#
+# Follow-up in this same patch: the button was rebuilt to reuse Chromium's
+# own native profile-switcher bubble (ProfileMenuCoordinator/ProfileMenuView)
+# instead of a custom dropdown -- see the button's own class comment for how
+# (claiming the kToolbarAvatarButtonElementId anchor identifier, and why its
+# two files had to move into //chrome/browser/ui's own sources in
+# chrome/browser/ui/BUILD.gn, already covered by 0009, to reach
+# ProfileMenuCoordinator without a circular target dependency). More
+# "profile" -> "project" retexturing followed in that same bubble
+# (chromium_strings.grd -- already covered by 0001 -- and more of
+# profiles_strings.grdp), and two rows (Google services settings, Guest)
+# were removed from it entirely in profile_menu_view.cc.
+#
+# Also fixes a whole class of null-deref crashes surfaced by finally
+# exercising non-regular profiles for real: AppSwap*ServiceFactory::
+# GetForProfile() legitimately returns null for Incognito/Guest/System
+# (ProfileKeyedServiceFactory's default ProfileSelections), which several
+# call sites dereferenced unchecked -- confirmed via real crash dumps for
+# each. Fixed at the shared root where possible (app_swap_route_matcher.cc's
+# FindAppSwapAppForUrl/FindAppSwapRouteGroupById, which the location bar,
+# Page Info, and the URL loader factory all funnel through) rather than at
+# every caller.
 gen 0016-project-selector-and-terminology.patch \
   chrome/app/profiles_strings.grdp \
   chrome/app/resources/chromium_strings_ru.xtb \
@@ -364,6 +386,7 @@ gen 0016-project-selector-and-terminology.patch \
   chrome/browser/resources/settings/route.ts \
   chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc \
   chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h \
+  chrome/browser/ui/views/profiles/profile_menu_view.cc \
   chrome/browser/ui/webui/settings/settings_ui.h \
   chrome/common/webui_url_constants.h
 

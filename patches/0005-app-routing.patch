@@ -1132,10 +1132,10 @@ index 0000000000000..e031b808837e0
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ARTIFACT_PROVIDER_H_
 diff --git a/chrome/browser/app_swap/app_swap_route_matcher.cc b/chrome/browser/app_swap/app_swap_route_matcher.cc
 new file mode 100644
-index 0000000000000..023bd88bd7086
+index 0000000000000..cea77e41a53a9
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_matcher.cc
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,132 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1228,9 +1228,21 @@ index 0000000000000..023bd88bd7086
 +const AppSwapRouteGroup* FindAppSwapRouteGroupById(
 +    Profile* profile,
 +    const std::string& group_id) {
-+  for (const AppSwapRouteGroup& group :
-+       AppSwapRouteGroupServiceFactory::GetForProfile(profile)
-+           ->GetRouteGroupsIfLoaded()) {
++  // AppSwapRouteGroupServiceFactory only builds an instance for regular
++  // profiles (ProfileKeyedServiceFactory's default ProfileSelections
++  // excludes Incognito/Guest/System) -- guarded here, at the shared root
++  // both of this file's public functions fan out from, rather than at each
++  // caller, since new callers (there are several already: the URL loader
++  // factory, the location bar's security-chip logic, Page Info) would
++  // otherwise each need to remember to do it themselves. Confirmed via a
++  // real crash dump: an Incognito window's location bar used to null-deref
++  // through here.
++  AppSwapRouteGroupService* service =
++      AppSwapRouteGroupServiceFactory::GetForProfile(profile);
++  if (!service) {
++    return nullptr;
++  }
++  for (const AppSwapRouteGroup& group : service->GetRouteGroupsIfLoaded()) {
 +    if (group.id == group_id) {
 +      return &group;
 +    }
@@ -1239,8 +1251,11 @@ index 0000000000000..023bd88bd7086
 +}
 +
 +const AppSwapApp* FindAppSwapAppForUrl(Profile* profile, const GURL& url) {
-+  for (const AppSwapApp& app :
-+       AppSwapAppsServiceFactory::GetForProfile(profile)->GetAppsIfLoaded()) {
++  AppSwapAppsService* service = AppSwapAppsServiceFactory::GetForProfile(profile);
++  if (!service) {
++    return nullptr;
++  }
++  for (const AppSwapApp& app : service->GetAppsIfLoaded()) {
 +    for (const std::string& host : app.hosts) {
 +      if (AppSwapUrlMatchesPattern(url, host)) {
 +        return &app;
