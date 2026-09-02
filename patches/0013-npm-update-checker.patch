@@ -1,6 +1,6 @@
 diff --git a/chrome/browser/app_swap/app_swap_prefs.cc b/chrome/browser/app_swap/app_swap_prefs.cc
 new file mode 100644
-index 0000000000000..84691524cdd31
+index 0000000000..84691524cd
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_prefs.cc
 @@ -0,0 +1,16 @@
@@ -22,7 +22,7 @@ index 0000000000000..84691524cdd31
 +}  // namespace app_swap::prefs
 diff --git a/chrome/browser/app_swap/app_swap_prefs.h b/chrome/browser/app_swap/app_swap_prefs.h
 new file mode 100644
-index 0000000000000..56d1ba88fffd2
+index 0000000000..56d1ba88ff
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_prefs.h
 @@ -0,0 +1,25 @@
@@ -53,7 +53,7 @@ index 0000000000000..56d1ba88fffd2
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PREFS_H_
 diff --git a/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc b/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc
 new file mode 100644
-index 0000000000000..b37d28c0a0af7
+index 0000000000..b37d28c0a0
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc
 @@ -0,0 +1,73 @@
@@ -132,7 +132,7 @@ index 0000000000000..b37d28c0a0af7
 +WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapUpdateAvailableTabHelper);
 diff --git a/chrome/browser/app_swap/app_swap_update_available_tab_helper.h b/chrome/browser/app_swap/app_swap_update_available_tab_helper.h
 new file mode 100644
-index 0000000000000..9ec98b53f9cf5
+index 0000000000..9ec98b53f9
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_available_tab_helper.h
 @@ -0,0 +1,106 @@
@@ -244,7 +244,7 @@ index 0000000000000..9ec98b53f9cf5
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_AVAILABLE_TAB_HELPER_H_
 diff --git a/chrome/browser/app_swap/app_swap_update_checker.cc b/chrome/browser/app_swap/app_swap_update_checker.cc
 new file mode 100644
-index 0000000000000..9dde13df9beb7
+index 0000000000..9dde13df9b
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_checker.cc
 @@ -0,0 +1,146 @@
@@ -396,7 +396,7 @@ index 0000000000000..9dde13df9beb7
 +}
 diff --git a/chrome/browser/app_swap/app_swap_update_checker.h b/chrome/browser/app_swap/app_swap_update_checker.h
 new file mode 100644
-index 0000000000000..40b64ec6f2f32
+index 0000000000..40b64ec6f2
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_checker.h
 @@ -0,0 +1,68 @@
@@ -469,7 +469,7 @@ index 0000000000000..40b64ec6f2f32
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_CHECKER_H_
 diff --git a/chrome/browser/prefs/BUILD.gn b/chrome/browser/prefs/BUILD.gn
-index 79f7e90a7b9c4..985d6227556cc 100644
+index 79f7e90a7b..985d622755 100644
 --- a/chrome/browser/prefs/BUILD.gn
 +++ b/chrome/browser/prefs/BUILD.gn
 @@ -67,6 +67,7 @@ source_set("impl") {
@@ -481,7 +481,7 @@ index 79f7e90a7b9c4..985d6227556cc 100644
      "//chrome/browser/background/glic",
      "//chrome/browser/component_updater",
 diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
-index e8138bc8e72bf..6b08075a17654 100644
+index e8138bc8e7..6b08075a17 100644
 --- a/chrome/browser/prefs/browser_prefs.cc
 +++ b/chrome/browser/prefs/browser_prefs.cc
 @@ -23,6 +23,7 @@
@@ -502,7 +502,7 @@ index e8138bc8e72bf..6b08075a17654 100644
    browser_shutdown::RegisterPrefs(registry);
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.cc b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.cc
 new file mode 100644
-index 0000000000000..33702a5c3f987
+index 0000000000..33702a5c3f
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.cc
 @@ -0,0 +1,109 @@
@@ -617,7 +617,7 @@ index 0000000000000..33702a5c3f987
 +}
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h
 new file mode 100644
-index 0000000000000..225fc8cf25020
+index 0000000000..225fc8cf25
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_reload_button_controller.h
 @@ -0,0 +1,94 @@
@@ -716,7 +716,7 @@ index 0000000000000..225fc8cf25020
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RELOAD_BUTTON_CONTROLLER_H_
 diff --git a/chrome/browser/ui/views/toolbar/BUILD.gn b/chrome/browser/ui/views/toolbar/BUILD.gn
-index 93d2d2e1fd5a8..804916cd18110 100644
+index 93d2d2e1fd..804916cd18 100644
 --- a/chrome/browser/ui/views/toolbar/BUILD.gn
 +++ b/chrome/browser/ui/views/toolbar/BUILD.gn
 @@ -234,6 +234,7 @@ source_set("impl") {
@@ -728,7 +728,7 @@ index 93d2d2e1fd5a8..804916cd18110 100644
      "//chrome/browser/ui/views/download",
      "//chrome/browser/ui/views/extensions:extensions_container_views",
 diff --git a/chrome/browser/ui/views/toolbar/reload_button.cc b/chrome/browser/ui/views/toolbar/reload_button.cc
-index a86b7baa53a5d..dbd357c59422c 100644
+index a86b7baa53..dbd357c594 100644
 --- a/chrome/browser/ui/views/toolbar/reload_button.cc
 +++ b/chrome/browser/ui/views/toolbar/reload_button.cc
 @@ -17,6 +17,7 @@
@@ -867,7 +867,7 @@ index a86b7baa53a5d..dbd357c59422c 100644
    if (!command_updater_) {
      return;
 diff --git a/chrome/browser/ui/views/toolbar/reload_button.h b/chrome/browser/ui/views/toolbar/reload_button.h
-index 735b1d5f798b4..5612898f4b54c 100644
+index 735b1d5f79..5612898f4b 100644
 --- a/chrome/browser/ui/views/toolbar/reload_button.h
 +++ b/chrome/browser/ui/views/toolbar/reload_button.h
 @@ -5,6 +5,9 @@
@@ -941,7 +941,7 @@ index 735b1d5f798b4..5612898f4b54c 100644
    base::WeakPtrFactory<ReloadButton> weak_ptr_factory_{this};
  };
 diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
-index 58334f6105692..55427e42c7489 100644
+index 58334f6105..55427e42c7 100644
 --- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
 +++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
 @@ -436,7 +436,7 @@ void ToolbarView::Init() {

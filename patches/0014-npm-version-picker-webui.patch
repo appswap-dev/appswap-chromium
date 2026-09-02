@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
-index a89c1a8c9fe16..774871f7d8d94 100644
+index a89c1a8c9f..774871f7d8 100644
 --- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
 +++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
 @@ -30,6 +30,8 @@
@@ -24,7 +24,7 @@ index a89c1a8c9fe16..774871f7d8d94 100644
        contextual_cueing_internals::ContextualCueingInternalsUI>(map);
 diff --git a/chrome/browser/resources/app_swap_version_picker/BUILD.gn b/chrome/browser/resources/app_swap_version_picker/BUILD.gn
 new file mode 100644
-index 0000000000000..7deeb90a23fa1
+index 0000000000..7deeb90a23
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_version_picker/BUILD.gn
 @@ -0,0 +1,37 @@
@@ -67,7 +67,7 @@ index 0000000000000..7deeb90a23fa1
 +}
 diff --git a/chrome/browser/resources/app_swap_version_picker/app.css b/chrome/browser/resources/app_swap_version_picker/app.css
 new file mode 100644
-index 0000000000000..d372b9cb26751
+index 0000000000..d372b9cb26
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_version_picker/app.css
 @@ -0,0 +1,91 @@
@@ -164,7 +164,7 @@ index 0000000000000..d372b9cb26751
 +}
 diff --git a/chrome/browser/resources/app_swap_version_picker/app.html.ts b/chrome/browser/resources/app_swap_version_picker/app.html.ts
 new file mode 100644
-index 0000000000000..8cbb4720dc49c
+index 0000000000..8cbb4720dc
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_version_picker/app.html.ts
 @@ -0,0 +1,40 @@
@@ -210,7 +210,7 @@ index 0000000000000..8cbb4720dc49c
 +}
 diff --git a/chrome/browser/resources/app_swap_version_picker/app.ts b/chrome/browser/resources/app_swap_version_picker/app.ts
 new file mode 100644
-index 0000000000000..175dc63ed58bc
+index 0000000000..175dc63ed5
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_version_picker/app.ts
 @@ -0,0 +1,110 @@
@@ -326,7 +326,7 @@ index 0000000000000..175dc63ed58bc
 +    AppSwapVersionPickerAppElement.is, AppSwapVersionPickerAppElement);
 diff --git a/chrome/browser/resources/app_swap_version_picker/app_swap_version_picker.html b/chrome/browser/resources/app_swap_version_picker/app_swap_version_picker.html
 new file mode 100644
-index 0000000000000..1a1edce0effef
+index 0000000000..1a1edce0ef
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_version_picker/app_swap_version_picker.html
 @@ -0,0 +1,19 @@
@@ -351,7 +351,7 @@ index 0000000000000..1a1edce0effef
 +</html>
 diff --git a/chrome/browser/resources/app_swap_version_picker/browser_proxy.ts b/chrome/browser/resources/app_swap_version_picker/browser_proxy.ts
 new file mode 100644
-index 0000000000000..1c72e0fe3b13e
+index 0000000000..1c72e0fe3b
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_version_picker/browser_proxy.ts
 @@ -0,0 +1,28 @@
@@ -384,7 +384,7 @@ index 0000000000000..1c72e0fe3b13e
 +
 +let instance: BrowserProxy|null = null;
 diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.h b/chrome/browser/ui/views/page_info/page_info_bubble_view.h
-index 71997156f1eff..4e6c9248ad042 100644
+index 71997156f1..4e6c9248ad 100644
 --- a/chrome/browser/ui/views/page_info/page_info_bubble_view.h
 +++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.h
 @@ -46,6 +46,7 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
@@ -410,7 +410,7 @@ index 71997156f1eff..4e6c9248ad042 100644
    std::unique_ptr<PageInfo> presenter_;
  
 diff --git a/chrome/browser/ui/views/page_info/page_info_navigation_handler.h b/chrome/browser/ui/views/page_info/page_info_navigation_handler.h
-index 0037c170cb9b6..83baefff96d68 100644
+index 0037c170cb..83baefff96 100644
 --- a/chrome/browser/ui/views/page_info/page_info_navigation_handler.h
 +++ b/chrome/browser/ui/views/page_info/page_info_navigation_handler.h
 @@ -6,6 +6,7 @@
@@ -431,7 +431,7 @@ index 0037c170cb9b6..83baefff96d68 100644
  
 diff --git a/chrome/browser/ui/webui/app_swap_version_picker/BUILD.gn b/chrome/browser/ui/webui/app_swap_version_picker/BUILD.gn
 new file mode 100644
-index 0000000000000..ac6d1ecb0af27
+index 0000000000..ac6d1ecb0a
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_version_picker/BUILD.gn
 @@ -0,0 +1,36 @@
@@ -473,7 +473,7 @@ index 0000000000000..ac6d1ecb0af27
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom
 new file mode 100644
-index 0000000000000..21dd293c321c0
+index 0000000000..21dd293c32
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom
 @@ -0,0 +1,38 @@
@@ -517,7 +517,7 @@ index 0000000000000..21dd293c321c0
 +};
 diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.cc b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.cc
 new file mode 100644
-index 0000000000000..b65e59660951e
+index 0000000000..b65e596609
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.cc
 @@ -0,0 +1,54 @@
@@ -577,7 +577,7 @@ index 0000000000000..b65e59660951e
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.h b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.h
 new file mode 100644
-index 0000000000000..1be42a82502ce
+index 0000000000..1be42a8250
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.h
 @@ -0,0 +1,100 @@
@@ -683,7 +683,7 @@ index 0000000000000..1be42a82502ce
 +#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_CONTEXT_H_
 diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.cc b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.cc
 new file mode 100644
-index 0000000000000..9de2f4cdd2ec8
+index 0000000000..9de2f4cdd2
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.cc
 @@ -0,0 +1,166 @@
@@ -855,7 +855,7 @@ index 0000000000000..9de2f4cdd2ec8
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.h b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.h
 new file mode 100644
-index 0000000000000..c2bf01eaca2e7
+index 0000000000..c2bf01eaca
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_page_handler.h
 @@ -0,0 +1,58 @@
@@ -919,7 +919,7 @@ index 0000000000000..c2bf01eaca2e7
 +#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_PAGE_HANDLER_H_
 diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.cc b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.cc
 new file mode 100644
-index 0000000000000..b8bc8a609b8df
+index 0000000000..b8bc8a609b
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.cc
 @@ -0,0 +1,65 @@
@@ -990,7 +990,7 @@ index 0000000000000..b8bc8a609b8df
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h
 new file mode 100644
-index 0000000000000..5b8b57da99c93
+index 0000000000..5b8b57da99
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h
 @@ -0,0 +1,79 @@
@@ -1074,7 +1074,7 @@ index 0000000000000..5b8b57da99c93
 +
 +#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_UI_H_
 diff --git a/third_party/lit/v3_0/BUILD.gn b/third_party/lit/v3_0/BUILD.gn
-index 087c776b3a90d..ecf7f9562d025 100644
+index 087c776b3a..ecf7f9562d 100644
 --- a/third_party/lit/v3_0/BUILD.gn
 +++ b/third_party/lit/v3_0/BUILD.gn
 @@ -30,6 +30,7 @@ ts_library("build_ts") {
@@ -1086,7 +1086,7 @@ index 087c776b3a90d..ecf7f9562d025 100644
      "//chrome/browser/resources/bookmarks:build_ts",
      "//chrome/browser/resources/browser_switch:build_ts",
 diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_ids.spec
-index b5503c48ce1c4..ce0b2489171b6 100644
+index b5503c48ce..ce0b248917 100644
 --- a/tools/gritsettings/resource_ids.spec
 +++ b/tools/gritsettings/resource_ids.spec
 @@ -228,6 +228,10 @@

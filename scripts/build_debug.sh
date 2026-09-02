@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the AppSwap release browser (plus the Windows installer, on Windows).
+# Builds the AppSwap debug browser (plus the Windows installer, on Windows).
 #
 # Usage:
 #   scripts/build.sh            # chrome (+ mini_installer on Windows)
@@ -8,7 +8,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$ROOT/src"
-OUT="$SRC/out/Release"
+OUT="$SRC/out/Default"
 PORTABLE="${1:-}"
 
 # args.gn has no target_os, so GN targets the host OS -- mini_installer and
@@ -20,19 +20,19 @@ esac
 
 # Stage the build args into the GN output directory.
 mkdir -p "$OUT"
-cp "$ROOT/build/args.gn" "$OUT/args.gn"
+cp "$ROOT/build/args_debug.gn" "$OUT/args.gn"
 
 cd "$SRC"
 
-echo "==> gn gen out/Release"
-gn gen out/Release
+echo "==> gn gen out/Default"
+gn gen out/Default
 
 if [[ "$IS_WINDOWS" == "1" ]]; then
-  echo "==> autoninja -C out/Release chrome mini_installer"
-  autoninja -C out/Release chrome mini_installer
+  echo "==> autoninja -C out/Default chrome mini_installer"
+  autoninja -C out/Default chrome mini_installer
 else
-  echo "==> autoninja -C out/Release chrome"
-  autoninja -j4 -C out/Release chrome
+  echo "==> autoninja -C out/Default chrome"
+  autoninja -j4 -C out/Default chrome
 fi
 
 if [[ "$PORTABLE" == "portable" ]]; then
@@ -42,9 +42,8 @@ if [[ "$PORTABLE" == "portable" ]]; then
   fi
   echo "==> packaging portable distribution"
   python chrome/tools/build/win/create_portable_archive.py \
-    --build_dir out/Release \
+    --build_dir out/Default \
     --output_dir "$ROOT/dist/AppSwap" \
-    --chrome_release chrome/installer/mini_installer/chrome.release \
     --zip
 fi
 

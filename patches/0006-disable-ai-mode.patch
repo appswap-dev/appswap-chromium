@@ -1,5 +1,5 @@
 diff --git a/components/omnibox/common/omnibox_feature_configs.cc b/components/omnibox/common/omnibox_feature_configs.cc
-index fc14abacb1673..8a824ef21f217 100644
+index fc14abacb1..8a824ef21f 100644
 --- a/components/omnibox/common/omnibox_feature_configs.cc
 +++ b/components/omnibox/common/omnibox_feature_configs.cc
 @@ -47,9 +47,13 @@ CalcProvider::CalcProvider() {
@@ -18,7 +18,7 @@ index fc14abacb1673..8a824ef21f217 100644
               "kAiModeEligibility",
               base::FEATURE_DISABLED_BY_DEFAULT);
 diff --git a/testing/variations/fieldtrial_testing_config.json b/testing/variations/fieldtrial_testing_config.json
-index 2b553aa98480b..cddcf88beeee2 100644
+index 2b553aa984..cddcf88bee 100644
 --- a/testing/variations/fieldtrial_testing_config.json
 +++ b/testing/variations/fieldtrial_testing_config.json
 @@ -5706,24 +5706,6 @@

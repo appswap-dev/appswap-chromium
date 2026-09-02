@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index 2a3958f78ddb6..4e6f3b49ffa24 100644
+index 2a3958f78d..4e6f3b49ff 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
 @@ -916,6 +916,7 @@ source_set("core") {
@@ -12,7 +12,7 @@ index 2a3958f78ddb6..4e6f3b49ffa24 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..755afe025506c
+index 0000000000..755afe0255
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
 @@ -0,0 +1,67 @@
@@ -85,7 +85,7 @@ index 0000000000000..755afe025506c
 +}
 diff --git a/chrome/browser/app_swap/app_swap_apps_service.cc b/chrome/browser/app_swap/app_swap_apps_service.cc
 new file mode 100644
-index 0000000000000..99e49927a52f7
+index 0000000000..99e49927a5
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_service.cc
 @@ -0,0 +1,213 @@
@@ -304,7 +304,7 @@ index 0000000000000..99e49927a52f7
 +}
 diff --git a/chrome/browser/app_swap/app_swap_apps_service.h b/chrome/browser/app_swap/app_swap_apps_service.h
 new file mode 100644
-index 0000000000000..1a76ba1fa4bcf
+index 0000000000..1a76ba1fa4
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_service.h
 @@ -0,0 +1,74 @@
@@ -384,7 +384,7 @@ index 0000000000000..1a76ba1fa4bcf
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_apps_ui.cc b/chrome/browser/app_swap/app_swap_apps_ui.cc
 new file mode 100644
-index 0000000000000..655d25f1fc663
+index 0000000000..655d25f1fc
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_ui.cc
 @@ -0,0 +1,596 @@
@@ -986,7 +986,7 @@ index 0000000000000..655d25f1fc663
 +                                                 "appswap-apps") {}
 diff --git a/chrome/browser/app_swap/app_swap_apps_ui.h b/chrome/browser/app_swap/app_swap_apps_ui.h
 new file mode 100644
-index 0000000000000..3f7310edb06f2
+index 0000000000..3f7310edb0
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_ui.h
 @@ -0,0 +1,28 @@
@@ -1020,7 +1020,7 @@ index 0000000000000..3f7310edb06f2
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_UI_H_
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.cc b/chrome/browser/app_swap/app_swap_artifact_provider.cc
 new file mode 100644
-index 0000000000000..3308209f92432
+index 0000000000..3308209f92
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.cc
 @@ -0,0 +1,494 @@
@@ -1520,7 +1520,7 @@ index 0000000000000..3308209f92432
 +}
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.h b/chrome/browser/app_swap/app_swap_artifact_provider.h
 new file mode 100644
-index 0000000000000..d1614cfc56443
+index 0000000000..d1614cfc56
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.h
 @@ -0,0 +1,158 @@
@@ -1684,7 +1684,7 @@ index 0000000000000..d1614cfc56443
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ARTIFACT_PROVIDER_H_
 diff --git a/chrome/browser/app_swap/app_swap_route_matcher.cc b/chrome/browser/app_swap/app_swap_route_matcher.cc
 new file mode 100644
-index 0000000000000..b1aee4726c9ec
+index 0000000000..b1aee4726c
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_matcher.cc
 @@ -0,0 +1,56 @@
@@ -1746,7 +1746,7 @@ index 0000000000000..b1aee4726c9ec
 +}
 diff --git a/chrome/browser/app_swap/app_swap_route_matcher.h b/chrome/browser/app_swap/app_swap_route_matcher.h
 new file mode 100644
-index 0000000000000..770d08ea53a41
+index 0000000000..770d08ea53
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_matcher.h
 @@ -0,0 +1,37 @@
@@ -1789,7 +1789,7 @@ index 0000000000000..770d08ea53a41
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_MATCHER_H_
 diff --git a/chrome/browser/app_swap/app_swap_routes_service.cc b/chrome/browser/app_swap/app_swap_routes_service.cc
 new file mode 100644
-index 0000000000000..07ae514bd8dc1
+index 0000000000..07ae514bd8
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_routes_service.cc
 @@ -0,0 +1,201 @@
@@ -1996,7 +1996,7 @@ index 0000000000000..07ae514bd8dc1
 +}
 diff --git a/chrome/browser/app_swap/app_swap_routes_service.h b/chrome/browser/app_swap/app_swap_routes_service.h
 new file mode 100644
-index 0000000000000..f065478b13540
+index 0000000000..f065478b13
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_routes_service.h
 @@ -0,0 +1,67 @@
@@ -2069,7 +2069,7 @@ index 0000000000000..f065478b13540
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_routes_ui.cc b/chrome/browser/app_swap/app_swap_routes_ui.cc
 new file mode 100644
-index 0000000000000..a4b99164cb33d
+index 0000000000..a4b99164cb
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_routes_ui.cc
 @@ -0,0 +1,597 @@
@@ -2672,7 +2672,7 @@ index 0000000000000..a4b99164cb33d
 +                                                   "appswap-routes") {}
 diff --git a/chrome/browser/app_swap/app_swap_routes_ui.h b/chrome/browser/app_swap/app_swap_routes_ui.h
 new file mode 100644
-index 0000000000000..e2d91642c7ba8
+index 0000000000..e2d91642c7
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_routes_ui.h
 @@ -0,0 +1,29 @@
@@ -2707,7 +2707,7 @@ index 0000000000000..e2d91642c7ba8
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_UI_H_
 diff --git a/chrome/browser/app_swap/app_swap_source.h b/chrome/browser/app_swap/app_swap_source.h
 new file mode 100644
-index 0000000000000..707f425096a7c
+index 0000000000..707f425096
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_source.h
 @@ -0,0 +1,18 @@
@@ -2731,7 +2731,7 @@ index 0000000000000..707f425096a7c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000000..88ff587393019
+index 0000000000..88ff587393
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 @@ -0,0 +1,428 @@
@@ -3165,7 +3165,7 @@ index 0000000000000..88ff587393019
 +}
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.h b/chrome/browser/app_swap/app_swap_url_loader_factory.h
 new file mode 100644
-index 0000000000000..4b82b1280f454
+index 0000000000..4b82b1280f
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.h
 @@ -0,0 +1,61 @@
@@ -3231,7 +3231,7 @@ index 0000000000000..4b82b1280f454
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index dde051181fa13..23b70734712fd 100644
+index dde051181f..23b7073471 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
 @@ -644,6 +644,8 @@
@@ -3299,7 +3299,7 @@ index dde051181fa13..23b70734712fd 100644
    if (disable_secure_dns) {
      WebContents* web_contents = WebContents::FromRenderFrameHost(frame);
 diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
-index 17a9289e00ac8..857fec92189da 100644
+index 17a9289e00..857fec9218 100644
 --- a/chrome/browser/ui/webui/BUILD.gn
 +++ b/chrome/browser/ui/webui/BUILD.gn
 @@ -53,6 +53,7 @@ source_set("configs") {
@@ -3319,7 +3319,7 @@ index 17a9289e00ac8..857fec92189da 100644
        "//chrome/browser/ui/webui/color_pipeline_internals",
        "//chrome/browser/ui/webui/history",
 diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-index 7a947c092bfaf..c05b3331b7a1b 100644
+index 7a947c092b..c05b3331b7 100644
 --- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 @@ -13,6 +13,10 @@

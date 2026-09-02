@@ -1,6 +1,6 @@
 diff --git a/chrome/browser/app_swap/app_swap_version_utils.cc b/chrome/browser/app_swap/app_swap_version_utils.cc
 new file mode 100644
-index 0000000000000..b234e8bcf8c94
+index 0000000000..b234e8bcf8
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_utils.cc
 @@ -0,0 +1,70 @@
@@ -76,7 +76,7 @@ index 0000000000000..b234e8bcf8c94
 +}  // namespace app_swap
 diff --git a/chrome/browser/app_swap/app_swap_version_utils.h b/chrome/browser/app_swap/app_swap_version_utils.h
 new file mode 100644
-index 0000000000000..c1d2484f38aec
+index 0000000000..c1d2484f38
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_utils.h
 @@ -0,0 +1,20 @@
@@ -102,7 +102,7 @@ index 0000000000000..c1d2484f38aec
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_UTILS_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc
 new file mode 100644
-index 0000000000000..62fff84694224
+index 0000000000..62fff84694
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc
 @@ -0,0 +1,48 @@
@@ -156,7 +156,7 @@ index 0000000000000..62fff84694224
 +}
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.h b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.h
 new file mode 100644
-index 0000000000000..d5ed616364995
+index 0000000000..d5ed616364
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.h
 @@ -0,0 +1,37 @@
@@ -198,7 +198,7 @@ index 0000000000000..d5ed616364995
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_VERSION_PICKER_DIALOG_H_
 diff --git a/chrome/browser/ui/views/controls/rich_hover_button.cc b/chrome/browser/ui/views/controls/rich_hover_button.cc
-index aa91770c8b9b8..bb04fb0715676 100644
+index aa91770c8b..bb04fb0715 100644
 --- a/chrome/browser/ui/views/controls/rich_hover_button.cc
 +++ b/chrome/browser/ui/views/controls/rich_hover_button.cc
 @@ -170,6 +170,14 @@ void RichHoverButton::SetSubtitleText(std::u16string_view subtitle_text) {

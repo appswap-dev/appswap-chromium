@@ -1,6 +1,6 @@
 diff --git a/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.cc b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.cc
 new file mode 100644
-index 0000000000000..bb9cf67caeffd
+index 0000000000..bb9cf67cae
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.cc
 @@ -0,0 +1,37 @@
@@ -43,7 +43,7 @@ index 0000000000000..bb9cf67caeffd
 +WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapProfilePinTabHelper);
 diff --git a/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h
 new file mode 100644
-index 0000000000000..d35f326eb2226
+index 0000000000..d35f326eb2
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h
 @@ -0,0 +1,51 @@
@@ -100,7 +100,7 @@ index 0000000000000..d35f326eb2226
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_PIN_TAB_HELPER_H_
 diff --git a/chrome/browser/app_swap/app_swap_profile_removal_util.cc b/chrome/browser/app_swap/app_swap_profile_removal_util.cc
 new file mode 100644
-index 0000000000000..dc45b2ed3fe47
+index 0000000000..dc45b2ed3f
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_removal_util.cc
 @@ -0,0 +1,112 @@
@@ -218,7 +218,7 @@ index 0000000000000..dc45b2ed3fe47
 +}
 diff --git a/chrome/browser/app_swap/app_swap_profile_removal_util.h b/chrome/browser/app_swap/app_swap_profile_removal_util.h
 new file mode 100644
-index 0000000000000..c786acf9f0c31
+index 0000000000..c786acf9f0
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_removal_util.h
 @@ -0,0 +1,30 @@
@@ -254,7 +254,7 @@ index 0000000000000..c786acf9f0c31
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_REMOVAL_UTIL_H_
 diff --git a/chrome/browser/app_swap/app_swap_profile_session_restore_util.cc b/chrome/browser/app_swap/app_swap_profile_session_restore_util.cc
 new file mode 100644
-index 0000000000000..7ce8b91f22882
+index 0000000000..7ce8b91f22
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_session_restore_util.cc
 @@ -0,0 +1,53 @@
@@ -313,7 +313,7 @@ index 0000000000000..7ce8b91f22882
 +}
 diff --git a/chrome/browser/app_swap/app_swap_profile_session_restore_util.h b/chrome/browser/app_swap/app_swap_profile_session_restore_util.h
 new file mode 100644
-index 0000000000000..3242764f21d98
+index 0000000000..3242764f21
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_session_restore_util.h
 @@ -0,0 +1,47 @@
@@ -366,7 +366,7 @@ index 0000000000000..3242764f21d98
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_SESSION_RESTORE_UTIL_H_
 diff --git a/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc
 new file mode 100644
-index 0000000000000..dce48bab37dc4
+index 0000000000..dce48bab37
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc
 @@ -0,0 +1,131 @@
@@ -503,7 +503,7 @@ index 0000000000000..dce48bab37dc4
 +}
 diff --git a/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h
 new file mode 100644
-index 0000000000000..762bbc577ec3c
+index 0000000000..762bbc577e
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h
 @@ -0,0 +1,81 @@
@@ -589,7 +589,7 @@ index 0000000000000..762bbc577ec3c
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_PIN_TAB_HELPER_H_
 diff --git a/chrome/browser/ui/browser_tabrestore.cc b/chrome/browser/ui/browser_tabrestore.cc
-index fa43dd782cdb8..cdc2113644798 100644
+index fa43dd782c..cdc2113644 100644
 --- a/chrome/browser/ui/browser_tabrestore.cc
 +++ b/chrome/browser/ui/browser_tabrestore.cc
 @@ -4,12 +4,15 @@
@@ -642,7 +642,7 @@ index fa43dd782cdb8..cdc2113644798 100644
    std::vector<std::unique_ptr<NavigationEntry>> entries =
        ContentSerializedNavigationBuilder::ToNavigationEntries(
 diff --git a/chrome/browser/ui/tab_helpers.cc b/chrome/browser/ui/tab_helpers.cc
-index dcf66fff381ea..f122f28e36285 100644
+index dcf66fff38..f122f28e36 100644
 --- a/chrome/browser/ui/tab_helpers.cc
 +++ b/chrome/browser/ui/tab_helpers.cc
 @@ -15,6 +15,9 @@

@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/toolbar/BUILD.gn b/chrome/browser/ui/toolbar/BUILD.gn
-index bbbeb90544d75..f781975b120dc 100644
+index bbbeb90544..f781975b12 100644
 --- a/chrome/browser/ui/toolbar/BUILD.gn
 +++ b/chrome/browser/ui/toolbar/BUILD.gn
 @@ -14,6 +14,7 @@ source_set("toolbar") {
@@ -11,7 +11,7 @@ index bbbeb90544d75..f781975b120dc 100644
      "//chrome/browser/contextual_tasks",
      "//chrome/browser/profiles:profile",
 diff --git a/chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.cc b/chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.cc
-index 4e23238dea745..b5fdd36434471 100644
+index 4e23238dea..b5fdd36434 100644
 --- a/chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.cc
 +++ b/chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.cc
 @@ -7,6 +7,7 @@
@@ -41,7 +41,7 @@ index 4e23238dea745..b5fdd36434471 100644
                   ? omnibox::kChromeProductIcon
                   : omnibox::kProductChromeRefreshOldIcon);
 diff --git a/chrome/browser/ui/views/location_bar/BUILD.gn b/chrome/browser/ui/views/location_bar/BUILD.gn
-index 8ec3b04f08a10..62e50333a5819 100644
+index 8ec3b04f08..62e50333a5 100644
 --- a/chrome/browser/ui/views/location_bar/BUILD.gn
 +++ b/chrome/browser/ui/views/location_bar/BUILD.gn
 @@ -73,6 +73,7 @@ source_set("impl") {
@@ -61,7 +61,7 @@ index 8ec3b04f08a10..62e50333a5819 100644
        "//chrome/browser/ui/views:content_setting_bubble_contents",
        "//chrome/browser/ui/views:layout_provider",
 diff --git a/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc b/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
-index 2611503829f48..53014a2dba1f0 100644
+index 2611503829..53014a2dba 100644
 --- a/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
 +++ b/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
 @@ -4,7 +4,12 @@
@@ -145,7 +145,7 @@ index 2611503829f48..53014a2dba1f0 100644
        url.SchemeIs(url::kFileScheme) ||
        url.SchemeIs(dom_distiller::kDomDistillerScheme) ||
 diff --git a/chrome/browser/ui/views/page_info/BUILD.gn b/chrome/browser/ui/views/page_info/BUILD.gn
-index 2db8d679023ad..9d487eaee8729 100644
+index 2db8d67902..9d487eaee8 100644
 --- a/chrome/browser/ui/views/page_info/BUILD.gn
 +++ b/chrome/browser/ui/views/page_info/BUILD.gn
 @@ -84,7 +84,9 @@ source_set("impl") {
@@ -167,7 +167,7 @@ index 2db8d679023ad..9d487eaee8729 100644
      "//components/safe_browsing/core/browser:suspicious_site_warning_allowlist",
      "//components/strings:components_branded_strings_grit",
 diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-index ce635526633ef..3e6acc4fc538b 100644
+index ce63552663..3e6acc4fc5 100644
 --- a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 +++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 @@ -6,6 +6,11 @@
@@ -326,7 +326,7 @@ index ce635526633ef..3e6acc4fc538b 100644
    CHECK(merchant_trust_coordinator_);
    auto title = l10n_util::GetStringUTF16(IDS_PAGE_INFO_MERCHANT_TRUST_HEADER);
 diff --git a/chrome/browser/ui/views/page_info/page_info_main_view.cc b/chrome/browser/ui/views/page_info/page_info_main_view.cc
-index 5bcdfb8d63a66..9cea942a8402d 100644
+index 5bcdfb8d63..9cea942a84 100644
 --- a/chrome/browser/ui/views/page_info/page_info_main_view.cc
 +++ b/chrome/browser/ui/views/page_info/page_info_main_view.cc
 @@ -11,6 +11,7 @@
@@ -357,7 +357,7 @@ index 5bcdfb8d63a66..9cea942a8402d 100644
        PageInfo::SAFE_BROWSING_STATUS_WARNABLE_SUSPICIOUS_SITE) {
      security_container_view_->AddChildView(
 diff --git a/components/omnibox/browser/BUILD.gn b/components/omnibox/browser/BUILD.gn
-index 295c822aea260..b350aae6da714 100644
+index 295c822aea..b350aae6da 100644
 --- a/components/omnibox/browser/BUILD.gn
 +++ b/components/omnibox/browser/BUILD.gn
 @@ -78,6 +78,7 @@ aggregate_vector_icons("omnibox_vector_icons") {
@@ -370,7 +370,7 @@ index 295c822aea260..b350aae6da714 100644
      "offline_pin_old.icon",
 diff --git a/components/omnibox/browser/vector_icons/npm_package.icon b/components/omnibox/browser/vector_icons/npm_package.icon
 new file mode 100644
-index 0000000000000..61f4f6d409dc7
+index 0000000000..61f4f6d409
 --- /dev/null
 +++ b/components/omnibox/browser/vector_icons/npm_package.icon
 @@ -0,0 +1,15 @@
@@ -390,7 +390,7 @@ index 0000000000000..61f4f6d409dc7
 +MOVE_TO, 12, 7,
 +LINE_TO, 12, 11.5,
 diff --git a/components/page_info/page_info.cc b/components/page_info/page_info.cc
-index 75b69ab48313d..045107fbb8cf7 100644
+index 75b69ab483..045107fbb8 100644
 --- a/components/page_info/page_info.cc
 +++ b/components/page_info/page_info.cc
 @@ -447,6 +447,7 @@ void PageInfo::OnThirdPartyToggleClicked(bool block_third_party_cookies) {

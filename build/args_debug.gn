@@ -1,0 +1,5 @@
+# AppSwap debug build configuration.
+# Generate with: gn gen out/Default (from the src/ directory).
+is_debug = true
+is_component_build = true
+symbol_level = 0

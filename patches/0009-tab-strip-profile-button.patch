@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 50920511caf57..4ef3547d2c046 100644
+index 50920511ca..4ef3547d2c 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
 @@ -792,6 +792,9 @@ static_library("ui") {
@@ -14,7 +14,7 @@ index 50920511caf57..4ef3547d2c046 100644
      "//chrome/browser/ui/views/file_system_access:impl",
 diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..1b36a9e870483
+index 0000000000..1b36a9e870
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/BUILD.gn
 @@ -0,0 +1,40 @@
@@ -60,7 +60,7 @@ index 0000000000000..1b36a9e870483
 +}
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc
 new file mode 100644
-index 0000000000000..b9960e3537a24
+index 0000000000..b9960e3537
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc
 @@ -0,0 +1,65 @@
@@ -131,7 +131,7 @@ index 0000000000000..b9960e3537a24
 +}
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h
 new file mode 100644
-index 0000000000000..ec577ad5edf3e
+index 0000000000..ec577ad5ed
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h
 @@ -0,0 +1,28 @@
@@ -165,7 +165,7 @@ index 0000000000000..ec577ad5edf3e
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_SWITCH_UTIL_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc
 new file mode 100644
-index 0000000000000..22a5c9c5cec83
+index 0000000000..22a5c9c5ce
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc
 @@ -0,0 +1,263 @@
@@ -434,7 +434,7 @@ index 0000000000000..22a5c9c5cec83
 +END_METADATA
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h
 new file mode 100644
-index 0000000000000..852a232574e1d
+index 0000000000..852a232574
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.h
 @@ -0,0 +1,100 @@
@@ -539,7 +539,7 @@ index 0000000000000..852a232574e1d
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_TAB_STRIP_BUTTON_H_
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-index f97b92504ba81..c8f9697c758dc 100644
+index f97b92504b..c8f9697c75 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
 @@ -56,6 +56,7 @@
@@ -580,7 +580,7 @@ index f97b92504ba81..c8f9697c758dc 100644
      if (page_action_container_ && page_action_container_->GetVisible()) {
        const bool is_capsule_active = page_action_container_->IsCapsuleActive();
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.h b/chrome/browser/ui/views/location_bar/location_bar_view.h
-index 2796ee6d49b16..b7c94e1d2ea08 100644
+index 2796ee6d49..b7c94e1d2e 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.h
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.h
 @@ -52,6 +52,7 @@

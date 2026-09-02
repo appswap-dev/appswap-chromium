@@ -3,4 +3,4 @@
 is_debug = false
 is_component_build = false
 symbol_level = 0
-target_cpu = "x64"
+# target_cpu = "x64"

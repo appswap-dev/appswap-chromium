@@ -1,5 +1,5 @@
 diff --git a/build/win/reorder-imports.py b/build/win/reorder-imports.py
-index 11602df2777ec..2012f9660729d 100755
+index 11602df277..2012f96607 100755
 --- a/build/win/reorder-imports.py
 +++ b/build/win/reorder-imports.py
 @@ -19,7 +19,7 @@ import pefile
@@ -61,7 +61,7 @@ index 11602df2777ec..2012f9660729d 100755
      parser.add_option(
          '-a', '--arch', help='architecture of build (optional)', default='ia32'
 diff --git a/chrome/BUILD.gn b/chrome/BUILD.gn
-index 6f97b7046d13c..c09088c11530e 100644
+index 6f97b7046d..c09088c115 100644
 --- a/chrome/BUILD.gn
 +++ b/chrome/BUILD.gn
 @@ -87,12 +87,12 @@ if (is_win) {
@@ -108,7 +108,7 @@ index 6f97b7046d13c..c09088c11530e 100644
          # the compiler and linker configs from :chrome_dll.
          configs += [ "//build/config/compiler:wexit_time_destructors" ]
 diff --git a/chrome/app/chrome_dll.ver b/chrome/app/chrome_dll.ver
-index 910fca21d178a..4181938b201f8 100644
+index 910fca21d1..4181938b20 100644
 --- a/chrome/app/chrome_dll.ver
 +++ b/chrome/app/chrome_dll.ver
 @@ -1,2 +1,2 @@
@@ -117,7 +117,7 @@ index 910fca21d178a..4181938b201f8 100644
 +INTERNAL_NAME=appswap_dll
 +ORIGINAL_FILENAME=appswap.dll
 diff --git a/chrome/app/chrome_exe.ver b/chrome/app/chrome_exe.ver
-index a2d39013f5a5d..56539e28d2271 100644
+index a2d39013f5..56539e28d2 100644
 --- a/chrome/app/chrome_exe.ver
 +++ b/chrome/app/chrome_exe.ver
 @@ -1,2 +1,2 @@
@@ -126,7 +126,7 @@ index a2d39013f5a5d..56539e28d2271 100644
 +INTERNAL_NAME=appswap_exe
 +ORIGINAL_FILENAME=appswap.exe
 diff --git a/chrome/app/chrome_renderer_dll.ver b/chrome/app/chrome_renderer_dll.ver
-index a6dc6eaf968c4..5c70492c4fc65 100644
+index a6dc6eaf96..5c70492c4f 100644
 --- a/chrome/app/chrome_renderer_dll.ver
 +++ b/chrome/app/chrome_renderer_dll.ver
 @@ -1,2 +1,2 @@
@@ -135,7 +135,7 @@ index a6dc6eaf968c4..5c70492c4fc65 100644
 +INTERNAL_NAME=appswap_renderer_dll
 +ORIGINAL_FILENAME=appswap_renderer.dll
 diff --git a/chrome/app/version_assembly/version_assembly_manifest.template b/chrome/app/version_assembly/version_assembly_manifest.template
-index 9bd1fc58f9fb1..f66dde3db803b 100644
+index 9bd1fc58f9..f66dde3db8 100644
 --- a/chrome/app/version_assembly/version_assembly_manifest.template
 +++ b/chrome/app/version_assembly/version_assembly_manifest.template
 @@ -4,5 +4,5 @@
@@ -146,7 +146,7 @@ index 9bd1fc58f9fb1..f66dde3db803b 100644
 +  <file name='appswap_elf.dll'/>
  </assembly>
 diff --git a/chrome/browser/web_applications/chrome_pwa_launcher/BUILD.gn b/chrome/browser/web_applications/chrome_pwa_launcher/BUILD.gn
-index 8a2eca6075d93..040b155239d52 100644
+index 8a2eca6075..040b155239 100644
 --- a/chrome/browser/web_applications/chrome_pwa_launcher/BUILD.gn
 +++ b/chrome/browser/web_applications/chrome_pwa_launcher/BUILD.gn
 @@ -12,6 +12,7 @@ process_version_rc_template("chrome_pwa_launcher_version") {
@@ -158,7 +158,7 @@ index 8a2eca6075d93..040b155239d52 100644
      "chrome_pwa_launcher_exe.rc",
      "chrome_pwa_launcher_main.cc",
 diff --git a/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher.ver b/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher.ver
-index 17c6db2188780..06324f9029015 100644
+index 17c6db2188..06324f9029 100644
 --- a/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher.ver
 +++ b/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher.ver
 @@ -1,2 +1,2 @@
@@ -167,7 +167,7 @@ index 17c6db2188780..06324f9029015 100644
 +INTERNAL_NAME=appswap_pwa_launcher
 +ORIGINAL_FILENAME=appswap_pwa_launcher.exe
 diff --git a/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher_util.cc b/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher_util.cc
-index 1c12414f3cc12..937c2c06b6bf5 100644
+index 1c12414f3c..937c2c06b6 100644
 --- a/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher_util.cc
 +++ b/chrome/browser/web_applications/chrome_pwa_launcher/chrome_pwa_launcher_util.cc
 @@ -11,7 +11,7 @@
@@ -180,7 +180,7 @@ index 1c12414f3cc12..937c2c06b6bf5 100644
  }  // namespace
  
 diff --git a/chrome/chrome_elf/BUILD.gn b/chrome/chrome_elf/BUILD.gn
-index 0f2c819248a6e..d524efc714364 100644
+index 0f2c819248..d524efc714 100644
 --- a/chrome/chrome_elf/BUILD.gn
 +++ b/chrome/chrome_elf/BUILD.gn
 @@ -49,6 +49,7 @@ static_library("test_stubs") {
@@ -192,7 +192,7 @@ index 0f2c819248a6e..d524efc714364 100644
      "chrome_elf.def",
      "chrome_elf_main.cc",
 diff --git a/chrome/chrome_elf/chrome_elf.def b/chrome/chrome_elf/chrome_elf.def
-index 7303c69c58ae1..d8b602f7c456e 100644
+index 7303c69c58..d8b602f7c4 100644
 --- a/chrome/chrome_elf/chrome_elf.def
 +++ b/chrome/chrome_elf/chrome_elf.def
 @@ -1,7 +1,7 @@
@@ -205,7 +205,7 @@ index 7303c69c58ae1..d8b602f7c456e 100644
  EXPORTS
    ; From components/crash/core/app/crash_export_stubs.cc
 diff --git a/chrome/chrome_elf/chrome_elf_constants.cc b/chrome/chrome_elf/chrome_elf_constants.cc
-index 04bc26d85bc00..02d914e0a35c5 100644
+index 04bc26d85b..02d914e0a3 100644
 --- a/chrome/chrome_elf/chrome_elf_constants.cc
 +++ b/chrome/chrome_elf/chrome_elf_constants.cc
 @@ -4,7 +4,7 @@
@@ -218,7 +218,7 @@ index 04bc26d85bc00..02d914e0a35c5 100644
  namespace elf_sec {
  
 diff --git a/chrome/chrome_proxy/BUILD.gn b/chrome/chrome_proxy/BUILD.gn
-index fd1927203915c..2eed35f6af392 100644
+index fd19272039..2eed35f6af 100644
 --- a/chrome/chrome_proxy/BUILD.gn
 +++ b/chrome/chrome_proxy/BUILD.gn
 @@ -12,6 +12,7 @@ process_version_rc_template("chrome_proxy_version") {
@@ -230,7 +230,7 @@ index fd1927203915c..2eed35f6af392 100644
      ":chrome_proxy_version",
      "//base",
 diff --git a/chrome/chrome_proxy/chrome_proxy.ver b/chrome/chrome_proxy/chrome_proxy.ver
-index 32083b145e37d..b5137bab9de71 100644
+index 32083b145e..b5137bab9d 100644
 --- a/chrome/chrome_proxy/chrome_proxy.ver
 +++ b/chrome/chrome_proxy/chrome_proxy.ver
 @@ -1,2 +1,2 @@
@@ -239,7 +239,7 @@ index 32083b145e37d..b5137bab9de71 100644
 +INTERNAL_NAME=appswap_proxy
 +ORIGINAL_FILENAME=appswap_proxy.exe
 diff --git a/chrome/chrome_proxy/chrome_proxy_main_win.cc b/chrome/chrome_proxy/chrome_proxy_main_win.cc
-index 776f544e4630a..6979de272800f 100644
+index 776f544e46..6979de2728 100644
 --- a/chrome/chrome_proxy/chrome_proxy_main_win.cc
 +++ b/chrome/chrome_proxy/chrome_proxy_main_win.cc
 @@ -15,10 +15,10 @@
@@ -256,7 +256,7 @@ index 776f544e4630a..6979de272800f 100644
  }  // namespace
  
 diff --git a/chrome/common/chrome_constants.cc b/chrome/common/chrome_constants.cc
-index 1a6b899b4bc3a..b2ca2133702a3 100644
+index 1a6b899b4b..b2ca213370 100644
 --- a/chrome/common/chrome_constants.cc
 +++ b/chrome/common/chrome_constants.cc
 @@ -32,9 +32,9 @@ const char kChromeVersion[] = CHROME_VERSION_STRING;
@@ -284,7 +284,7 @@ index 1a6b899b4bc3a..b2ca2133702a3 100644
  const base::FilePath::CharType kBrowserProcessExecutablePath[] =
      FPL(PRODUCT_FULLNAME_STRING ".app/Contents/MacOS/" PRODUCT_FULLNAME_STRING);
 diff --git a/chrome/common/chrome_constants.h b/chrome/common/chrome_constants.h
-index 464a435a50d51..523364e7f9c8e 100644
+index 464a435a50..523364e7f9 100644
 --- a/chrome/common/chrome_constants.h
 +++ b/chrome/common/chrome_constants.h
 @@ -36,11 +36,11 @@ extern const char kMacHelperSuffixAlerts[];
@@ -303,7 +303,7 @@ index 464a435a50d51..523364e7f9c8e 100644
      FILE_PATH_LITERAL("Chrome_StatusTrayWindow");
  #endif  // BUILDFLAG(IS_WIN)
 diff --git a/chrome/installer/mini_installer/BUILD.gn b/chrome/installer/mini_installer/BUILD.gn
-index ce1f5a5711eeb..9571b75052a4a 100644
+index ce1f5a5711..9571b75052 100644
 --- a/chrome/installer/mini_installer/BUILD.gn
 +++ b/chrome/installer/mini_installer/BUILD.gn
 @@ -149,9 +149,9 @@ action("mini_installer_archive") {
@@ -320,7 +320,7 @@ index ce1f5a5711eeb..9571b75052a4a 100644
      "$root_out_dir/setup.exe",
      "//chrome/tools/build/win/makecab.py",
 diff --git a/chrome/installer/mini_installer/chrome.release b/chrome/installer/mini_installer/chrome.release
-index 173c8590146cf..aade2e27e9dcc 100644
+index 173c859014..aade2e27e9 100644
 --- a/chrome/installer/mini_installer/chrome.release
 +++ b/chrome/installer/mini_installer/chrome.release
 @@ -6,8 +6,8 @@
@@ -372,7 +372,7 @@ index 173c8590146cf..aade2e27e9dcc 100644
  [FFMPEG]
  ffmpeg.dll: %(VersionDir)s\
 diff --git a/chrome/installer/util/util_constants.h b/chrome/installer/util/util_constants.h
-index 2f0df7216ad9c..64bae980a926f 100644
+index 2f0df7216a..64bae980a9 100644
 --- a/chrome/installer/util/util_constants.h
 +++ b/chrome/installer/util/util_constants.h
 @@ -347,13 +347,13 @@ inline constexpr char kGoogleUpdateIsMachineEnvVar[] = "GoogleUpdateIsMachine";
@@ -409,7 +409,7 @@ index 2f0df7216ad9c..64bae980a926f 100644
  // DowngradeVersion holds the version from which Chrome was downgraded. In case
  // of multiple downgrades (e.g., 75->74->73), it retains the highest version
 diff --git a/chrome/notification_helper/BUILD.gn b/chrome/notification_helper/BUILD.gn
-index 0244dc319f502..38f89a75b3259 100644
+index 0244dc319f..38f89a75b3 100644
 --- a/chrome/notification_helper/BUILD.gn
 +++ b/chrome/notification_helper/BUILD.gn
 @@ -8,6 +8,7 @@ import("//chrome/process_version_rc_template.gni")
@@ -421,7 +421,7 @@ index 0244dc319f502..38f89a75b3259 100644
      "notification_helper.cc",
      "notification_helper.rc",
 diff --git a/chrome/notification_helper/notification_helper_exe.ver b/chrome/notification_helper/notification_helper_exe.ver
-index eeebf42be4092..de18978a228a5 100644
+index eeebf42be4..de18978a22 100644
 --- a/chrome/notification_helper/notification_helper_exe.ver
 +++ b/chrome/notification_helper/notification_helper_exe.ver
 @@ -1,2 +1,2 @@
@@ -432,7 +432,7 @@ index eeebf42be4092..de18978a228a5 100644
 +ORIGINAL_FILENAME=appswap_notification_helper.exe
 \ No newline at end of file
 diff --git a/chrome/tools/build/win/FILES.cfg b/chrome/tools/build/win/FILES.cfg
-index 25e607f3a5229..3067768e37a84 100644
+index 25e607f3a5..3067768e37 100644
 --- a/chrome/tools/build/win/FILES.cfg
 +++ b/chrome/tools/build/win/FILES.cfg
 @@ -48,12 +48,12 @@ FILES = [
@@ -555,7 +555,7 @@ index 25e607f3a5229..3067768e37a84 100644
      'archive': 'chrome-win32-syms.zip',
    },
 diff --git a/components/crash/win/BUILD.gn b/components/crash/win/BUILD.gn
-index 5e31703941c02..fc2e4e671088b 100644
+index 5e31703941..fc2e4e6710 100644
 --- a/components/crash/win/BUILD.gn
 +++ b/components/crash/win/BUILD.gn
 @@ -15,6 +15,7 @@ process_version_rc_template("chrome_wer_resources") {
@@ -567,7 +567,7 @@ index 5e31703941c02..fc2e4e671088b 100644
      "chrome_wer.def",
      "chrome_wer_main.cc",
 diff --git a/components/crash/win/chrome_wer.def b/components/crash/win/chrome_wer.def
-index 87e8d66b09b26..ebe96b6a4612b 100644
+index 87e8d66b09..ebe96b6a46 100644
 --- a/components/crash/win/chrome_wer.def
 +++ b/components/crash/win/chrome_wer.def
 @@ -1,7 +1,7 @@
@@ -580,7 +580,7 @@ index 87e8d66b09b26..ebe96b6a4612b 100644
  EXPORTS
    ; These are required for the WER api.
 diff --git a/components/crash/win/chrome_wer.ver b/components/crash/win/chrome_wer.ver
-index 58ad9b44cf772..f33d1ff2db7c9 100644
+index 58ad9b44cf..f33d1ff2db 100644
 --- a/components/crash/win/chrome_wer.ver
 +++ b/components/crash/win/chrome_wer.ver
 @@ -1,2 +1,2 @@

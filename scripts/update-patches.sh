@@ -120,6 +120,7 @@ gen 0004-portable-scheme-pak.patch \
   chrome/chrome_paks.gni \
   chrome/test/BUILD.gn \
   ui/base/resource/resource_bundle.cc \
+  ui/base/resource/resource_bundle_mac.mm \
   content/common/url_schemes.cc \
   content/public/common/url_constants.h \
   content/public/common/url_utils.cc \
