@@ -1,5 +1,5 @@
 diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
-index 875bfcfedb8a8..f3c6651f3084b 100644
+index 875bfcfedb8a8..56c0c54f906bf 100644
 --- a/chrome/app/chromium_strings.grd
 +++ b/chrome/app/chromium_strings.grd
 @@ -278,7 +278,7 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
@@ -1474,12 +1474,12 @@ index 875bfcfedb8a8..f3c6651f3084b 100644
 -        <message name="IDS_PROFILE_MENU_PROFILES_LIST_TITLE" desc="Title in the profile menu for the list of 'other Chromium profiles'.">
 -          Other Chromium profiles
 +        <message name="IDS_PROFILE_MENU_PROFILES_LIST_TITLE" desc="Title in the profile menu for the list of 'other AppSwap profiles'.">
-+          Other AppSwap profiles
++          Other AppSwap projects
          </message>
 -        <message name="IDS_PROFILE_MENU_MANAGE_PROFILES" desc="The text label of the Manage Chromium Profiles item in the Profile Menu.">
 -          Manage Chromium profiles
 +        <message name="IDS_PROFILE_MENU_MANAGE_PROFILES" desc="The text label of the Manage AppSwap Profiles item in the Profile Menu.">
-+          Manage AppSwap profiles
++          Manage AppSwap projects
          </message>
          <message name="IDS_PROFILE_MENU_SIGN_OUT"
 -          desc="The text label of the Sign out of Chromium button in the Profile Menu.">
@@ -1489,7 +1489,7 @@ index 875bfcfedb8a8..f3c6651f3084b 100644
          </message>
          <message name="IDS_PROFILE_MENU_ADD_PROFILE" desc="The text label of the add new profile item in the profile menu.">
 -          Add Chromium profile
-+          Add AppSwap profile
++          Add AppSwap project
          </message>
        </if>
        <if expr="use_titlecase">
@@ -1501,12 +1501,12 @@ index 875bfcfedb8a8..f3c6651f3084b 100644
 -        <message name="IDS_PROFILE_MENU_PROFILES_LIST_TITLE" desc="Title in the profile menu for the list of 'other Chromium profiles'.">
 -          Other Chromium Profiles
 +        <message name="IDS_PROFILE_MENU_PROFILES_LIST_TITLE" desc="Title in the profile menu for the list of 'other AppSwap profiles'.">
-+          Other AppSwap Profiles
++          Other AppSwap Projects
          </message>
 -        <message name="IDS_PROFILE_MENU_MANAGE_PROFILES" desc="The text label of the Manage Chromium Profiles item in the Profile Menu.">
 -          Manage Chromium Profiles
 +        <message name="IDS_PROFILE_MENU_MANAGE_PROFILES" desc="The text label of the Manage AppSwap Profiles item in the Profile Menu.">
-+          Manage AppSwap Profiles
++          Manage AppSwap Projects
          </message>
          <message name="IDS_PROFILE_MENU_SIGN_OUT"
 -          desc="The text label of the Sign out of Chromium button in the Profile Menu.">
@@ -1516,7 +1516,7 @@ index 875bfcfedb8a8..f3c6651f3084b 100644
          </message>
          <message name="IDS_PROFILE_MENU_ADD_PROFILE" desc="The text label of the add new profile item in the profile menu.">
 -          Add Chromium Profile
-+          Add AppSwap Profile
++          Add AppSwap Project
          </message>
        </if>
  

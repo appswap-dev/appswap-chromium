@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 50920511caf57..4ef3547d2c046 100644
+index 50920511caf57..e0e25f8e8a542 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
 @@ -792,6 +792,9 @@ static_library("ui") {
@@ -12,12 +12,28 @@ index 50920511caf57..4ef3547d2c046 100644
      "//chrome/browser/ui/views/eye_dropper",
      "//chrome/browser/ui/views/file_system_access",
      "//chrome/browser/ui/views/file_system_access:impl",
+@@ -2151,6 +2154,15 @@ static_library("ui") {
+ 
+   if (is_win || is_mac || is_linux || is_chromeos) {
+     sources += [
++      # AppSwapProjectSelectorButton lives here (rather than in
++      # //chrome/browser/ui/views/app_swap, where its sibling AppSwap
++      # buttons live) because its whole point is calling
++      # chrome::ShowAvatarMenu()/ProfileMenuCoordinator below, both of which
++      # only exist inside this target -- which depends ON app_swap, not the
++      # other way around, so pulling this button into app_swap instead would
++      # be a circular dependency.
++      "views/app_swap/app_swap_project_selector_button.cc",
++      "views/app_swap/app_swap_project_selector_button.h",
+       "views/profiles/incognito_menu_view.cc",
+       "views/profiles/incognito_menu_view.h",
+       "views/profiles/profile_menu_coordinator.cc",
 diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..402b46f847655
+index 0000000000000..62abcd555125a
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/BUILD.gn
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,42 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -28,8 +44,6 @@ index 0000000000000..402b46f847655
 +    "app_swap_profile_switch_util.h",
 +    "app_swap_profile_tab_strip_button.cc",
 +    "app_swap_profile_tab_strip_button.h",
-+    "app_swap_project_selector_button.cc",
-+    "app_swap_project_selector_button.h",
 +    "app_swap_reload_button_controller.cc",
 +    "app_swap_reload_button_controller.h",
 +    "app_swap_route_group_tab_strip_button.cc",
@@ -40,11 +54,9 @@ index 0000000000000..402b46f847655
 +
 +  deps = [
 +    "//base",
-+    "//chrome/browser:browser_process",
 +    "//chrome/browser/app_swap",
 +    "//chrome/browser/profiles:profile",
 +    "//chrome/browser/ui/browser_window",
-+    "//chrome/browser/ui/profiles",
 +    "//chrome/browser/ui/page_info",
 +    "//chrome/browser/ui/tabs",
 +    "//chrome/browser/ui/views/page_info",
@@ -66,10 +78,10 @@ index 0000000000000..402b46f847655
 +}
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc
 new file mode 100644
-index 0000000000000..9a97efa3d61ce
+index 0000000000000..c388dee085f0a
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,77 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -95,9 +107,17 @@ index 0000000000000..9a97efa3d61ce
 +
 +void SwitchActiveAppSwapProfile(const std::string& new_profile_id,
 +                                content::WebContents* web_contents) {
-+  AppSwapProfilesServiceFactory::GetForProfile(
-+      Profile::FromBrowserContext(web_contents->GetBrowserContext()))
-+      ->SetActiveProfile(new_profile_id);
++  AppSwapProfilesService* service = AppSwapProfilesServiceFactory::GetForProfile(
++      Profile::FromBrowserContext(web_contents->GetBrowserContext()));
++  if (!service) {
++    // Doesn't apply to Incognito/Guest/System (see AppSwapProfileTabStripButton
++    // for why) -- this should be unreachable in practice, since the only
++    // caller only offers profiles to switch to after successfully loading
++    // them from this same (non-null) service, but a direct/future caller
++    // shouldn't crash if it skips that check.
++    return;
++  }
++  service->SetActiveProfile(new_profile_id);
 +
 +  BrowserWindowInterface* browser =
 +      ChromePageInfoDelegate::DefaultGetBrowserCallback().Run(web_contents);
@@ -175,10 +195,10 @@ index 0000000000000..ec577ad5edf3e
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_SWITCH_UTIL_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc
 new file mode 100644
-index 0000000000000..a1d8c56597495
+index 0000000000000..52da04d87824a
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc
-@@ -0,0 +1,264 @@
+@@ -0,0 +1,286 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -285,11 +305,21 @@ index 0000000000000..a1d8c56597495
 +      browser_(browser) {
 +  SetVisible(false);
 +  browser_->GetTabStripModel()->AddObserver(this);
-+  profiles_change_subscription_ =
-+      AppSwapProfilesServiceFactory::GetForProfile(browser_->GetProfile())->AddChangeCallback(
-+          base::BindRepeating(
-+              &AppSwapProfileTabStripButton::UpdateForActiveTab,
-+              base::Unretained(this)));
++  // AppSwapProfilesServiceFactory only builds an instance for regular
++  // profiles (ProfileKeyedServiceFactory's default ProfileSelections
++  // excludes Incognito/Guest/System) -- AppSwap Profiles are a real per-
++  // window storage-partition identity, which doesn't make sense inside
++  // those anyway, so this button just stays permanently hidden there
++  // instead (see the matching guard in UpdateForActiveTab() and
++  // ButtonPressed()) rather than crashing. Confirmed via a real crash dump:
++  // opening an Incognito window used to null-deref right here.
++  if (AppSwapProfilesService* service = AppSwapProfilesServiceFactory::GetForProfile(
++          browser_->GetProfile())) {
++    profiles_change_subscription_ = service->AddChangeCallback(
++        base::BindRepeating(
++            &AppSwapProfileTabStripButton::UpdateForActiveTab,
++            base::Unretained(this)));
++  }
 +  UpdateForActiveTab();
 +}
 +
@@ -312,6 +342,13 @@ index 0000000000000..a1d8c56597495
 +}
 +
 +void AppSwapProfileTabStripButton::UpdateForActiveTab() {
++  AppSwapProfilesService* service =
++      AppSwapProfilesServiceFactory::GetForProfile(browser_->GetProfile());
++  if (!service) {
++    SetVisible(false);
++    return;
++  }
++
 +  content::WebContents* web_contents =
 +      browser_->GetTabStripModel()->GetActiveWebContents();
 +
@@ -331,8 +368,7 @@ index 0000000000000..a1d8c56597495
 +    const content::StoragePartitionConfig& config = partition->GetConfig();
 +    if (config.partition_domain() == kAppSwapProfilePartitionDomain) {
 +      const std::string profile_id = config.partition_name();
-+      for (const AppSwapProfile& profile :
-+           AppSwapProfilesServiceFactory::GetForProfile(browser_->GetProfile())->GetProfilesIfLoaded()) {
++      for (const AppSwapProfile& profile : service->GetProfilesIfLoaded()) {
 +        if (profile.id == profile_id) {
 +          SetText(base::UTF8ToUTF16(profile.name));
 +          ApplyBadgeStyle(profile.name);
@@ -385,6 +421,12 @@ index 0000000000000..a1d8c56597495
 +}
 +
 +void AppSwapProfileTabStripButton::ButtonPressed() {
++  AppSwapProfilesService* service =
++      AppSwapProfilesServiceFactory::GetForProfile(browser_->GetProfile());
++  if (!service) {
++    return;
++  }
++
 +  // Tear down any previous menu before rebuilding: menu_runner_ owns a
 +  // MenuItemView tree built from menu_model_adapter_/menu_model_, so it must
 +  // be destroyed first -- destroying menu_model_/menu_model_adapter_ first
@@ -398,7 +440,7 @@ index 0000000000000..a1d8c56597495
 +  // List every configured profile, not just the current page's app -- the
 +  // active profile is a global identity, so switching can pick any of them
 +  // regardless of what site the button happens to be showing on right now.
-+  menu_profiles_ = AppSwapProfilesServiceFactory::GetForProfile(browser_->GetProfile())->GetProfilesIfLoaded();
++  menu_profiles_ = service->GetProfilesIfLoaded();
 +
 +  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
 +  for (size_t i = 0; i < menu_profiles_.size(); ++i) {

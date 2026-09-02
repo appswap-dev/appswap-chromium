@@ -943,7 +943,7 @@ index 735b1d5f798b4..5612898f4b54c 100644
    base::WeakPtrFactory<ReloadButton> weak_ptr_factory_{this};
  };
 diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
-index 58334f6105692..55427e42c7489 100644
+index 58334f6105692..f8ed91fa26b59 100644
 --- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
 +++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
 @@ -436,7 +436,7 @@ void ToolbarView::Init() {
@@ -955,3 +955,26 @@ index 58334f6105692..55427e42c7489 100644
    }
  
    if (!features::IsWebUIHomeButtonEnabled()) {
+@@ -579,9 +579,19 @@ void ToolbarView::Init() {
+ 
+   if (!features::IsWebUIAvatarButtonEnabled()) {
+     avatar_ = AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
+-    bool show_avatar_toolbar_button =
+-        AvatarToolbarButtonInterface::CanShowForProfile(browser_->GetProfile());
+-    avatar_->SetVisible(show_avatar_toolbar_button);
++    // Always hidden -- AppSwapProjectSelectorButton (in the tab strip, see
++    // horizontal_tab_strip_region_view.cc) replaces it as this window's
++    // project/profile switcher. avatar_ stays a real child view rather than
++    // being torn out entirely, since other ToolbarView code (the glic-button
++    // insertion index, command-tag mapping, flex/margin properties) still
++    // expects it to exist. It also gives up the kToolbarAvatarButtonElementId
++    // identifier it registers itself under in its own constructor, so
++    // AppSwapProjectSelectorButton's claim on that identifier (see its own
++    // comment) is the only one -- ProfileMenuCoordinator's bubble anchors to
++    // whichever view holds it, which is how clicking that button shows
++    // Chromium's native profile-switcher bubble anchored correctly.
++    avatar_->SetVisible(false);
++    avatar_->ClearProperty(views::kElementIdentifierKey);
+   }
+ 
+   // Only manage the overflow button when there are at least some views
