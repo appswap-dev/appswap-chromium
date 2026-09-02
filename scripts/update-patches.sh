@@ -71,6 +71,7 @@ gen 0001-branding.patch \
   chrome/app/theme/chromium/product_logo_48.png \
   chrome/app/theme/chromium/product_logo_64.png \
   chrome/app/theme/chromium/win/chromium.ico \
+  chrome/app/theme/chromium/mac/app.icns \
   chrome/app/theme/default_100_percent/chromium/product_logo_16.png \
   chrome/app/theme/default_100_percent/chromium/product_logo_32.png \
   chrome/app/theme/default_100_percent/chromium/linux/product_logo_16.png \
