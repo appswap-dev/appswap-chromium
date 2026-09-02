@@ -1,0 +1,476 @@
+diff --git a/chrome/app/profiles_strings.grdp b/chrome/app/profiles_strings.grdp
+index db742e65b501b..f11538e26d858 100644
+--- a/chrome/app/profiles_strings.grdp
++++ b/chrome/app/profiles_strings.grdp
+@@ -772,28 +772,28 @@
+       Done
+     </message>
+     <message name="IDS_PROFILE_CUSTOMIZATION_THEME_PICKER_LABEL" desc="Title text for the input used to pick a theme for the profile.">
+-      Choose a theme for your profile
++      Choose a theme for your project
+     </message>
+     <message name="IDS_PROFILE_CUSTOMIZATION_WELCOME" desc="Title of the profile customization bubble">
+       Welcome, <ph name="USERNAME">$1<ex>Bob</ex></ph>
+     </message>
+     <message name="IDS_PROFILE_CUSTOMIZATION_INPUT_LABEL" desc="Not displayed. Used by screen readers to describe the input used to rename the profile.">
+-      Rename your profile
++      Rename your project
+     </message>
+     <message name="IDS_PROFILE_CUSTOMIZATION_INPUT_TITLE" desc="Title text for the input used to rename the profile.">
+-      Add a name or label for your profile
++      Add a name or label for your project
+     </message>
+     <message name="IDS_PROFILE_CUSTOMIZATION_INPUT_PLACEHOLDER" desc="Placeholder text for the input used to rename the profile.">
+       Add a name or label, like Work or Personal
+     </message>
+     <message name="IDS_PROFILE_CUSTOMIZATION_INPUT_ERROR_MESSAGE" desc="Error message for the input used to rename the profile.">
+-      Enter a profile name
++      Enter a project name
+     </message>
+     <message name="IDS_PROFILE_CUSTOMIZATION_SKIP_BUTTON_LABEL" desc="Text for the Skip button on the profile customization dialog">
+       Skip
+     </message>
+     <message name="IDS_PROFILE_CUSTOMIZATION_DELETE_PROFILE_BUTTON_LABEL" desc="Text for the Delete profile button on the profile customization dialog for local profile creation. This aborts the ongoing profile creation process.">
+-      Delete profile
++      Delete project
+     </message>
+     <message name="IDS_PROFILE_CUSTOMIZATION_LOCAL_PROFILE_CREATION_TITLE" desc="Title of the profile customization dialog for local profile creation (user is not signed-in)">
+       Welcome!
+diff --git a/chrome/app/resources/chromium_strings_ru.xtb b/chrome/app/resources/chromium_strings_ru.xtb
+index 389f3ed37246a..e7b4214ab6763 100644
+--- a/chrome/app/resources/chromium_strings_ru.xtb
++++ b/chrome/app/resources/chromium_strings_ru.xtb
+@@ -1,6 +1,7 @@
+ <?xml version="1.0" ?>
+ <!DOCTYPE translationbundle>
+ <translationbundle lang="ru">
++<translation id="8853690774672026572">Название проекта</translation>
+ <translation id="1026101648481255140">Продолжить установку</translation>
+ <translation id="1029669172902658969">Чтобы установить обновление, перезапустите Chromium OS.</translation>
+ <translation id="1040916596585577953">Chromium рекомендует проверить это расширение.</translation>
+diff --git a/chrome/app/resources/generated_resources_ru.xtb b/chrome/app/resources/generated_resources_ru.xtb
+index 04fcc79e687f3..05abdfb7af96e 100644
+--- a/chrome/app/resources/generated_resources_ru.xtb
++++ b/chrome/app/resources/generated_resources_ru.xtb
+@@ -2286,7 +2286,7 @@
+ <translation id="2761632996810146912"><ph name="HASHTAG_SETTINGS" /> По запросу "<ph name="SEARCH_QUERY" />" результатов не найдено</translation>
+ <translation id="2762441749940182211">Доступ к камере запрещен</translation>
+ <translation id="2764786626780673772">Сведения о VPN</translation>
+-<translation id="2764920001292228569">Введите название профиля.</translation>
++<translation id="6863968397820801887">Введите название проекта.</translation>
+ <translation id="2765100602267695013">Обратитесь к оператору мобильной связи.</translation>
+ <translation id="2765217105034171413">Мелкий</translation>
+ <translation id="2765820627968019645">Светлая</translation>
+@@ -4234,7 +4234,7 @@
+ <translation id="4249373718504745892">Этот сайт не имеет доступа к вашим камере и микрофону</translation>
+ <translation id="4249785854468467847">Новые ИИ-функции в Chrome</translation>
+ <translation id="4250229828105606438">Скриншот</translation>
+-<translation id="4250596587221570622">Выберите тему профиля</translation>
++<translation id="4030176198253136376">Выберите тему проекта</translation>
+ <translation id="4250680216510889253">Нет</translation>
+ <translation id="4251243704979202079"><ph name="ORIGIN" /> сможет просматривать файлы в папке "<ph name="FOLDERNAME" />" и создавать их копии.</translation>
+ <translation id="4252899949534773101">Включите Bluetooth</translation>
+@@ -4494,7 +4494,7 @@
+ <translation id="4431962107539413562">Получите доступ к паролям на всех своих устройствах</translation>
+ <translation id="4432621511648257259">Неверный пароль.</translation>
+ <translation id="4434611816075088065">Рекомендаций по безопасности пока нет</translation>
+-<translation id="4435020454241191356">Добавьте название или ярлык для профиля</translation>
++<translation id="7517218109389462647">Добавьте название или ярлык для проекта</translation>
+ <translation id="4436201444922652535">Ссылки</translation>
+ <translation id="443719869834432257">Тип события: <ph name="EVENT_TYPES" /></translation>
+ <translation id="4437879751057074691">Предлагать сохранение паролей и ключей доступа</translation>
+@@ -6561,7 +6561,7 @@
+ <translation id="6090760257419195752">Закрытые предупреждения</translation>
+ <translation id="609174145569509836">Освободить место</translation>
+ <translation id="6091761513005122595">Ресурс подключен.</translation>
+-<translation id="6093803049406781019">Удалить профиль</translation>
++<translation id="4379949386466879121">Удалить проект</translation>
+ <translation id="6095696531220637741">Макарон</translation>
+ <translation id="6095984072944024315">−</translation>
+ <translation id="6096047740730590436">Развернуть</translation>
+@@ -8892,7 +8892,7 @@
+ <translation id="7907502219904644296">Настроить доступ</translation>
+ <translation id="7907837847548254634">Быстро показывать цветную рамку вокруг объекта, когда на него перемещается фокус</translation>
+ <translation id="7908835530772972485">Удалять данные при закрытии всех окон</translation>
+-<translation id="7909324225945368569">Поле для переименования профиля</translation>
++<translation id="441887837051646685">Поле для переименования проекта</translation>
+ <translation id="7909969815743704077">Скачано в режиме инкогнито</translation>
+ <translation id="7909986151924474987">Возможно, этот профиль не получится восстановить.</translation>
+ <translation id="7910768399700579500">&amp;Новая папка</translation>
+@@ -9099,7 +9099,7 @@
+ <translation id="804786196054284061">Лицензионное соглашение с конечным пользователем</translation>
+ <translation id="8048596485169033655">Скачиваются файлы аннотации основного узла (<ph name="PERCENT" /> %)</translation>
+ <translation id="8048728378294435881">Создайте резервную копию данных и используйте их на любом устройстве.</translation>
+-<translation id="8048977114738515028">Чтобы быстро переключаться на этот профиль, создайте ярлык на рабочем столе</translation>
++<translation id="4824952669007807592">Чтобы быстро переключаться на этот проект, создайте ярлык на рабочем столе</translation>
+ <translation id="8049122382261047457">Ищите по изображениям с Google Объективом</translation>
+ <translation id="8049948037269924837">Обратное направление прокрутки с помощью сенсорной панели</translation>
+ <translation id="8050038245906040378">Подписывание коммерческого кода Microsoft</translation>
+@@ -10259,7 +10259,7 @@
+ <translation id="8954796993367253220">Чтобы очистить историю гостевого режима, закройте все гостевые окна</translation>
+ <translation id="8955174612586215829">Обзор тем</translation>
+ <translation id="8957656266859671822">Выберите нужный аккаунт</translation>
+-<translation id="8957757410289731985">Настроить профиль</translation>
++<translation id="2645401323541503883">Настроить проект</translation>
+ <translation id="8959144235813727886">Сайты и приложения</translation>
+ <translation id="895944840846194039">Память JavaScript</translation>
+ <translation id="8960208913905765425">Преобразование единиц измерения с помощью функции "Быстрые ответы"</translation>
+diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
+index d25afe1f80994..a6ae4aaa8722d 100644
+--- a/chrome/app/settings_strings.grdp
++++ b/chrome/app/settings_strings.grdp
+@@ -3614,7 +3614,7 @@
+         Show desktop shortcut
+       </message>
+       <message name="IDS_SETTINGS_CUSTOMIZE_PROFILE" desc="Title of the manage profile subpage. This is a subpage to customize Chrome Profile.">
+-        Customize profile
++        Customize project
+       </message>
+       <message name="IDS_SETTINGS_PICK_A_THEME_COLOR" desc="Title of edit profile theme color section on the manage profile page.">
+         Pick a theme color
+@@ -3626,7 +3626,7 @@
+         Create desktop shortcut
+       </message>
+       <message name="IDS_SETTINGS_CREATE_SHORTCUT_SUBTITLE" desc="Subtitle of create shortcut section on the manage profile page.">
+-        Create a desktop shortcut on your device to access directly to this profile
++        Create a desktop shortcut on your device to quickly switch to this project
+       </message>
+     </if>
+ 
+diff --git a/chrome/browser/resources/settings/route.ts b/chrome/browser/resources/settings/route.ts
+index 2aaa938c7e14a..03f1a65081008 100644
+--- a/chrome/browser/resources/settings/route.ts
++++ b/chrome/browser/resources/settings/route.ts
+@@ -167,7 +167,7 @@ function createRoutes(): SettingsRoutes {
+     r.SIGN_OUT.isNavigableDialog = true;
+     r.IMPORT_DATA = r.PEOPLE.createChild('/importData');
+     r.IMPORT_DATA.isNavigableDialog = true;
+-    r.MANAGE_PROFILE = r.PEOPLE.createChild('/manageProfile');
++    r.MANAGE_PROFILE = r.PEOPLE.createChild('/manageProject');
+     // </if>
+ 
+     r.SYNC = r.PEOPLE.createChild('/syncSetup');
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc
+new file mode 100644
+index 0000000000000..27ae213bc058e
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc
+@@ -0,0 +1,192 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h"
++
++#include <iterator>
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/hash/hash.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/browser_process.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_attributes_entry.h"
++#include "chrome/browser/profiles/profile_manager.h"
++#include "chrome/browser/profiles/profile_window.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/profiles/profile_picker.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/mojom/menu_source_type.mojom.h"
++#include "ui/base/models/menu_separator_types.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
++#include "ui/gfx/color_utils.h"
++#include "ui/gfx/geometry/insets.h"
++#include "ui/views/background.h"
++#include "ui/views/border.h"
++#include "ui/views/controls/menu/menu_item_view.h"
++#include "ui/views/controls/menu/menu_model_adapter.h"
++#include "ui/views/controls/menu/menu_runner.h"
++
++namespace {
++
++// Command ids for the project-picker menu. Purely local to this menu's own
++// ExecuteCommand -- not part of chrome's global command-id space.
++constexpr int kNewProjectCommandId = 1;
++constexpr int kProjectCommandBase = 2;
++
++// Modest rounding for a "rounded rectangle" chip, not a full pill/stadium.
++constexpr float kBadgeCornerRadius = 6.0f;
++
++// Same curated palette as AppSwapProfileTabStripButton -- see its comment
++// for why these specific hues (avoids washed-out yellows, spans hues that
++// stay distinct under red-green color blindness).
++constexpr double kBadgeHues[] = {
++    210.0,  // blue
++    175.0,  // teal
++    150.0,  // blue-leaning green (not yellow-green)
++    265.0,  // purple
++    330.0,  // magenta / pink
++    25.0,   // orange
++    245.0,  // indigo
++    355.0,  // pink-leaning red
++};
++
++double HueForProjectName(const std::string& name) {
++  return kBadgeHues[base::PersistentHash(name) % std::size(kBadgeHues)];
++}
++
++SkColor ComputeBadgeBackgroundColor(const std::string& name, bool dark_theme) {
++  color_utils::HSL hsl;
++  hsl.h = HueForProjectName(name) / 360.0;
++  hsl.s = dark_theme ? 0.40 : 0.62;
++  hsl.l = dark_theme ? 0.28 : 0.80;
++  return color_utils::HSLToSkColor(hsl, SK_AlphaOPAQUE);
++}
++
++SkColor ComputeBadgeTextColor(SkColor background) {
++  return color_utils::BlendForMinContrast(SK_ColorBLACK, background).color;
++}
++
++}  // namespace
++
++AppSwapProjectSelectorButton::AppSwapProjectSelectorButton(
++    BrowserWindowInterface* browser)
++    : views::MenuButton(base::BindRepeating(
++          &AppSwapProjectSelectorButton::ButtonPressed,
++          base::Unretained(this))),
++      browser_(browser) {
++  profile_attributes_observation_.Observe(
++      &g_browser_process->profile_manager()->GetProfileAttributesStorage());
++  UpdateLabel();
++}
++
++AppSwapProjectSelectorButton::~AppSwapProjectSelectorButton() = default;
++
++void AppSwapProjectSelectorButton::OnProfileNameChanged(
++    const base::FilePath& profile_path,
++    const std::u16string& old_name) {
++  if (profile_path == browser_->GetProfile()->GetPath()) {
++    UpdateLabel();
++  }
++}
++
++void AppSwapProjectSelectorButton::UpdateLabel() {
++  ProfileAttributesEntry* entry =
++      g_browser_process->profile_manager()
++          ->GetProfileAttributesStorage()
++          .GetProfileAttributesWithPath(browser_->GetProfile()->GetPath());
++  const std::string name =
++      entry ? base::UTF16ToUTF8(entry->GetName()) : "Project";
++  SetText(base::UTF8ToUTF16(name));
++  ApplyBadgeStyle(name);
++}
++
++void AppSwapProjectSelectorButton::ApplyBadgeStyle(
++    const std::string& project_name) {
++  bool dark_theme = false;
++  if (const ui::ColorProvider* color_provider = GetColorProvider()) {
++    dark_theme =
++        color_utils::IsDark(color_provider->GetColor(ui::kColorWindowBackground));
++  }
++
++  const SkColor background_color =
++      ComputeBadgeBackgroundColor(project_name, dark_theme);
++  const SkColor text_color = ComputeBadgeTextColor(background_color);
++
++  SetBackground(
++      views::CreateRoundedRectBackground(background_color, kBadgeCornerRadius));
++  SetEnabledTextColors(text_color);
++  SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(4, 10)));
++}
++
++void AppSwapProjectSelectorButton::OnThemeChanged() {
++  views::MenuButton::OnThemeChanged();
++  UpdateLabel();
++}
++
++void AppSwapProjectSelectorButton::ButtonPressed() {
++  // Tear down any previous menu before rebuilding -- see
++  // AppSwapProfileTabStripButton::ButtonPressed for why this ordering
++  // (menu_runner_ first) matters.
++  menu_runner_.reset();
++  menu_model_adapter_.reset();
++  menu_model_.reset();
++
++  const base::FilePath current_path = browser_->GetProfile()->GetPath();
++  const base::FilePath guest_path = ProfileManager::GetGuestProfilePath();
++  const base::FilePath system_path = ProfileManager::GetSystemProfilePath();
++
++  ProfileAttributesStorage& storage =
++      g_browser_process->profile_manager()->GetProfileAttributesStorage();
++
++  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
++  menu_project_paths_.clear();
++  for (ProfileAttributesEntry* entry :
++       storage.GetAllProfilesAttributesSortedByNameWithCheck()) {
++    const base::FilePath path = entry->GetPath();
++    if (path == current_path || path == guest_path || path == system_path ||
++        entry->IsOmitted()) {
++      continue;
++    }
++    menu_project_paths_.push_back(path);
++    menu_model_->AddItem(
++        kProjectCommandBase + static_cast<int>(menu_project_paths_.size() - 1),
++        entry->GetName());
++  }
++  if (!menu_project_paths_.empty()) {
++    menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
++  }
++  menu_model_->AddItem(kNewProjectCommandId, u"New Project…");
++
++  menu_model_adapter_ = std::make_unique<views::MenuModelAdapter>(
++      menu_model_.get());
++  std::unique_ptr<views::MenuItemView> root = menu_model_adapter_->CreateMenu();
++  menu_runner_ = std::make_unique<views::MenuRunner>(
++      std::move(root), views::MenuRunner::HAS_MNEMONICS);
++  menu_runner_->RunMenuAt(GetWidget(), nullptr, GetAnchorBoundsInScreen(),
++                          views::MenuAnchorPosition::kTopLeft,
++                          ui::mojom::MenuSourceType::kNone);
++}
++
++void AppSwapProjectSelectorButton::ExecuteCommand(int command_id,
++                                                   int event_flags) {
++  if (command_id == kNewProjectCommandId) {
++    ProfilePicker::Show(ProfilePicker::Params::FromEntryPoint(
++        ProfilePicker::EntryPoint::kProfileMenuAddNewProfile));
++    return;
++  }
++
++  const size_t index = static_cast<size_t>(command_id - kProjectCommandBase);
++  if (index >= menu_project_paths_.size()) {
++    return;
++  }
++  profiles::SwitchToProfile(menu_project_paths_[index],
++                            /*always_create=*/false);
++}
++
++BEGIN_METADATA(AppSwapProjectSelectorButton)
++END_METADATA
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h
+new file mode 100644
+index 0000000000000..9df81e1e02f8a
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h
+@@ -0,0 +1,94 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROJECT_SELECTOR_BUTTON_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROJECT_SELECTOR_BUTTON_H_
++
++#include <memory>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/memory/raw_ptr.h"
++#include "base/scoped_observation.h"
++#include "chrome/browser/profiles/profile_attributes_storage.h"
++#include "chrome/browser/profiles/profile_attributes_storage_observer.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/menus/simple_menu_model.h"
++#include "ui/views/controls/button/menu_button.h"
++
++class BrowserWindowInterface;
++
++namespace views {
++class MenuModelAdapter;
++class MenuRunner;
++}  // namespace views
++
++// A leading tab-strip button (sits where the Tab Search button lives, before
++// the first tab) showing the Project (== Chromium Profile, see the
++// "Projects" plan) this window belongs to. This is a real per-window
++// identity -- always visible, unlike the location-bar AppSwap Profile/Route
++// Group chips, which only show up on relevant pages. Clicking it opens a
++// menu listing every *other* configured Project plus "New Project..."; the
++// current window's own project is on the button itself, not repeated in the
++// dropdown. Picking a project activates (or opens) that Profile's own window
++// via profiles::SwitchToProfile -- a Project switch is a real Profile
++// switch, not an in-page reload, unlike AppSwapRouteGroupTabStripButton's
++// per-tab pin.
++//
++// Deliberately a standalone views::MenuButton + ui::SimpleMenuModel, not a
++// WebUI bubble -- this avoids any dependency on TabSearchBubbleHost /
++// TabStripComboButton (chrome/browser/ui/views/tabs/shared/), which stay
++// completely untouched.
++class AppSwapProjectSelectorButton : public views::MenuButton,
++                                     public ProfileAttributesStorageObserver,
++                                     public ui::SimpleMenuModel::Delegate {
++  METADATA_HEADER(AppSwapProjectSelectorButton, views::MenuButton)
++
++ public:
++  explicit AppSwapProjectSelectorButton(BrowserWindowInterface* browser);
++  AppSwapProjectSelectorButton(const AppSwapProjectSelectorButton&) = delete;
++  AppSwapProjectSelectorButton& operator=(
++      const AppSwapProjectSelectorButton&) = delete;
++  ~AppSwapProjectSelectorButton() override;
++
++  // ProfileAttributesStorageObserver:
++  void OnProfileNameChanged(const base::FilePath& profile_path,
++                            const std::u16string& old_name) override;
++
++  // ui::SimpleMenuModel::Delegate:
++  void ExecuteCommand(int command_id, int event_flags) override;
++
++  // views::View:
++  void OnThemeChanged() override;
++
++ private:
++  // Recomputes the button's label/badge from the current window's own
++  // ProfileAttributesEntry.
++  void UpdateLabel();
++
++  // Same badge-coloring approach as AppSwapProfileTabStripButton::
++  // ApplyBadgeStyle -- see its comment.
++  void ApplyBadgeStyle(const std::string& project_name);
++
++  // Builds and runs the project-picker menu.
++  void ButtonPressed();
++
++  raw_ptr<BrowserWindowInterface> browser_;
++
++  // The *other* projects listed in the menu currently shown, in menu order --
++  // kept in sync with the menu so ExecuteCommand's command ids resolve
++  // against the same list the user picked from. Excludes this window's own
++  // project.
++  std::vector<base::FilePath> menu_project_paths_;
++
++  base::ScopedObservation<ProfileAttributesStorage,
++                          ProfileAttributesStorageObserver>
++      profile_attributes_observation_{this};
++
++  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
++  std::unique_ptr<views::MenuModelAdapter> menu_model_adapter_;
++  std::unique_ptr<views::MenuRunner> menu_runner_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROJECT_SELECTOR_BUTTON_H_
+diff --git a/chrome/browser/ui/webui/settings/settings_ui.h b/chrome/browser/ui/webui/settings/settings_ui.h
+index 3bbfa947460fa..dea6bc9510ce0 100644
+--- a/chrome/browser/ui/webui/settings/settings_ui.h
++++ b/chrome/browser/ui/webui/settings/settings_ui.h
+@@ -61,7 +61,7 @@ class SettingsUI
+           CustomizeColorSchemeModeHandlerFactory
+ #if !BUILDFLAG(IS_CHROMEOS)
+     ,
+-      // chrome://settings/manageProfile which only exists on !IS_CHROMEOS
++      // chrome://settings/manageProject which only exists on !IS_CHROMEOS
+       // requires mojo bindings.
+       public theme_color_picker::mojom::ThemeColorPickerHandlerFactory,
+       public signin::mojom::SigninPageHandlerFactory
+diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
+index 28c843b871593..fd66d5a6fb511 100644
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -563,7 +563,7 @@ inline constexpr char kHistorySearchSubpage[] = "ai/historySearch";
+ inline constexpr char kImportDataSubPage[] = "importData";
+ inline constexpr char kLanguageOptionsSubPage[] = "languages";
+ inline constexpr char kLanguagesSubPage[] = "languages/details";
+-inline constexpr char kManageProfileSubPage[] = "manageProfile";
++inline constexpr char kManageProfileSubPage[] = "manageProject";
+ inline constexpr char kAiHelpMeWriteSubpage[] = "ai/helpMeWrite";
+ inline constexpr char kOnDeviceSiteDataSubpage[] = "content/siteData";
+ inline constexpr char kOnStartupSubPage[] = "onStartup";

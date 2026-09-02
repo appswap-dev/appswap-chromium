@@ -1343,10 +1343,10 @@ index 0000000000000..707f425096a7c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000000..519e2e921a3bd
+index 0000000000000..57340fe2f6f83
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,926 @@
+@@ -0,0 +1,950 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2091,10 +2091,23 @@ index 0000000000000..519e2e921a3bd
 +  // very first load on a cold start simply falls through to the network,
 +  // same as an unconfigured route.
 +  Profile* profile = Profile::FromBrowserContext(browser_context);
-+  AppSwapAppsServiceFactory::GetForProfile(profile)->GetApps(
-+      base::DoNothing());
-+  AppSwapRouteGroupServiceFactory::GetForProfile(profile)->GetRouteGroups(
-+      base::DoNothing());
++  AppSwapAppsService* apps_service =
++      AppSwapAppsServiceFactory::GetForProfile(profile);
++  AppSwapRouteGroupService* route_group_service =
++      AppSwapRouteGroupServiceFactory::GetForProfile(profile);
++  // Both factories only build an instance for regular profiles
++  // (ProfileKeyedServiceFactory's default ProfileSelections excludes
++  // System/Guest) -- e.g. the System Profile that ProfilePicker::Show()
++  // navigates internally hits this for its own WebUI resource fetches.
++  // AppSwap simply doesn't apply there: skip installing the proxying factory
++  // entirely rather than threading a null check through every downstream
++  // lookup (FindAppSwapAppForUrl/FindAppSwapRouteGroupById in
++  // CreateLoaderAndStart below both assume a valid service).
++  if (!apps_service || !route_group_service) {
++    return;
++  }
++  apps_service->GetApps(base::DoNothing());
++  route_group_service->GetRouteGroups(base::DoNothing());
 +  AppSwapUpdateChecker::GetInstance()->EnsureStarted();
 +
 +  auto [receiver, remote] = builder.Append();
@@ -2109,7 +2122,7 @@ index 0000000000000..519e2e921a3bd
 +    content::GlobalRenderFrameHostId frame_id,
 +    base::SelfDeletingPassKey pass_key)
 +    : network::SelfDeletingURLLoaderFactory(std::move(receiver), pass_key),
-+      browser_context_(browser_context),
++      browser_context_(browser_context->GetWeakPtr()),
 +      frame_id_(frame_id) {
 +  target_factory_.Bind(std::move(target_factory));
 +  target_factory_.set_disconnect_handler(base::BindOnce(
@@ -2130,7 +2143,18 @@ index 0000000000000..519e2e921a3bd
 +    const network::ResourceRequest& request,
 +    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
 +    const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
-+  Profile* profile = Profile::FromBrowserContext(browser_context_);
++  content::BrowserContext* browser_context = browser_context_.get();
++  if (!browser_context) {
++    // The Profile this factory belongs to has already been destroyed (its
++    // mojo disconnect is processed asynchronously, so this can outlive the
++    // Profile itself -- see the comment on browser_context_). Nothing left
++    // to resolve Apps/Route Groups against; just pass the request through.
++    target_factory_->CreateLoaderAndStart(std::move(loader), request_id,
++                                          options, request, std::move(client),
++                                          traffic_annotation);
++    return;
++  }
++  Profile* profile = Profile::FromBrowserContext(browser_context);
 +
 +  // Route Group rules are checked independently of, and before, apps -- they
 +  // have no notion of "app" at all (see AppSwapRouteGroupRule), and apply to
@@ -2275,10 +2299,10 @@ index 0000000000000..519e2e921a3bd
 +}
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.h b/chrome/browser/app_swap/app_swap_url_loader_factory.h
 new file mode 100644
-index 0000000000000..aca33d3313706
+index 0000000000000..fe601f5a4a79b
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.h
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,85 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2286,7 +2310,7 @@ index 0000000000000..aca33d3313706
 +#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 +#define CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 +
-+#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
 +#include "content/public/browser/global_routing_id.h"
 +#include "mojo/public/cpp/bindings/pending_receiver.h"
 +#include "mojo/public/cpp/bindings/pending_remote.h"
@@ -2346,12 +2370,15 @@ index 0000000000000..aca33d3313706
 +  mojo::Remote<network::mojom::URLLoaderFactory> target_factory_;
 +
 +  // The Profile (== Project) this factory resolves Apps/Route Groups
-+  // against. Held as a raw pointer (not looked up fresh like `frame_id_`
-+  // below) since a BrowserContext's lifetime comfortably outlives any single
-+  // URLLoaderFactory bound to one of its renderer processes -- profile
-+  // teardown tears down its renderer processes (and their mojo pipes to
-+  // factories like this one) first.
-+  const raw_ptr<content::BrowserContext> browser_context_;
++  // against. Held as a WeakPtr, not a raw pointer: this factory is
++  // self-deleting and only torn down when its mojo pipe disconnects, which
++  // is NOT guaranteed to happen before the owning Profile is destroyed --
++  // confirmed by a real crash (BackupRefPtr's dangling-pointer detector
++  // firing in this class's destructor) when closing the last window of one
++  // Profile while another Profile's window was still open. A raw_ptr member
++  // dangling across that reordering trips the safety check even if never
++  // dereferenced afterwards; a WeakPtr degrades safely to null instead.
++  const base::WeakPtr<content::BrowserContext> browser_context_;
 +
 +  // The frame this factory serves requests for. Looked up fresh (rather than
 +  // held as a raw content::RenderFrameHost*) since a RenderFrameHost can
@@ -2362,7 +2389,7 @@ index 0000000000000..aca33d3313706
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index dde051181fa13..f089058cdcfb9 100644
+index dde051181fa13..a3f29515c07cc 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
 @@ -644,6 +644,9 @@
@@ -2375,7 +2402,7 @@ index dde051181fa13..f089058cdcfb9 100644
  #include "chrome/browser/enterprise/network_header_injection/http_header_injection_proxying_url_loader_factory.h"
  #include "chrome/browser/enterprise/network_header_injection/http_header_injection_utils.h"
  #include "components/webapps/isolated_web_apps/scheme.h"
-@@ -1802,6 +1805,36 @@ ChromeContentBrowserClient::GetStoragePartitionConfigForSite(
+@@ -1802,6 +1805,44 @@ ChromeContentBrowserClient::GetStoragePartitionConfigForSite(
    }
  #endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE) && !BUILDFLAG(IS_ANDROID)
  
@@ -2393,17 +2420,25 @@ index dde051181fa13..f089058cdcfb9 100644
 +  // own warm-up for the Apps/Routes services it needs), since the
 +  // SiteInstance/partition for a navigation is chosen before its
 +  // URLLoaderFactory is created.
-+  AppSwapProfilesService* appswap_profiles_service =
-+      AppSwapProfilesServiceFactory::GetForProfile(
-+          Profile::FromBrowserContext(browser_context));
-+  appswap_profiles_service->GetProfiles(base::DoNothing());
++  // This runs for every navigation in every BrowserContext, including the
++  // System Profile that ProfilePicker::Show() navigates internally (its
++  // WebUI's own StoragePartitionConfig lookup for chrome://profile-picker).
++  // AppSwapProfilesServiceFactory only builds an instance for regular
++  // profiles (ProfileKeyedServiceFactory's default ProfileSelections
++  // excludes System/Guest), so GetForProfile() legitimately returns nullptr
++  // there -- AppSwap Profiles simply don't apply to those contexts.
++  if (AppSwapProfilesService* appswap_profiles_service =
++          AppSwapProfilesServiceFactory::GetForProfile(
++              Profile::FromBrowserContext(browser_context))) {
++    appswap_profiles_service->GetProfiles(base::DoNothing());
 +
-+  if (site.SchemeIsHTTPOrHTTPS()) {
-+    if (std::optional<std::string> profile_id =
-+            appswap_profiles_service->GetActiveProfileIdIfLoaded()) {
-+      return content::StoragePartitionConfig::Create(
-+          browser_context, kAppSwapProfilePartitionDomain,
-+          /*partition_name=*/*profile_id, /*in_memory=*/false);
++    if (site.SchemeIsHTTPOrHTTPS()) {
++      if (std::optional<std::string> profile_id =
++              appswap_profiles_service->GetActiveProfileIdIfLoaded()) {
++        return content::StoragePartitionConfig::Create(
++            browser_context, kAppSwapProfilePartitionDomain,
++            /*partition_name=*/*profile_id, /*in_memory=*/false);
++      }
 +    }
 +  }
 +#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
@@ -2412,7 +2447,7 @@ index dde051181fa13..f089058cdcfb9 100644
    return default_storage_partition_config;
  }
  
-@@ -4981,6 +5014,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
+@@ -4981,6 +5022,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
    handler->AddHandlerPair(&HandleChromeAboutAndChromeSyncRewrite,
                            BrowserURLHandler::null_handler());
  
@@ -2424,7 +2459,7 @@ index dde051181fa13..f089058cdcfb9 100644
  #if BUILDFLAG(IS_ANDROID)
    // Handler to rewrite chrome://newtab on Android.
    handler->AddHandlerPair(&chrome::android::HandleAndroidNativePageURL,
-@@ -6599,6 +6637,9 @@ void ChromeContentBrowserClient::WillCreateURLLoaderFactory(
+@@ -6599,6 +6645,9 @@ void ChromeContentBrowserClient::WillCreateURLLoaderFactory(
        frame, type == URLLoaderFactoryType::kNavigation, request_initiator,
        isolation_info, factory_builder);
  

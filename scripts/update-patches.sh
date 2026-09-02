@@ -325,6 +325,46 @@ gen 0015-projects.patch \
   chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.h \
   chrome/browser/ui/webui/app_swap_projects
 
+# Project Selector: a leading tab-strip button (before Tab Search, in the
+# combo-button's usual position) showing the current Project (== Profile)
+# and letting you switch to any other one, or create a new one via the
+# stock ProfilePicker -- deliberately a standalone views::MenuButton +
+# ui::SimpleMenuModel (same shape as AppSwapProfileTabStripButton/
+# AppSwapRouteGroupTabStripButton) rather than a WebUI bubble, so it never
+# touches TabSearchButton/TabStripComboButton. Also fixes two real,
+# pre-existing null/dangling-pointer crashes this surfaced the first time
+# anything actually exercised ProfilePicker::Show() (System Profile
+# navigation, and a Profile outliving an AppSwapProxyingURLLoaderFactory
+# bound to it) -- both already covered by 0005 above (chrome_content_
+# browser_client.cc, app_swap_url_loader_factory.*), along with the new
+# button's own frame wiring in horizontal_tab_strip_region_view.* and
+# views/app_swap/BUILD.gn (covered by 0009).
+#
+# Also renames Chromium's own "manageProfile" settings subpage to
+# "manageProject" (route.ts + the kManageProfileSubPage constant native
+# code uses to open it -- every other reference is to the shared Route
+# object or an internal view id, not the path string itself, so only these
+# two needed to change) and retextures the stock profile-creation/
+# management dialogs' English strings plus their Russian translations from
+# "profile" to "project" wording (profiles_strings.grdp,
+# settings_strings.grdp, generated_resources_ru.xtb, chromium_strings_ru.xtb
+# -- settings_chromium_strings.grdp is already covered by 0001 above). New
+# message ids for the retextured strings were computed with grit's own
+# `xmb` tool against a minimal probe .grd (verified by first reproducing
+# the *existing* ids from the current Russian translations before trusting
+# the new ones), not hand-derived, since grit's fingerprint depends on the
+# exact processed message content.
+gen 0016-project-selector-and-terminology.patch \
+  chrome/app/profiles_strings.grdp \
+  chrome/app/resources/chromium_strings_ru.xtb \
+  chrome/app/resources/generated_resources_ru.xtb \
+  chrome/app/settings_strings.grdp \
+  chrome/browser/resources/settings/route.ts \
+  chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc \
+  chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h \
+  chrome/browser/ui/webui/settings/settings_ui.h \
+  chrome/common/webui_url_constants.h
+
 # Warn about any changed file not covered by one of the patches above.
 echo "Checking for uncovered changes..."
 for f in $(git status --porcelain --untracked-files=no | cut -c4-); do

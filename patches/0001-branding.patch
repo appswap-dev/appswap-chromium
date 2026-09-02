@@ -3170,7 +3170,7 @@ index c3ed41189b590..5095023b56613 100644
      </else>
    </if>
 diff --git a/chrome/app/settings_chromium_strings.grdp b/chrome/app/settings_chromium_strings.grdp
-index 237b2a8517c3c..4f80a0d8c702c 100644
+index 237b2a8517c3c..d9a0740c74782 100644
 --- a/chrome/app/settings_chromium_strings.grdp
 +++ b/chrome/app/settings_chromium_strings.grdp
 @@ -1,10 +1,10 @@
@@ -3449,7 +3449,7 @@ index 237b2a8517c3c..4f80a0d8c702c 100644
    </message>
    <message name="IDS_SETTING_NAME_YOUR_PROFILE" desc="Title of the edit local profile name section on the manage profile page.">
 -    Name your Chromium profile
-+    Name your AppSwap profile
++    Project name
    </message>
  </if>
 -  <message name="IDS_SETTINGS_PEOPLE_SIGN_IN_PROMPT_SECONDARY_WITH_ACCOUNT" desc="The secondary text displayed to prompt users to enable sync for an account that is alredy present in Chromium.">

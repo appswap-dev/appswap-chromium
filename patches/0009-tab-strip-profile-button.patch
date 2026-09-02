@@ -14,10 +14,10 @@ index 50920511caf57..4ef3547d2c046 100644
      "//chrome/browser/ui/views/file_system_access:impl",
 diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..62abcd555125a
+index 0000000000000..402b46f847655
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/BUILD.gn
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,46 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -28,6 +28,8 @@ index 0000000000000..62abcd555125a
 +    "app_swap_profile_switch_util.h",
 +    "app_swap_profile_tab_strip_button.cc",
 +    "app_swap_profile_tab_strip_button.h",
++    "app_swap_project_selector_button.cc",
++    "app_swap_project_selector_button.h",
 +    "app_swap_reload_button_controller.cc",
 +    "app_swap_reload_button_controller.h",
 +    "app_swap_route_group_tab_strip_button.cc",
@@ -38,9 +40,11 @@ index 0000000000000..62abcd555125a
 +
 +  deps = [
 +    "//base",
++    "//chrome/browser:browser_process",
 +    "//chrome/browser/app_swap",
 +    "//chrome/browser/profiles:profile",
 +    "//chrome/browser/ui/browser_window",
++    "//chrome/browser/ui/profiles",
 +    "//chrome/browser/ui/page_info",
 +    "//chrome/browser/ui/tabs",
 +    "//chrome/browser/ui/views/page_info",
@@ -545,6 +549,151 @@ index 0000000000000..852a232574e1d
 +};
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_TAB_STRIP_BUTTON_H_
+diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
+index 76e408d422544..f1c42e70b1897 100644
+--- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
+@@ -24,6 +24,7 @@
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/tabs/tab_strip_prefs.h"
+ #include "chrome/browser/ui/ui_features.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/tab_search_bubble_host.h"
+ #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
+@@ -168,6 +169,22 @@ HorizontalTabStripRegionViewOld::HorizontalTabStripRegionViewOld(
+ 
+   if (browser &&
+       (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
++    // Added before the combo button (Tab Search's leading position) so it
++    // renders as the outermost leading element, before Tab Search -- a
++    // regular (non-layout-ignored) FlexLayout child, unlike combo_button_
++    // below, which paints to its own layer and overlaps the tab strip's
++    // corner radius (see UpdateTabStripMargin()). AppSwapProjectSelectorButton
++    // is a plain rounded chip, not a flat-edge button meant to blend into
++    // that corner, so it doesn't need or want that treatment.
++    project_selector_button_ = AddChildView(
++        std::make_unique<AppSwapProjectSelectorButton>(browser));
++    project_selector_button_->SetProperty(
++        views::kCrossAxisAlignmentKey, views::LayoutAlignment::kCenter);
++    project_selector_button_->SetProperty(
++        views::kMarginsKey,
++        gfx::Insets::TLBR(
++            0, 0, 0, GetLayoutConstant(LayoutConstant::kTabStripPadding)));
++
+     combo_button_ = AddChildView(std::make_unique<TabStripComboButton>(
+         browser, TabStripComboButton::Context::kHorizontalTabStrip));
+     combo_button_->SetProperty(views::kCrossAxisAlignmentKey,
+@@ -279,6 +296,9 @@ HorizontalTabStripRegionViewOld::~HorizontalTabStripRegionViewOld() {
+   if (combo_button_) {
+     RemoveChildViewT(std::exchange(combo_button_, nullptr));
+   }
++  if (project_selector_button_) {
++    RemoveChildViewT(std::exchange(project_selector_button_, nullptr));
++  }
+   if (new_tab_button_) {
+     RemoveChildViewT(std::exchange(new_tab_button_, nullptr));
+   }
+@@ -339,6 +359,10 @@ views::View::Views HorizontalTabStripRegionViewOld::GetChildrenInZOrder() {
+     children.emplace_back(combo_button_.get());
+   }
+ 
++  if (project_selector_button_) {
++    children.emplace_back(project_selector_button_.get());
++  }
++
+   if (unfocus_button_) {
+     children.emplace_back(unfocus_button_.get());
+   }
+@@ -777,6 +801,20 @@ HorizontalTabStripRegionViewNew::HorizontalTabStripRegionViewNew(
+   std::unique_ptr<TabStripActionContainer> tab_strip_action_container;
+   if (browser &&
+       (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
++    // Added before the combo button (Tab Search's leading position) so it
++    // renders as the outermost leading element, before Tab Search. See the
++    // matching comment in HorizontalTabStripRegionViewOld's constructor for
++    // why this is a plain FlexLayout child rather than sharing
++    // combo_button_'s corner-overlap treatment.
++    project_selector_button_ = AddChildView(
++        std::make_unique<AppSwapProjectSelectorButton>(browser));
++    project_selector_button_->SetProperty(
++        views::kCrossAxisAlignmentKey, views::LayoutAlignment::kCenter);
++    project_selector_button_->SetProperty(
++        views::kMarginsKey,
++        gfx::Insets::TLBR(
++            0, 0, 0, GetLayoutConstant(LayoutConstant::kTabStripPadding)));
++
+     combo_button_ = AddChildView(std::make_unique<TabStripComboButton>(
+         browser, TabStripComboButton::Context::kHorizontalTabStrip));
+     combo_button_->SetProperty(views::kCrossAxisAlignmentKey,
+@@ -826,6 +864,9 @@ HorizontalTabStripRegionViewNew::~HorizontalTabStripRegionViewNew() {
+   if (combo_button_) {
+     RemoveChildViewT(std::exchange(combo_button_, nullptr));
+   }
++  if (project_selector_button_) {
++    RemoveChildViewT(std::exchange(project_selector_button_, nullptr));
++  }
+   if (new_tab_button_) {
+     RemoveChildViewT(std::exchange(new_tab_button_, nullptr));
+   }
+@@ -839,6 +880,9 @@ bool HorizontalTabStripRegionViewNew::IsPositionInWindowCaption(
+   if (combo_button_ && IsHitInView(combo_button_, point)) {
+     return false;
+   }
++  if (project_selector_button_ && IsHitInView(project_selector_button_, point)) {
++    return false;
++  }
+   if (tab_strip_view() && IsHitInView(tab_strip_view(), point)) {
+     gfx::Point point_in_tab_strip = point;
+     views::View::ConvertPointToTarget(this, tab_strip_view(),
+@@ -864,6 +908,9 @@ views::View::Views HorizontalTabStripRegionViewNew::GetChildrenInZOrder() {
+   if (combo_button_) {
+     children.emplace_back(combo_button_.get());
+   }
++  if (project_selector_button_) {
++    children.emplace_back(project_selector_button_.get());
++  }
+   if (reserved_grab_handle_space_) {
+     children.emplace_back(reserved_grab_handle_space_.get());
+   }
+@@ -983,7 +1030,8 @@ gfx::Point HorizontalTabStripRegionViewNew::GetLinkDropArrowPosition(
+ }
+ 
+ void HorizontalTabStripRegionViewNew::OnTabStripViewSet() {
+-  const size_t index = combo_button_ ? 1 : 0;
++  const size_t index = (project_selector_button_ ? 1 : 0) +
++                      (combo_button_ ? 1 : 0);
+   ReorderChildView(tab_strip_view(), index);
+ }
+ 
+diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+index 3860b6181381b..48a534b38840c 100644
+--- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+@@ -17,6 +17,7 @@
+ #include "ui/base/pointer/touch_ui_controller.h"
+ #include "ui/views/accessible_pane_view.h"
+ 
++class AppSwapProjectSelectorButton;
+ class BrowserView;
+ 
+ namespace views {
+@@ -128,6 +129,7 @@ class HorizontalTabStripRegionViewOld : public TabStripRegionView {
+   raw_ptr<views::View> reserved_grab_handle_space_ = nullptr;
+   raw_ptr<TabStrip> tab_strip_ = nullptr;
+   raw_ptr<TabStripScrollContainer> tab_strip_scroll_container_ = nullptr;
++  raw_ptr<AppSwapProjectSelectorButton> project_selector_button_ = nullptr;
+   raw_ptr<TabStripComboButton> combo_button_ = nullptr;
+   raw_ptr<views::Button> new_tab_button_ = nullptr;
+   raw_ptr<TabStripControlButton> unfocus_button_ = nullptr;
+@@ -175,6 +177,7 @@ class HorizontalTabStripRegionViewNew : public BaseTabStripRegionView {
+ 
+   raw_ptr<TabStripActionContainer> tab_strip_action_container_ = nullptr;
+   raw_ptr<views::View> reserved_grab_handle_space_ = nullptr;
++  raw_ptr<AppSwapProjectSelectorButton> project_selector_button_ = nullptr;
+   raw_ptr<TabStripComboButton> combo_button_ = nullptr;
+   raw_ptr<views::Button> new_tab_button_ = nullptr;
+ 
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
 index f97b92504ba81..ac4d827d90431 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
