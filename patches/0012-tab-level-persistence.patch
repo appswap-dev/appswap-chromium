@@ -1,6 +1,6 @@
 diff --git a/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.cc b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.cc
 new file mode 100644
-index 0000000000..bb9cf67cae
+index 0000000000000..bb9cf67caeffd
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.cc
 @@ -0,0 +1,37 @@
@@ -43,7 +43,7 @@ index 0000000000..bb9cf67cae
 +WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapProfilePinTabHelper);
 diff --git a/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h
 new file mode 100644
-index 0000000000..d35f326eb2
+index 0000000000000..d35f326eb2226
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h
 @@ -0,0 +1,51 @@
@@ -100,7 +100,7 @@ index 0000000000..d35f326eb2
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_PIN_TAB_HELPER_H_
 diff --git a/chrome/browser/app_swap/app_swap_profile_removal_util.cc b/chrome/browser/app_swap/app_swap_profile_removal_util.cc
 new file mode 100644
-index 0000000000..dc45b2ed3f
+index 0000000000000..dc45b2ed3fe47
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_removal_util.cc
 @@ -0,0 +1,112 @@
@@ -218,7 +218,7 @@ index 0000000000..dc45b2ed3f
 +}
 diff --git a/chrome/browser/app_swap/app_swap_profile_removal_util.h b/chrome/browser/app_swap/app_swap_profile_removal_util.h
 new file mode 100644
-index 0000000000..c786acf9f0
+index 0000000000000..c786acf9f0c31
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_removal_util.h
 @@ -0,0 +1,30 @@
@@ -254,7 +254,7 @@ index 0000000000..c786acf9f0
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_REMOVAL_UTIL_H_
 diff --git a/chrome/browser/app_swap/app_swap_profile_session_restore_util.cc b/chrome/browser/app_swap/app_swap_profile_session_restore_util.cc
 new file mode 100644
-index 0000000000..7ce8b91f22
+index 0000000000000..7ce8b91f22882
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_session_restore_util.cc
 @@ -0,0 +1,53 @@
@@ -313,7 +313,7 @@ index 0000000000..7ce8b91f22
 +}
 diff --git a/chrome/browser/app_swap/app_swap_profile_session_restore_util.h b/chrome/browser/app_swap/app_swap_profile_session_restore_util.h
 new file mode 100644
-index 0000000000..3242764f21
+index 0000000000000..3242764f21d98
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_session_restore_util.h
 @@ -0,0 +1,47 @@
@@ -366,7 +366,7 @@ index 0000000000..3242764f21
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_SESSION_RESTORE_UTIL_H_
 diff --git a/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc
 new file mode 100644
-index 0000000000..dce48bab37
+index 0000000000000..dce48bab37dc4
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.cc
 @@ -0,0 +1,131 @@
@@ -503,7 +503,7 @@ index 0000000000..dce48bab37
 +}
 diff --git a/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h
 new file mode 100644
-index 0000000000..762bbc577e
+index 0000000000000..762bbc577ec3c
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_pin_tab_helper.h
 @@ -0,0 +1,81 @@
@@ -589,10 +589,10 @@ index 0000000000..762bbc577e
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_PIN_TAB_HELPER_H_
 diff --git a/chrome/browser/ui/browser_tabrestore.cc b/chrome/browser/ui/browser_tabrestore.cc
-index fa43dd782c..cdc2113644 100644
+index fa43dd782cdb8..5dd5d62545135 100644
 --- a/chrome/browser/ui/browser_tabrestore.cc
 +++ b/chrome/browser/ui/browser_tabrestore.cc
-@@ -4,12 +4,15 @@
+@@ -4,12 +4,16 @@
  
  #include "chrome/browser/ui/browser_tabrestore.h"
  
@@ -604,11 +604,12 @@ index fa43dd782c..cdc2113644 100644
  #include "base/containers/span.h"
  #include "build/build_config.h"
 +#include "chrome/browser/app_swap/app_swap_profile_session_restore_util.h"
++#include "chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
  #include "chrome/browser/apps/app_service/web_contents_app_id_utils.h"
  #include "chrome/browser/glic/glic_tab_restore_helper.h"
  #include "chrome/browser/profiles/profile.h"
-@@ -76,6 +79,23 @@ std::unique_ptr<WebContents> CreateRestoredTab(
+@@ -76,6 +80,23 @@ std::unique_ptr<WebContents> CreateRestoredTab(
        WebContents::CreateParams::kNoRendererProcess;
    create_params.last_active_time_ticks = last_active_time_ticks;
    create_params.last_active_time = last_active_time;
@@ -632,34 +633,38 @@ index fa43dd782c..cdc2113644 100644
    std::unique_ptr<WebContents> web_contents =
        WebContents::CreateWithSessionStorage(create_params,
                                              session_storage_namespace_map);
-@@ -85,6 +105,8 @@ std::unique_ptr<WebContents> CreateRestoredTab(
+@@ -85,6 +106,10 @@ std::unique_ptr<WebContents> CreateRestoredTab(
    glic::RestoreGlicStateFromExtraData(web_contents.get(), extra_data);
    send_tab_to_self::SendTabToSelfActivationTracker::RestoreFromExtraData(
        web_contents.get(), extra_data);
 +  AppSwapVersionPinTabHelper::RestoreFromExtraData(web_contents.get(),
 +                                                   extra_data);
++  AppSwapRouteGroupPinTabHelper::RestoreFromExtraData(web_contents.get(),
++                                                      extra_data);
  
    std::vector<std::unique_ptr<NavigationEntry>> entries =
        ContentSerializedNavigationBuilder::ToNavigationEntries(
 diff --git a/chrome/browser/ui/tab_helpers.cc b/chrome/browser/ui/tab_helpers.cc
-index dcf66fff38..f122f28e36 100644
+index dcf66fff381ea..12a188bac7ce3 100644
 --- a/chrome/browser/ui/tab_helpers.cc
 +++ b/chrome/browser/ui/tab_helpers.cc
-@@ -15,6 +15,9 @@
+@@ -15,6 +15,10 @@
  #include "base/time/default_tick_clock.h"
  #include "base/trace_event/trace_event.h"
  #include "build/build_config.h"
 +#include "chrome/browser/app_swap/app_swap_profile_pin_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
  #include "chrome/browser/bookmarks/bookmark_model_factory.h"
  #include "chrome/browser/breadcrumbs/breadcrumb_manager_tab_helper.h"
  #include "chrome/browser/browser_process.h"
-@@ -446,6 +449,9 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents,
+@@ -446,6 +450,10 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents,
    content_settings::PageSpecificContentSettings::CreateForWebContents(
        web_contents,
        std::make_unique<PageSpecificContentSettingsDelegate>(web_contents));
 +  AppSwapProfilePinTabHelper::CreateForWebContents(web_contents);
++  AppSwapRouteGroupPinTabHelper::CreateForWebContents(web_contents);
 +  AppSwapUpdateAvailableTabHelper::CreateForWebContents(web_contents);
 +  AppSwapVersionPinTabHelper::CreateForWebContents(web_contents);
    CoreTabHelper::CreateForWebContents(web_contents);

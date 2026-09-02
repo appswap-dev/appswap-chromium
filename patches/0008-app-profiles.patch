@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/app_swap/app_swap_profiles_service.cc b/chrome/browser/app_swap/app_swap_profiles_service.cc
 new file mode 100644
-index 0000000000..6dca71a78b
+index 0000000000000..b9e889e6af46e
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profiles_service.cc
-@@ -0,0 +1,248 @@
+@@ -0,0 +1,239 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -19,11 +19,10 @@ index 0000000000..6dca71a78b
 +#include "base/json/json_reader.h"
 +#include "base/json/json_writer.h"
 +#include "base/no_destructor.h"
-+#include "base/path_service.h"
 +#include "base/task/thread_pool.h"
 +#include "base/uuid.h"
 +#include "base/values.h"
-+#include "chrome/common/chrome_paths.h"
++#include "content/public/browser/browser_context.h"
 +
 +namespace {
 +
@@ -80,21 +79,13 @@ index 0000000000..6dca71a78b
 +
 +}  // namespace
 +
-+AppSwapProfilesService::AppSwapProfilesService() = default;
++AppSwapProfilesService::AppSwapProfilesService(
++    content::BrowserContext* browser_context)
++    : profile_path_(browser_context->GetPath()) {}
 +AppSwapProfilesService::~AppSwapProfilesService() = default;
 +
-+// static
-+AppSwapProfilesService* AppSwapProfilesService::GetInstance() {
-+  static base::NoDestructor<AppSwapProfilesService> instance;
-+  return instance.get();
-+}
-+
-+base::FilePath AppSwapProfilesService::ConfigPath() {
-+  base::FilePath dir;
-+  if (!base::PathService::Get(chrome::DIR_USER_DATA, &dir)) {
-+    base::GetTempDir(&dir);
-+  }
-+  return dir.Append(FILE_PATH_LITERAL("AppSwap"))
++base::FilePath AppSwapProfilesService::ConfigPath() const {
++  return profile_path_.Append(FILE_PATH_LITERAL("AppSwap"))
 +      .Append(FILE_PATH_LITERAL("profiles.json"));
 +}
 +
@@ -254,10 +245,10 @@ index 0000000000..6dca71a78b
 +}
 diff --git a/chrome/browser/app_swap/app_swap_profiles_service.h b/chrome/browser/app_swap/app_swap_profiles_service.h
 new file mode 100644
-index 0000000000..75c7717cbb
+index 0000000000000..264fdc82fdf73
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profiles_service.h
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,109 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -274,6 +265,11 @@ index 0000000000..75c7717cbb
 +#include "base/files/file_path.h"
 +#include "base/functional/callback.h"
 +#include "base/sequence_checker.h"
++#include "components/keyed_service/core/keyed_service.h"
++
++namespace content {
++class BrowserContext;
++}  // namespace content
 +
 +// The content::StoragePartitionConfig partition_domain used for every
 +// AppSwap Profile's storage partition; partition_name is the profile's id.
@@ -294,17 +290,18 @@ index 0000000000..75c7717cbb
 +  std::string name;
 +};
 +
-+// Owns the persistent profile configuration, stored as JSON in the user data
-+// directory. The file is read/written on a background (MayBlock) task runner.
-+class AppSwapProfilesService {
++// Owns the persistent profile configuration for one Project (== Chromium
++// Profile), stored as JSON under that profile's own directory. The file is
++// read/written on a background (MayBlock) task runner. See
++// AppSwapProfilesServiceFactory for how to reach the instance for a given
++// Profile.
++class AppSwapProfilesService : public KeyedService {
 + public:
-+  AppSwapProfilesService();
-+  ~AppSwapProfilesService();
++  AppSwapProfilesService(content::BrowserContext* browser_context);
++  ~AppSwapProfilesService() override;
 +
 +  AppSwapProfilesService(const AppSwapProfilesService&) = delete;
 +  AppSwapProfilesService& operator=(const AppSwapProfilesService&) = delete;
-+
-+  static AppSwapProfilesService* GetInstance();
 +
 +  // Loads the config from disk (on first call) and invokes |callback| with
 +  // the profiles on the UI thread.
@@ -348,8 +345,9 @@ index 0000000000..75c7717cbb
 +          loaded);
 +  void ScheduleSave();
 +
-+  base::FilePath ConfigPath();
++  base::FilePath ConfigPath() const;
 +
++  const base::FilePath profile_path_;
 +  std::vector<AppSwapProfile> profiles_;
 +  std::optional<std::string> active_profile_id_;
 +  bool loaded_ = false;
@@ -360,591 +358,3 @@ index 0000000000..75c7717cbb
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILES_SERVICE_H_
-diff --git a/chrome/browser/app_swap/app_swap_profiles_ui.cc b/chrome/browser/app_swap/app_swap_profiles_ui.cc
-new file mode 100644
-index 0000000000..ec8edcc726
---- /dev/null
-+++ b/chrome/browser/app_swap/app_swap_profiles_ui.cc
-@@ -0,0 +1,547 @@
-+// Copyright 2026 The AppSwap Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "chrome/browser/app_swap/app_swap_profiles_ui.h"
-+
-+#include <memory>
-+#include <string>
-+#include <utility>
-+#include <vector>
-+
-+#include "base/functional/bind.h"
-+#include "base/memory/ref_counted_memory.h"
-+#include "base/memory/weak_ptr.h"
-+#include "base/values.h"
-+#include "chrome/browser/app_swap/app_swap_profile_removal_util.h"
-+#include "chrome/browser/app_swap/app_swap_profiles_service.h"
-+#include "chrome/browser/profiles/profile.h"
-+#include "chrome/grit/theme_resources.h"
-+#include "content/public/browser/web_ui.h"
-+#include "content/public/browser/web_ui_data_source.h"
-+#include "content/public/browser/web_ui_message_handler.h"
-+#include "content/public/common/url_constants.h"
-+#include "services/network/public/mojom/content_security_policy.mojom.h"
-+
-+namespace {
-+
-+constexpr char kProfilesHtml[] = R"html(<!doctype html>
-+<html>
-+<head>
-+<title>AppSwap Profiles</title>
-+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
-+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-+<meta charset="utf-8">
-+<style>
-+  :root {
-+    --bg: #f6f6f8;
-+    --surface: #ffffff;
-+    --border: #e3e3e8;
-+    --text: #1e1e24;
-+    --text-muted: #6c6c78;
-+    --primary: #4f46e5;
-+    --primary-hover: #4338ca;
-+    --danger: #dc2626;
-+    --danger-bg: #fef2f2;
-+    --star: #f59e0b;
-+    --shadow: 0 1px 2px rgba(20, 20, 30, 0.04), 0 2px 10px rgba(20, 20, 30, 0.05);
-+    --shadow-hover: 0 6px 20px rgba(20, 20, 30, 0.10);
-+    --radius: 14px;
-+  }
-+  @media (prefers-color-scheme: dark) {
-+    :root {
-+      --bg: #19191d;
-+      --surface: #222227;
-+      --border: #34343c;
-+      --text: #eceef0;
-+      --text-muted: #9a9aa4;
-+      --primary: #6366f1;
-+      --primary-hover: #818cf8;
-+      --danger: #f87171;
-+      --danger-bg: #3a1d1d;
-+      --star: #fbbf24;
-+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 10px rgba(0, 0, 0, 0.3);
-+      --shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.4);
-+    }
-+  }
-+  * { box-sizing: border-box; }
-+  body {
-+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
-+    background: var(--bg);
-+    color: var(--text);
-+    margin: 0;
-+    padding: 2rem clamp(1.25rem, 4vw, 3rem) 3rem;
-+  }
-+  header {
-+    display: flex;
-+    align-items: center;
-+    justify-content: space-between;
-+    gap: 1rem;
-+    margin-bottom: 1.75rem;
-+  }
-+  .titlebar { display: flex; align-items: center; gap: 1.25rem; }
-+  h1 {
-+    font-size: 1.35rem;
-+    margin: 0;
-+    display: flex;
-+    align-items: center;
-+    gap: 0.5rem;
-+  }
-+  h1 .count {
-+    font-weight: 400;
-+    color: var(--text-muted);
-+    font-size: 0.95rem;
-+  }
-+  nav.tabs { display: flex; gap: 0.25rem; }
-+  nav.tabs a {
-+    color: var(--text-muted);
-+    text-decoration: none;
-+    font-size: 0.88rem;
-+    font-weight: 600;
-+    padding: 0.4rem 0.7rem;
-+    border-radius: 7px;
-+  }
-+  nav.tabs a:hover { background: var(--surface); color: var(--text); }
-+  nav.tabs a.active { background: var(--surface); color: var(--primary); box-shadow: var(--shadow); }
-+  button { font: inherit; }
-+  .btn-primary {
-+    background: var(--primary);
-+    color: #fff;
-+    border: none;
-+    padding: 0.55rem 1.1rem;
-+    border-radius: 9px;
-+    font-size: 0.9rem;
-+    font-weight: 600;
-+    cursor: pointer;
-+    display: inline-flex;
-+    align-items: center;
-+    gap: 0.4rem;
-+    transition: background 0.12s ease;
-+  }
-+  .btn-primary:hover { background: var(--primary-hover); }
-+  .grid {
-+    display: grid;
-+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-+    gap: 1rem;
-+  }
-+  .card {
-+    background: var(--surface);
-+    border: 1px solid var(--border);
-+    border-radius: var(--radius);
-+    padding: 1.1rem;
-+    box-shadow: var(--shadow);
-+    display: flex;
-+    flex-direction: column;
-+    gap: 0.7rem;
-+    transition: transform 0.12s ease, box-shadow 0.12s ease;
-+  }
-+  .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
-+  .profile-name {
-+    display: flex;
-+    align-items: center;
-+    gap: 0.4rem;
-+    font-size: 0.98rem;
-+    font-weight: 600;
-+    overflow: hidden;
-+    text-overflow: ellipsis;
-+    white-space: nowrap;
-+  }
-+  .star-btn {
-+    background: transparent;
-+    border: none;
-+    cursor: pointer;
-+    padding: 0;
-+    font-size: 1rem;
-+    line-height: 1;
-+    color: var(--border);
-+    flex: none;
-+  }
-+  .star-btn.active { color: var(--star); }
-+  .star-btn:hover { color: var(--star); }
-+  .card-actions {
-+    margin-top: auto;
-+    display: flex;
-+    gap: 0.25rem;
-+    justify-content: flex-end;
-+    padding-top: 0.5rem;
-+    border-top: 1px solid var(--border);
-+  }
-+  .icon-btn {
-+    background: transparent;
-+    border: none;
-+    color: var(--text-muted);
-+    cursor: pointer;
-+    padding: 0.35rem 0.6rem;
-+    border-radius: 7px;
-+    font-size: 0.82rem;
-+  }
-+  .icon-btn:hover { background: var(--bg); color: var(--text); }
-+  .icon-btn.danger:hover { background: var(--danger-bg); color: var(--danger); }
-+  .empty {
-+    text-align: center;
-+    padding: 5rem 1rem;
-+    color: var(--text-muted);
-+  }
-+  .empty .glyph { font-size: 2.5rem; margin-bottom: 0.75rem; }
-+  .empty p { margin: 0 0 1.25rem; }
-+  .empty a { color: var(--primary); }
-+
-+  dialog {
-+    border: none;
-+    border-radius: var(--radius);
-+    padding: 0;
-+    background: var(--surface);
-+    color: var(--text);
-+    width: min(28rem, 92vw);
-+    box-shadow: var(--shadow-hover);
-+  }
-+  dialog::backdrop { background: rgba(20, 20, 30, 0.45); }
-+  .dialog-body { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
-+  .dialog-body h2 { margin: 0; font-size: 1.1rem; }
-+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
-+  .field label { font-size: 0.82rem; color: var(--text-muted); font-weight: 600; }
-+  .field input, .field select {
-+    padding: 0.5rem 0.6rem;
-+    font-size: 0.9rem;
-+    border: 1px solid var(--border);
-+    border-radius: 8px;
-+    background: var(--bg);
-+    color: var(--text);
-+  }
-+  .field input:focus, .field select:focus {
-+    outline: none;
-+    border-color: var(--primary);
-+  }
-+  .preview {
-+    font-size: 0.8rem;
-+    color: var(--text-muted);
-+    background: var(--bg);
-+    border: 1px solid var(--border);
-+    border-radius: 8px;
-+    padding: 0.5rem 0.6rem;
-+  }
-+  .dialog-actions {
-+    display: flex;
-+    justify-content: flex-end;
-+    gap: 0.5rem;
-+    margin-top: 0.25rem;
-+  }
-+  .btn-secondary {
-+    background: transparent;
-+    border: 1px solid var(--border);
-+    color: var(--text);
-+    padding: 0.5rem 1rem;
-+    border-radius: 8px;
-+    cursor: pointer;
-+    font-size: 0.9rem;
-+  }
-+  .btn-secondary:hover { background: var(--bg); }
-+</style>
-+</head>
-+<body>
-+  <header>
-+    <div class="titlebar">
-+      <h1>Profiles <span class="count" id="count"></span></h1>
-+      <nav class="tabs">
-+        <a href="appswap://apps">Apps</a>
-+        <a href="appswap://routes">Routes</a>
-+        <a href="appswap://profiles" class="active">Profiles</a>
-+      </nav>
-+    </div>
-+    <button class="btn-primary" id="openAdd" type="button">+ Add profile</button>
-+  </header>
-+  <div id="content"></div>
-+
-+  <dialog id="dialog">
-+    <form class="dialog-body" id="form" method="dialog">
-+      <h2 id="dialogTitle">Add profile</h2>
-+      <div class="field">
-+        <label for="name">Name</label>
-+        <input id="name" placeholder="Client" required>
-+      </div>
-+      <div class="preview">An isolated identity — its own cookies, local storage, and cache — that you can switch to on any site.</div>
-+      <div class="dialog-actions">
-+        <button class="btn-secondary" id="cancel" type="button">Cancel</button>
-+        <button class="btn-primary" id="save" type="submit">Add profile</button>
-+      </div>
-+    </form>
-+  </dialog>
-+
-+  <script>
-+    let editingId = null;
-+    let profiles = [];
-+    const field = (id) => document.getElementById(id);
-+    const dialog = field('dialog');
-+
-+    function render() {
-+      const content = field('content');
-+      content.replaceChildren();
-+      field('count').textContent = profiles.length ? '(' + profiles.length + ')' : '';
-+
-+      if (!profiles.length) {
-+        const empty = document.createElement('div');
-+        empty.className = 'empty';
-+        empty.innerHTML = '<div class="glyph">&#128100;</div>' +
-+            '<p>No profiles configured yet. A profile is its own isolated cookies, ' +
-+            'local storage, and cache — handy for staying signed into the same site as two ' +
-+            'different accounts.</p>';
-+        const btn = document.createElement('button');
-+        btn.className = 'btn-primary';
-+        btn.type = 'button';
-+        btn.textContent = '+ Add your first profile';
-+        btn.addEventListener('click', openAddDialog);
-+        empty.appendChild(btn);
-+        content.appendChild(empty);
-+        return;
-+      }
-+
-+      const grid = document.createElement('div');
-+      grid.className = 'grid';
-+      for (const profile of profiles) {
-+        grid.appendChild(buildCard(profile));
-+      }
-+      content.appendChild(grid);
-+    }
-+
-+    function buildCard(profile) {
-+      const card = document.createElement('div');
-+      card.className = 'card';
-+
-+      const name = document.createElement('div');
-+      name.className = 'profile-name';
-+      const star = document.createElement('button');
-+      star.type = 'button';
-+      star.className = 'star-btn' + (profile.active ? ' active' : '');
-+      star.title = profile.active ? 'Active profile' : 'Make active';
-+      star.textContent = profile.active ? '★' : '☆';
-+      star.addEventListener('click', () => chrome.send('activateProfile', [profile.id]));
-+      const label = document.createElement('span');
-+      label.textContent = profile.name;
-+      name.appendChild(star);
-+      name.appendChild(label);
-+
-+      const actions = document.createElement('div');
-+      actions.className = 'card-actions';
-+      const editBtn = document.createElement('button');
-+      editBtn.className = 'icon-btn';
-+      editBtn.type = 'button';
-+      editBtn.textContent = 'Edit';
-+      editBtn.addEventListener('click', () => openEditDialog(profile));
-+      const rmBtn = document.createElement('button');
-+      rmBtn.className = 'icon-btn danger';
-+      rmBtn.type = 'button';
-+      rmBtn.textContent = 'Remove';
-+      rmBtn.addEventListener('click', () => {
-+        if (confirm('Remove profile "' + profile.name + '"?')) {
-+          chrome.send('removeProfile', [profile.id]);
-+        }
-+      });
-+      actions.appendChild(editBtn);
-+      actions.appendChild(rmBtn);
-+
-+      card.appendChild(name);
-+      card.appendChild(actions);
-+      return card;
-+    }
-+
-+    function openAddDialog() {
-+      editingId = null;
-+      field('dialogTitle').textContent = 'Add profile';
-+      field('save').textContent = 'Add profile';
-+      field('name').value = '';
-+      dialog.showModal();
-+      field('name').focus();
-+    }
-+
-+    function openEditDialog(profile) {
-+      editingId = profile.id;
-+      field('dialogTitle').textContent = 'Edit profile';
-+      field('save').textContent = 'Save';
-+      field('name').value = profile.name;
-+      dialog.showModal();
-+      field('name').focus();
-+    }
-+
-+    field('openAdd').addEventListener('click', openAddDialog);
-+    field('cancel').addEventListener('click', () => dialog.close());
-+
-+    field('form').addEventListener('submit', (event) => {
-+      event.preventDefault();
-+      const name = field('name').value.trim();
-+      if (!name) return;
-+      if (editingId) {
-+        chrome.send('updateProfile', [editingId, name]);
-+      } else {
-+        chrome.send('addProfile', [name]);
-+      }
-+      dialog.close();
-+    });
-+
-+    window.setData = (data) => {
-+      profiles = data.profiles;
-+      render();
-+    };
-+    chrome.send('getData');
-+  </script>
-+</body>
-+</html>
-+)html";
-+
-+class AppSwapProfilesHandler : public content::WebUIMessageHandler {
-+ public:
-+  void RegisterMessages() override {
-+    web_ui()->RegisterMessageCallback(
-+        "getData", base::BindRepeating(&AppSwapProfilesHandler::HandleGetData,
-+                                       base::Unretained(this)));
-+    web_ui()->RegisterMessageCallback(
-+        "addProfile",
-+        base::BindRepeating(&AppSwapProfilesHandler::HandleAddProfile,
-+                            base::Unretained(this)));
-+    web_ui()->RegisterMessageCallback(
-+        "updateProfile",
-+        base::BindRepeating(&AppSwapProfilesHandler::HandleUpdateProfile,
-+                            base::Unretained(this)));
-+    web_ui()->RegisterMessageCallback(
-+        "removeProfile",
-+        base::BindRepeating(&AppSwapProfilesHandler::HandleRemoveProfile,
-+                            base::Unretained(this)));
-+    web_ui()->RegisterMessageCallback(
-+        "activateProfile",
-+        base::BindRepeating(&AppSwapProfilesHandler::HandleActivateProfile,
-+                            base::Unretained(this)));
-+  }
-+
-+ private:
-+  void SendData() {
-+    AppSwapProfilesService::GetInstance()->GetProfiles(base::BindOnce(
-+        &AppSwapProfilesHandler::OnProfilesLoaded, weak_factory_.GetWeakPtr()));
-+  }
-+
-+  void OnProfilesLoaded(std::vector<AppSwapProfile> profiles) {
-+    base::ListValue profiles_list;
-+    for (const AppSwapProfile& profile : profiles) {
-+      base::DictValue dict;
-+      dict.Set("id", profile.id);
-+      dict.Set("name", profile.name);
-+      std::optional<std::string> active_id =
-+          AppSwapProfilesService::GetInstance()->GetActiveProfileIdIfLoaded();
-+      dict.Set("active", active_id.has_value() && *active_id == profile.id);
-+      profiles_list.Append(std::move(dict));
-+    }
-+
-+    base::DictValue data;
-+    data.Set("profiles", std::move(profiles_list));
-+    CallJavascriptFunction("setData", data);
-+  }
-+
-+  void HandleGetData(const base::ListValue& args) {
-+    AllowJavascript();
-+    SendData();
-+  }
-+
-+  void HandleAddProfile(const base::ListValue& args) {
-+    AllowJavascript();
-+    if (args.empty()) {
-+      return;
-+    }
-+    const std::string* name = args[0].GetIfString();
-+    if (!name) {
-+      return;
-+    }
-+
-+    AppSwapProfile profile;
-+    profile.name = *name;
-+    AppSwapProfilesService::GetInstance()->AddProfile(std::move(profile));
-+    SendData();
-+  }
-+
-+  void HandleUpdateProfile(const base::ListValue& args) {
-+    AllowJavascript();
-+    if (args.size() < 2) {
-+      return;
-+    }
-+    const std::string* id = args[0].GetIfString();
-+    const std::string* name = args[1].GetIfString();
-+    if (!id || !name) {
-+      return;
-+    }
-+
-+    AppSwapProfile profile;
-+    profile.id = *id;
-+    profile.name = *name;
-+    AppSwapProfilesService::GetInstance()->UpdateProfile(std::move(profile));
-+    SendData();
-+  }
-+
-+  void HandleRemoveProfile(const base::ListValue& args) {
-+    AllowJavascript();
-+    if (args.empty()) {
-+      return;
-+    }
-+    const std::string* id = args[0].GetIfString();
-+    if (!id) {
-+      return;
-+    }
-+    // Move any tab currently running under this profile off it first, then
-+    // wipe the partition's data, and only then forget the profile itself --
-+    // in that order so nothing is left mid-navigation on a partition that's
-+    // about to be cleared.
-+    SwitchTabsOffAppSwapProfile(*id);
-+    ClearAppSwapProfileData(*id, Profile::FromWebUI(web_ui()));
-+    AppSwapProfilesService::GetInstance()->RemoveProfile(*id);
-+    SendData();
-+  }
-+
-+  void HandleActivateProfile(const base::ListValue& args) {
-+    AllowJavascript();
-+    if (args.empty()) {
-+      return;
-+    }
-+    const std::string* id = args[0].GetIfString();
-+    if (!id) {
-+      return;
-+    }
-+    AppSwapProfilesService::GetInstance()->SetActiveProfile(*id);
-+    SendData();
-+  }
-+
-+  base::WeakPtrFactory<AppSwapProfilesHandler> weak_factory_{this};
-+};
-+
-+}  // namespace
-+
-+AppSwapProfilesUI::AppSwapProfilesUI(content::WebUI* web_ui)
-+    : content::WebUIController(web_ui) {
-+  // Lets this page's renderer navigate directly to appswap:// links (e.g. the
-+  // nav tabs), which ChildProcessSecurityPolicy would otherwise block as an
-+  // unrequestable scheme even though it's just an alias rewritten to this
-+  // same chrome:// page.
-+  web_ui->AddRequestableScheme(content::kAppSwapUIScheme);
-+  content::WebUIDataSource* source =
-+      content::WebUIDataSource::CreateAndAdd(Profile::FromWebUI(web_ui),
-+                                             "appswap-profiles");
-+  // Allow the inline script in the page.
-+  source->OverrideContentSecurityPolicy(
-+      network::mojom::CSPDirectiveName::ScriptSrc,
-+      "script-src chrome://resources 'self' 'unsafe-inline';");
-+  source->AddResourcePath("favicon-16.png", IDR_PRODUCT_LOGO_16);
-+  source->AddResourcePath("favicon-32.png", IDR_PRODUCT_LOGO_32);
-+  // Serve the single HTML document for the root URL (both "" and "/" paths).
-+  source->SetRequestFilter(
-+      base::BindRepeating(
-+          [](const std::string& path) { return path.empty() || path == "/"; }),
-+      base::BindRepeating(
-+          [](const std::string& path,
-+             content::WebUIDataSource::GotDataCallback callback) {
-+            std::move(callback).Run(
-+                base::MakeRefCounted<base::RefCountedString>(
-+                    std::string(kProfilesHtml)));
-+          }));
-+  web_ui->AddMessageHandler(std::make_unique<AppSwapProfilesHandler>());
-+}
-+
-+AppSwapProfilesUI::~AppSwapProfilesUI() = default;
-+
-+AppSwapProfilesUIConfig::AppSwapProfilesUIConfig()
-+    : content::DefaultWebUIConfig<AppSwapProfilesUI>(content::kChromeUIScheme,
-+                                                      "appswap-profiles") {}
-diff --git a/chrome/browser/app_swap/app_swap_profiles_ui.h b/chrome/browser/app_swap/app_swap_profiles_ui.h
-new file mode 100644
-index 0000000000..62c8b9910f
---- /dev/null
-+++ b/chrome/browser/app_swap/app_swap_profiles_ui.h
-@@ -0,0 +1,29 @@
-+// Copyright 2026 The AppSwap Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILES_UI_H_
-+#define CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILES_UI_H_
-+
-+#include "content/public/browser/web_ui_controller.h"
-+#include "content/public/browser/webui_config.h"
-+
-+namespace content {
-+class WebUI;
-+}  // namespace content
-+
-+// Serves the AppSwap profile configuration UI (appswap://profiles, served as
-+// chrome://appswap-profiles).
-+class AppSwapProfilesUI : public content::WebUIController {
-+ public:
-+  explicit AppSwapProfilesUI(content::WebUI* web_ui);
-+  ~AppSwapProfilesUI() override;
-+};
-+
-+class AppSwapProfilesUIConfig
-+    : public content::DefaultWebUIConfig<AppSwapProfilesUI> {
-+ public:
-+  AppSwapProfilesUIConfig();
-+};
-+
-+#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILES_UI_H_

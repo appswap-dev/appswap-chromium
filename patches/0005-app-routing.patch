@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index 2a3958f78d..4e6f3b49ff 100644
+index 2a3958f78ddb6..4e6f3b49ffa24 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
 @@ -916,6 +916,7 @@ source_set("core") {
@@ -12,10 +12,10 @@ index 2a3958f78d..4e6f3b49ff 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000..755afe0255
+index 0000000000000..ab138e6a8e3d9
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,70 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -24,8 +24,8 @@ index 0000000000..755afe0255
 +  sources = [
 +    "app_swap_apps_service.cc",
 +    "app_swap_apps_service.h",
-+    "app_swap_apps_ui.cc",
-+    "app_swap_apps_ui.h",
++    "app_swap_apps_service_factory.cc",
++    "app_swap_apps_service_factory.h",
 +    "app_swap_artifact_provider.cc",
 +    "app_swap_artifact_provider.h",
 +    "app_swap_prefs.cc",
@@ -38,12 +38,14 @@ index 0000000000..755afe0255
 +    "app_swap_profile_session_restore_util.h",
 +    "app_swap_profiles_service.cc",
 +    "app_swap_profiles_service.h",
-+    "app_swap_profiles_ui.cc",
-+    "app_swap_profiles_ui.h",
-+    "app_swap_routes_service.cc",
-+    "app_swap_routes_service.h",
-+    "app_swap_routes_ui.cc",
-+    "app_swap_routes_ui.h",
++    "app_swap_profiles_service_factory.cc",
++    "app_swap_profiles_service_factory.h",
++    "app_swap_route_group_pin_tab_helper.cc",
++    "app_swap_route_group_pin_tab_helper.h",
++    "app_swap_route_group_service.cc",
++    "app_swap_route_group_service.h",
++    "app_swap_route_group_service_factory.cc",
++    "app_swap_route_group_service_factory.h",
 +    "app_swap_route_matcher.cc",
 +    "app_swap_route_matcher.h",
 +    "app_swap_source.h",
@@ -68,6 +70,7 @@ index 0000000000..755afe0255
 +    "//chrome/browser/sessions",
 +    "//chrome/browser/ui/browser_window",
 +    "//chrome/browser/ui/tabs",
++    "//components/keyed_service/core",
 +    "//components/prefs",
 +    "//components/sessions",
 +    "//chrome/common",
@@ -85,10 +88,10 @@ index 0000000000..755afe0255
 +}
 diff --git a/chrome/browser/app_swap/app_swap_apps_service.cc b/chrome/browser/app_swap/app_swap_apps_service.cc
 new file mode 100644
-index 0000000000..99e49927a5
+index 0000000000000..b78566461ba28
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_service.cc
-@@ -0,0 +1,213 @@
+@@ -0,0 +1,215 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -104,11 +107,10 @@ index 0000000000..99e49927a5
 +#include "base/json/json_reader.h"
 +#include "base/json/json_writer.h"
 +#include "base/no_destructor.h"
-+#include "base/path_service.h"
 +#include "base/task/thread_pool.h"
 +#include "base/uuid.h"
 +#include "base/values.h"
-+#include "chrome/common/chrome_paths.h"
++#include "content/public/browser/browser_context.h"
 +
 +namespace {
 +
@@ -122,6 +124,11 @@ index 0000000000..99e49927a5
 +  if (!app.token.empty()) {
 +    dict.Set("token", app.token);
 +  }
++  base::ListValue hosts_list;
++  for (const std::string& host : app.hosts) {
++    hosts_list.Append(host);
++  }
++  dict.Set("hosts", std::move(hosts_list));
 +  return dict;
 +}
 +
@@ -143,6 +150,13 @@ index 0000000000..99e49927a5
 +  }
 +  if (const std::string* token = dict.FindString("token")) {
 +    app.token = *token;
++  }
++  if (const base::ListValue* hosts_list = dict.FindList("hosts")) {
++    for (const base::Value& host : *hosts_list) {
++      if (const std::string* host_str = host.GetIfString()) {
++        app.hosts.push_back(*host_str);
++      }
++    }
 +  }
 +  return app;
 +}
@@ -177,21 +191,12 @@ index 0000000000..99e49927a5
 +
 +}  // namespace
 +
-+AppSwapAppsService::AppSwapAppsService() = default;
++AppSwapAppsService::AppSwapAppsService(content::BrowserContext* browser_context)
++    : profile_path_(browser_context->GetPath()) {}
 +AppSwapAppsService::~AppSwapAppsService() = default;
 +
-+// static
-+AppSwapAppsService* AppSwapAppsService::GetInstance() {
-+  static base::NoDestructor<AppSwapAppsService> instance;
-+  return instance.get();
-+}
-+
-+base::FilePath AppSwapAppsService::ConfigPath() {
-+  base::FilePath dir;
-+  if (!base::PathService::Get(chrome::DIR_USER_DATA, &dir)) {
-+    base::GetTempDir(&dir);
-+  }
-+  return dir.Append(FILE_PATH_LITERAL("AppSwap"))
++base::FilePath AppSwapAppsService::ConfigPath() const {
++  return profile_path_.Append(FILE_PATH_LITERAL("AppSwap"))
 +      .Append(FILE_PATH_LITERAL("apps.json"));
 +}
 +
@@ -304,10 +309,10 @@ index 0000000000..99e49927a5
 +}
 diff --git a/chrome/browser/app_swap/app_swap_apps_service.h b/chrome/browser/app_swap/app_swap_apps_service.h
 new file mode 100644
-index 0000000000..1a76ba1fa4
+index 0000000000000..76f9e21273f98
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_service.h
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,87 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -322,36 +327,48 @@ index 0000000000..1a76ba1fa4
 +#include "base/functional/callback.h"
 +#include "base/sequence_checker.h"
 +#include "chrome/browser/app_swap/app_swap_source.h"
++#include "components/keyed_service/core/keyed_service.h"
++
++namespace content {
++class BrowserContext;
++}  // namespace content
 +
 +// A configured app: an npm package identified by a GUID, with a display title
-+// and a version (exact version or dist-tag such as "latest").
++// and a version (exact version or dist-tag such as "latest"), plus the
++// origin(s) it's served at directly. `hosts` replaces what used to be a
++// separate AppSwapRoute entity (origin -> app_id) -- an app without any
++// serving origin isn't useful on its own, so hosting is just a property of
++// the app itself now.
 +struct AppSwapApp {
-+  std::string id;           // GUID, generated on creation.
++  std::string id;             // GUID, generated on creation.
 +  std::string title;
-+  std::string package_name;  // e.g. "@myorg/myapp"
-+  std::string version;       // exact version ("1.2.3") or dist-tag ("latest")
-+  std::string registry;      // e.g. "https://registry.npmjs.org"
-+  std::string token;         // optional bearer token for private registries
++  std::string package_name;   // e.g. "@myorg/myapp"
++  std::string version;        // exact version ("1.2.3") or dist-tag ("latest")
++  std::string registry;       // e.g. "https://registry.npmjs.org"
++  std::string token;          // optional bearer token for private registries
++  std::vector<std::string> hosts;  // e.g. "https://my-website.com" or
++                                    // "https://my-website.com/docs"
 +
 +  AppSwapSource ToSource() const {
 +    return AppSwapSource{package_name, version, registry, token};
 +  }
 +};
 +
-+// Owns the persistent app configuration, stored as JSON in the user data
-+// directory. The file is read/written on a background (MayBlock) task runner.
-+class AppSwapAppsService {
++// Owns the persistent app configuration for one Project (== Chromium
++// Profile), stored as JSON under that profile's own directory. The file is
++// read/written on a background (MayBlock) task runner. See
++// AppSwapAppsServiceFactory for how to reach the instance for a given
++// Profile.
++class AppSwapAppsService : public KeyedService {
 + public:
-+  AppSwapAppsService();
-+  ~AppSwapAppsService();
++  AppSwapAppsService(content::BrowserContext* browser_context);
++  ~AppSwapAppsService() override;
 +
 +  AppSwapAppsService(const AppSwapAppsService&) = delete;
 +  AppSwapAppsService& operator=(const AppSwapAppsService&) = delete;
 +
-+  static AppSwapAppsService* GetInstance();
-+
-+  // Loads the config from disk (on first call) and invokes |callback| with the
-+  // apps on the UI thread.
++  // Loads the config from disk (on first call) and invokes |callback| with
++  // the apps on the UI thread.
 +  void GetApps(base::OnceCallback<void(std::vector<AppSwapApp>)> callback);
 +
 +  // Returns the loaded apps synchronously, or an empty list if the config
@@ -372,8 +389,9 @@ index 0000000000..1a76ba1fa4
 +  void OnConfigLoaded(std::vector<AppSwapApp> apps);
 +  void ScheduleSave();
 +
-+  base::FilePath ConfigPath();
++  base::FilePath ConfigPath() const;
 +
++  const base::FilePath profile_path_;
 +  std::vector<AppSwapApp> apps_;
 +  bool loaded_ = false;
 +  bool loading_ = false;
@@ -382,660 +400,27 @@ index 0000000000..1a76ba1fa4
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
-diff --git a/chrome/browser/app_swap/app_swap_apps_ui.cc b/chrome/browser/app_swap/app_swap_apps_ui.cc
-new file mode 100644
-index 0000000000..655d25f1fc
---- /dev/null
-+++ b/chrome/browser/app_swap/app_swap_apps_ui.cc
-@@ -0,0 +1,596 @@
-+// Copyright 2026 The AppSwap Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "chrome/browser/app_swap/app_swap_apps_ui.h"
-+
-+#include <memory>
-+#include <string>
-+
-+#include "base/functional/bind.h"
-+#include "base/memory/ref_counted_memory.h"
-+#include "base/memory/weak_ptr.h"
-+#include "base/values.h"
-+#include "chrome/browser/app_swap/app_swap_apps_service.h"
-+#include "chrome/browser/profiles/profile.h"
-+#include "chrome/grit/theme_resources.h"
-+#include "content/public/browser/web_ui.h"
-+#include "content/public/browser/web_ui_data_source.h"
-+#include "content/public/browser/web_ui_message_handler.h"
-+#include "content/public/common/url_constants.h"
-+#include "services/network/public/mojom/content_security_policy.mojom.h"
-+
-+namespace {
-+
-+constexpr char kDefaultRegistry[] = "https://registry.npmjs.org";
-+
-+constexpr char kAppsHtml[] = R"html(<!doctype html>
-+<html>
-+<head>
-+<title>AppSwap Apps</title>
-+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
-+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-+<meta charset="utf-8">
-+<style>
-+  :root {
-+    --bg: #f6f6f8;
-+    --surface: #ffffff;
-+    --border: #e3e3e8;
-+    --text: #1e1e24;
-+    --text-muted: #6c6c78;
-+    --primary: #4f46e5;
-+    --primary-hover: #4338ca;
-+    --danger: #dc2626;
-+    --danger-bg: #fef2f2;
-+    --shadow: 0 1px 2px rgba(20, 20, 30, 0.04), 0 2px 10px rgba(20, 20, 30, 0.05);
-+    --shadow-hover: 0 6px 20px rgba(20, 20, 30, 0.10);
-+    --radius: 14px;
-+  }
-+  @media (prefers-color-scheme: dark) {
-+    :root {
-+      --bg: #19191d;
-+      --surface: #222227;
-+      --border: #34343c;
-+      --text: #eceef0;
-+      --text-muted: #9a9aa4;
-+      --primary: #6366f1;
-+      --primary-hover: #818cf8;
-+      --danger: #f87171;
-+      --danger-bg: #3a1d1d;
-+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 10px rgba(0, 0, 0, 0.3);
-+      --shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.4);
-+    }
-+  }
-+  * { box-sizing: border-box; }
-+  body {
-+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
-+    background: var(--bg);
-+    color: var(--text);
-+    margin: 0;
-+    padding: 2rem clamp(1.25rem, 4vw, 3rem) 3rem;
-+  }
-+  header {
-+    display: flex;
-+    align-items: center;
-+    justify-content: space-between;
-+    gap: 1rem;
-+    margin-bottom: 1.75rem;
-+  }
-+  h1 {
-+    font-size: 1.35rem;
-+    margin: 0;
-+    display: flex;
-+    align-items: center;
-+    gap: 0.5rem;
-+  }
-+  h1 .count {
-+    font-weight: 400;
-+    color: var(--text-muted);
-+    font-size: 0.95rem;
-+  }
-+  .titlebar { display: flex; align-items: center; gap: 1.25rem; }
-+  nav.tabs { display: flex; gap: 0.25rem; }
-+  nav.tabs a {
-+    color: var(--text-muted);
-+    text-decoration: none;
-+    font-size: 0.88rem;
-+    font-weight: 600;
-+    padding: 0.4rem 0.7rem;
-+    border-radius: 7px;
-+  }
-+  nav.tabs a:hover { background: var(--surface); color: var(--text); }
-+  nav.tabs a.active { background: var(--surface); color: var(--primary); box-shadow: var(--shadow); }
-+  button { font: inherit; }
-+  .btn-primary {
-+    background: var(--primary);
-+    color: #fff;
-+    border: none;
-+    padding: 0.55rem 1.1rem;
-+    border-radius: 9px;
-+    font-size: 0.9rem;
-+    font-weight: 600;
-+    cursor: pointer;
-+    display: inline-flex;
-+    align-items: center;
-+    gap: 0.4rem;
-+    transition: background 0.12s ease;
-+  }
-+  .btn-primary:hover { background: var(--primary-hover); }
-+  .grid {
-+    display: grid;
-+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-+    gap: 1rem;
-+  }
-+  .card {
-+    background: var(--surface);
-+    border: 1px solid var(--border);
-+    border-radius: var(--radius);
-+    padding: 1.1rem;
-+    box-shadow: var(--shadow);
-+    display: flex;
-+    flex-direction: column;
-+    gap: 0.7rem;
-+    transition: transform 0.12s ease, box-shadow 0.12s ease;
-+  }
-+  .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
-+  .card-top { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
-+  .icon {
-+    width: 42px;
-+    height: 42px;
-+    border-radius: 11px;
-+    display: flex;
-+    align-items: center;
-+    justify-content: center;
-+    color: #fff;
-+    font-weight: 700;
-+    font-size: 1.1rem;
-+    flex-shrink: 0;
-+  }
-+  .card-heading { min-width: 0; }
-+  .card-title {
-+    font-weight: 600;
-+    font-size: 0.98rem;
-+    overflow: hidden;
-+    text-overflow: ellipsis;
-+    white-space: nowrap;
-+  }
-+  .card-package {
-+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-+    font-size: 0.78rem;
-+    color: var(--text-muted);
-+    overflow: hidden;
-+    text-overflow: ellipsis;
-+    white-space: nowrap;
-+  }
-+  .meta { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-+  .badge {
-+    font-size: 0.72rem;
-+    padding: 0.15rem 0.55rem;
-+    border-radius: 999px;
-+    background: var(--bg);
-+    border: 1px solid var(--border);
-+    color: var(--text-muted);
-+    max-width: 100%;
-+    overflow: hidden;
-+    text-overflow: ellipsis;
-+    white-space: nowrap;
-+  }
-+  .card-actions {
-+    margin-top: auto;
-+    display: flex;
-+    gap: 0.25rem;
-+    justify-content: flex-end;
-+    padding-top: 0.5rem;
-+    border-top: 1px solid var(--border);
-+  }
-+  .icon-btn {
-+    background: transparent;
-+    border: none;
-+    color: var(--text-muted);
-+    cursor: pointer;
-+    padding: 0.35rem 0.6rem;
-+    border-radius: 7px;
-+    font-size: 0.82rem;
-+  }
-+  .icon-btn:hover { background: var(--bg); color: var(--text); }
-+  .icon-btn.danger:hover { background: var(--danger-bg); color: var(--danger); }
-+  .empty {
-+    text-align: center;
-+    padding: 5rem 1rem;
-+    color: var(--text-muted);
-+  }
-+  .empty .glyph { font-size: 2.5rem; margin-bottom: 0.75rem; }
-+  .empty p { margin: 0 0 1.25rem; }
-+
-+  dialog {
-+    border: none;
-+    border-radius: var(--radius);
-+    padding: 0;
-+    background: var(--surface);
-+    color: var(--text);
-+    width: min(28rem, 92vw);
-+    box-shadow: var(--shadow-hover);
-+  }
-+  dialog::backdrop { background: rgba(20, 20, 30, 0.45); }
-+  .dialog-body { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
-+  .dialog-body h2 { margin: 0; font-size: 1.1rem; }
-+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
-+  .field label { font-size: 0.82rem; color: var(--text-muted); font-weight: 600; }
-+  .field input {
-+    padding: 0.5rem 0.6rem;
-+    font-size: 0.9rem;
-+    border: 1px solid var(--border);
-+    border-radius: 8px;
-+    background: var(--bg);
-+    color: var(--text);
-+  }
-+  .field input:focus {
-+    outline: none;
-+    border-color: var(--primary);
-+  }
-+  .dialog-actions {
-+    display: flex;
-+    justify-content: flex-end;
-+    gap: 0.5rem;
-+    margin-top: 0.25rem;
-+  }
-+  .btn-secondary {
-+    background: transparent;
-+    border: 1px solid var(--border);
-+    color: var(--text);
-+    padding: 0.5rem 1rem;
-+    border-radius: 8px;
-+    cursor: pointer;
-+    font-size: 0.9rem;
-+  }
-+  .btn-secondary:hover { background: var(--bg); }
-+</style>
-+</head>
-+<body>
-+  <header>
-+    <div class="titlebar">
-+      <h1>Apps <span class="count" id="count"></span></h1>
-+      <nav class="tabs">
-+        <a href="appswap://apps" class="active">Apps</a>
-+        <a href="appswap://routes">Routes</a>
-+        <a href="appswap://profiles">Profiles</a>
-+      </nav>
-+    </div>
-+    <button class="btn-primary" id="openAdd" type="button">+ Add app</button>
-+  </header>
-+  <div id="content"></div>
-+
-+  <dialog id="dialog">
-+    <form class="dialog-body" id="form" method="dialog">
-+      <h2 id="dialogTitle">Add app</h2>
-+      <div class="field">
-+        <label for="title">Title</label>
-+        <input id="title" placeholder="My App" required>
-+      </div>
-+      <div class="field">
-+        <label for="package">Package</label>
-+        <input id="package" placeholder="@myorg/myapp" required>
-+      </div>
-+      <div class="field">
-+        <label for="version">Version or dist-tag</label>
-+        <input id="version" placeholder="latest" required>
-+      </div>
-+      <div class="field">
-+        <label for="registry">Registry</label>
-+        <input id="registry" placeholder="https://registry.npmjs.org" value="https://registry.npmjs.org">
-+      </div>
-+      <div class="dialog-actions">
-+        <button class="btn-secondary" id="cancel" type="button">Cancel</button>
-+        <button class="btn-primary" id="save" type="submit">Add app</button>
-+      </div>
-+    </form>
-+  </dialog>
-+
-+  <script>
-+    let editingId = null;
-+    const field = (id) => document.getElementById(id);
-+    const dialog = field('dialog');
-+
-+    const PALETTE = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444',
-+                      '#8b5cf6', '#ec4899', '#14b8a6'];
-+    function colorFor(text) {
-+      let hash = 0;
-+      for (let i = 0; i < text.length; i++) {
-+        hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
-+      }
-+      return PALETTE[hash % PALETTE.length];
-+    }
-+    function hostnameOf(url) {
-+      try {
-+        return new URL(url).hostname;
-+      } catch (e) {
-+        return url;
-+      }
-+    }
-+    function initialOf(title) {
-+      return (title.trim()[0] || '?').toUpperCase();
-+    }
-+
-+    function render(apps) {
-+      const content = field('content');
-+      content.replaceChildren();
-+      field('count').textContent = apps.length ? '(' + apps.length + ')' : '';
-+
-+      if (!apps.length) {
-+        const empty = document.createElement('div');
-+        empty.className = 'empty';
-+        empty.innerHTML = '<div class="glyph">&#128230;</div>' +
-+            '<p>No apps configured yet.</p>';
-+        const btn = document.createElement('button');
-+        btn.className = 'btn-primary';
-+        btn.type = 'button';
-+        btn.textContent = '+ Add your first app';
-+        btn.addEventListener('click', openAddDialog);
-+        empty.appendChild(btn);
-+        content.appendChild(empty);
-+        return;
-+      }
-+
-+      const grid = document.createElement('div');
-+      grid.className = 'grid';
-+      for (const app of apps) {
-+        grid.appendChild(buildCard(app));
-+      }
-+      content.appendChild(grid);
-+    }
-+
-+    function buildCard(app) {
-+      const card = document.createElement('div');
-+      card.className = 'card';
-+
-+      const top = document.createElement('div');
-+      top.className = 'card-top';
-+
-+      const icon = document.createElement('div');
-+      icon.className = 'icon';
-+      icon.style.background = colorFor(app.package || app.title);
-+      icon.textContent = initialOf(app.title);
-+
-+      const heading = document.createElement('div');
-+      heading.className = 'card-heading';
-+      const title = document.createElement('div');
-+      title.className = 'card-title';
-+      title.textContent = app.title;
-+      title.title = app.title;
-+      const pkg = document.createElement('div');
-+      pkg.className = 'card-package';
-+      pkg.textContent = app.package;
-+      pkg.title = app.package;
-+      heading.appendChild(title);
-+      heading.appendChild(pkg);
-+
-+      top.appendChild(icon);
-+      top.appendChild(heading);
-+
-+      const meta = document.createElement('div');
-+      meta.className = 'meta';
-+      const versionBadge = document.createElement('span');
-+      versionBadge.className = 'badge';
-+      versionBadge.textContent = app.version;
-+      const registryBadge = document.createElement('span');
-+      registryBadge.className = 'badge';
-+      registryBadge.textContent = hostnameOf(app.registry);
-+      registryBadge.title = app.registry;
-+      meta.appendChild(versionBadge);
-+      meta.appendChild(registryBadge);
-+
-+      const actions = document.createElement('div');
-+      actions.className = 'card-actions';
-+      const editBtn = document.createElement('button');
-+      editBtn.className = 'icon-btn';
-+      editBtn.type = 'button';
-+      editBtn.textContent = 'Edit';
-+      editBtn.addEventListener('click', () => openEditDialog(app));
-+      const rmBtn = document.createElement('button');
-+      rmBtn.className = 'icon-btn danger';
-+      rmBtn.type = 'button';
-+      rmBtn.textContent = 'Remove';
-+      rmBtn.addEventListener('click', () => {
-+        if (confirm('Remove "' + app.title + '"?')) {
-+          chrome.send('removeApp', [app.id]);
-+        }
-+      });
-+      actions.appendChild(editBtn);
-+      actions.appendChild(rmBtn);
-+
-+      card.appendChild(top);
-+      card.appendChild(meta);
-+      card.appendChild(actions);
-+      return card;
-+    }
-+
-+    function openAddDialog() {
-+      editingId = null;
-+      field('dialogTitle').textContent = 'Add app';
-+      field('save').textContent = 'Add app';
-+      field('title').value = '';
-+      field('package').value = '';
-+      field('version').value = '';
-+      field('registry').value = 'https://registry.npmjs.org';
-+      dialog.showModal();
-+      field('title').focus();
-+    }
-+
-+    function openEditDialog(app) {
-+      editingId = app.id;
-+      field('dialogTitle').textContent = 'Edit app';
-+      field('save').textContent = 'Save';
-+      field('title').value = app.title;
-+      field('package').value = app.package;
-+      field('version').value = app.version;
-+      field('registry').value = app.registry || 'https://registry.npmjs.org';
-+      dialog.showModal();
-+      field('title').focus();
-+    }
-+
-+    field('openAdd').addEventListener('click', openAddDialog);
-+    field('cancel').addEventListener('click', () => dialog.close());
-+
-+    field('form').addEventListener('submit', (event) => {
-+      event.preventDefault();
-+      const title = field('title').value.trim();
-+      const pkg = field('package').value.trim();
-+      const version = field('version').value.trim();
-+      const registry = field('registry').value.trim() || 'https://registry.npmjs.org';
-+      if (!title || !pkg || !version) return;
-+      if (editingId) {
-+        chrome.send('updateApp', [editingId, title, pkg, version, registry]);
-+      } else {
-+        chrome.send('addApp', [title, pkg, version, registry]);
-+      }
-+      dialog.close();
-+    });
-+
-+    window.setApps = render;
-+    chrome.send('getApps');
-+  </script>
-+</body>
-+</html>
-+)html";
-+
-+class AppSwapAppsHandler : public content::WebUIMessageHandler {
-+ public:
-+  void RegisterMessages() override {
-+    web_ui()->RegisterMessageCallback(
-+        "getApps", base::BindRepeating(&AppSwapAppsHandler::HandleGetApps,
-+                                       base::Unretained(this)));
-+    web_ui()->RegisterMessageCallback(
-+        "addApp", base::BindRepeating(&AppSwapAppsHandler::HandleAddApp,
-+                                      base::Unretained(this)));
-+    web_ui()->RegisterMessageCallback(
-+        "updateApp", base::BindRepeating(&AppSwapAppsHandler::HandleUpdateApp,
-+                                         base::Unretained(this)));
-+    web_ui()->RegisterMessageCallback(
-+        "removeApp", base::BindRepeating(&AppSwapAppsHandler::HandleRemoveApp,
-+                                         base::Unretained(this)));
-+  }
-+
-+ private:
-+  void SendApps() {
-+    AppSwapAppsService::GetInstance()->GetApps(base::BindOnce(
-+        &AppSwapAppsHandler::OnAppsLoaded, weak_factory_.GetWeakPtr()));
-+  }
-+
-+  void OnAppsLoaded(std::vector<AppSwapApp> apps) {
-+    base::ListValue list;
-+    for (const AppSwapApp& app : apps) {
-+      base::DictValue dict;
-+      dict.Set("id", app.id);
-+      dict.Set("title", app.title);
-+      dict.Set("package", app.package_name);
-+      dict.Set("version", app.version);
-+      dict.Set("registry", app.registry);
-+      list.Append(std::move(dict));
-+    }
-+    CallJavascriptFunction("setApps", list);
-+  }
-+
-+  void HandleGetApps(const base::ListValue& args) {
-+    AllowJavascript();
-+    SendApps();
-+  }
-+
-+  void HandleAddApp(const base::ListValue& args) {
-+    AllowJavascript();
-+    if (args.size() < 4) {
-+      return;
-+    }
-+    const std::string* title = args[0].GetIfString();
-+    const std::string* package = args[1].GetIfString();
-+    const std::string* version = args[2].GetIfString();
-+    const std::string* registry = args[3].GetIfString();
-+    if (!title || !package || !version) {
-+      return;
-+    }
-+
-+    AppSwapApp app;
-+    app.title = *title;
-+    app.package_name = *package;
-+    app.version = *version;
-+    app.registry = registry && !registry->empty() ? *registry : kDefaultRegistry;
-+    AppSwapAppsService::GetInstance()->AddApp(std::move(app));
-+    SendApps();
-+  }
-+
-+  void HandleUpdateApp(const base::ListValue& args) {
-+    AllowJavascript();
-+    if (args.size() < 5) {
-+      return;
-+    }
-+    const std::string* id = args[0].GetIfString();
-+    const std::string* title = args[1].GetIfString();
-+    const std::string* package = args[2].GetIfString();
-+    const std::string* version = args[3].GetIfString();
-+    const std::string* registry = args[4].GetIfString();
-+    if (!id || !title || !package || !version) {
-+      return;
-+    }
-+
-+    AppSwapApp app;
-+    app.id = *id;
-+    app.title = *title;
-+    app.package_name = *package;
-+    app.version = *version;
-+    app.registry = registry && !registry->empty() ? *registry : kDefaultRegistry;
-+    AppSwapAppsService::GetInstance()->UpdateApp(std::move(app));
-+    SendApps();
-+  }
-+
-+  void HandleRemoveApp(const base::ListValue& args) {
-+    AllowJavascript();
-+    if (args.empty()) {
-+      return;
-+    }
-+    const std::string* id = args[0].GetIfString();
-+    if (!id) {
-+      return;
-+    }
-+    AppSwapAppsService::GetInstance()->RemoveApp(*id);
-+    SendApps();
-+  }
-+
-+  base::WeakPtrFactory<AppSwapAppsHandler> weak_factory_{this};
-+};
-+
-+}  // namespace
-+
-+AppSwapAppsUI::AppSwapAppsUI(content::WebUI* web_ui)
-+    : content::WebUIController(web_ui) {
-+  // Lets this page's renderer navigate directly to appswap:// links (e.g. the
-+  // nav tabs), which ChildProcessSecurityPolicy would otherwise block as an
-+  // unrequestable scheme even though it's just an alias rewritten to this
-+  // same chrome:// page.
-+  web_ui->AddRequestableScheme(content::kAppSwapUIScheme);
-+  content::WebUIDataSource* source =
-+      content::WebUIDataSource::CreateAndAdd(Profile::FromWebUI(web_ui),
-+                                             "appswap-apps");
-+  // Allow the inline script in the page.
-+  source->OverrideContentSecurityPolicy(
-+      network::mojom::CSPDirectiveName::ScriptSrc,
-+      "script-src chrome://resources 'self' 'unsafe-inline';");
-+  source->AddResourcePath("favicon-16.png", IDR_PRODUCT_LOGO_16);
-+  source->AddResourcePath("favicon-32.png", IDR_PRODUCT_LOGO_32);
-+  // Serve the single HTML document for the root URL (both "" and "/" paths).
-+  source->SetRequestFilter(
-+      base::BindRepeating(
-+          [](const std::string& path) { return path.empty() || path == "/"; }),
-+      base::BindRepeating(
-+          [](const std::string& path,
-+             content::WebUIDataSource::GotDataCallback callback) {
-+            std::move(callback).Run(
-+                base::MakeRefCounted<base::RefCountedString>(
-+                    std::string(kAppsHtml)));
-+          }));
-+  web_ui->AddMessageHandler(std::make_unique<AppSwapAppsHandler>());
-+}
-+
-+AppSwapAppsUI::~AppSwapAppsUI() = default;
-+
-+AppSwapAppsUIConfig::AppSwapAppsUIConfig()
-+    : content::DefaultWebUIConfig<AppSwapAppsUI>(content::kChromeUIScheme,
-+                                                 "appswap-apps") {}
-diff --git a/chrome/browser/app_swap/app_swap_apps_ui.h b/chrome/browser/app_swap/app_swap_apps_ui.h
-new file mode 100644
-index 0000000000..3f7310edb0
---- /dev/null
-+++ b/chrome/browser/app_swap/app_swap_apps_ui.h
-@@ -0,0 +1,28 @@
-+// Copyright 2026 The AppSwap Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_UI_H_
-+#define CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_UI_H_
-+
-+#include "content/public/browser/web_ui_controller.h"
-+#include "content/public/browser/webui_config.h"
-+
-+namespace content {
-+class WebUI;
-+}  // namespace content
-+
-+// Serves the AppSwap apps catalog (appswap://apps, served as
-+// chrome://appswap-apps).
-+class AppSwapAppsUI : public content::WebUIController {
-+ public:
-+  explicit AppSwapAppsUI(content::WebUI* web_ui);
-+  ~AppSwapAppsUI() override;
-+};
-+
-+class AppSwapAppsUIConfig : public content::DefaultWebUIConfig<AppSwapAppsUI> {
-+ public:
-+  AppSwapAppsUIConfig();
-+};
-+
-+#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_UI_H_
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.cc b/chrome/browser/app_swap/app_swap_artifact_provider.cc
 new file mode 100644
-index 0000000000..3308209f92
+index 0000000000000..01a8501a93e64
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.cc
-@@ -0,0 +1,494 @@
+@@ -0,0 +1,549 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
 +
++#include <algorithm>
 +#include <memory>
 +#include <optional>
 +#include <string>
 +#include <utility>
++#include <vector>
 +
 +#include "base/compiler_specific.h"
++#include "base/files/file_enumerator.h"
 +#include "base/files/file_path.h"
 +#include "base/files/file_util.h"
 +#include "base/functional/bind.h"
@@ -1045,6 +430,7 @@ index 0000000000..3308209f92
 +#include "base/strings/string_util.h"
 +#include "base/task/thread_pool.h"
 +#include "base/values.h"
++#include "chrome/browser/app_swap/app_swap_version_utils.h"
 +#include "chrome/browser/net/system_network_context_manager.h"
 +#include "chrome/common/chrome_paths.h"
 +#include "net/base/net_errors.h"
@@ -1099,6 +485,34 @@ index 0000000000..3308209f92
 +    }
 +  }
 +  return base::StrCat({source.registry, "/", encoded});
++}
++
++base::FilePath PackageDir(const AppSwapSource& source) {
++  base::FilePath apps_dir;
++  if (!base::PathService::Get(chrome::DIR_USER_DATA, &apps_dir)) {
++    base::GetTempDir(&apps_dir);
++  }
++  return apps_dir.AppendASCII("AppSwapApps")
++      .Append(base::FilePath::FromUTF8Unsafe(source.package_name));
++}
++
++base::FilePath TargetDir(const AppSwapSource& source,
++                         const std::string& version) {
++  return PackageDir(source).Append(base::FilePath::FromUTF8Unsafe(version));
++}
++
++// Blocking; must run off the UI thread. Each subdirectory of a package's
++// cache directory is an extracted version (see TargetDir()).
++std::vector<std::string> ListCachedVersionsBlocking(base::FilePath package_dir) {
++  std::vector<std::string> versions;
++  base::FileEnumerator enumerator(package_dir, /*recursive=*/false,
++                                  base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath name = enumerator.Next(); !name.empty();
++       name = enumerator.Next()) {
++    versions.push_back(name.BaseName().AsUTF8Unsafe());
++  }
++  std::sort(versions.begin(), versions.end(), &app_swap::IsNewerVersion);
++  return versions;
 +}
 +
 +// Extracts a ustar-format tar archive into `dest_dir`. Returns false on error
@@ -1246,9 +660,30 @@ index 0000000000..3308209f92
 +  }
 +
 +  if (IsExactVersion(source.version)) {
-+    DownloadTarball(source, source.version, TarballUrl(source, source.version),
-+                    base::BindOnce(&AppSwapArtifactProvider::Finish,
-+                                   base::Unretained(this), source));
++    // Check disk before the network: an exact version that's already been
++    // extracted (from an earlier session, or resolved under a since-moved
++    // dist-tag) doesn't need re-downloading, and -- more importantly --
++    // this is what lets a currently-displayed tab keep working (via the
++    // fallback in AppSwapProxyingURLLoaderFactory's ServeAfterResolve) when
++    // the registry is unreachable.
++    const base::FilePath target_dir = TargetDir(source, source.version);
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&base::PathExists, target_dir),
++        base::BindOnce(
++            [](AppSwapArtifactProvider* self, AppSwapSource source,
++               base::FilePath target_dir, bool exists) {
++              if (exists) {
++                self->Finish(source, target_dir);
++                return;
++              }
++              self->DownloadTarball(
++                  source, source.version,
++                  TarballUrl(source, source.version),
++                  base::BindOnce(&AppSwapArtifactProvider::Finish,
++                                 base::Unretained(self), source));
++            },
++            base::Unretained(this), source, target_dir));
 +  } else {
 +    FetchMetadata(
 +        source, &loaders_,
@@ -1367,6 +802,16 @@ index 0000000000..3308209f92
 +          base::Unretained(this), key, std::move(callback)));
 +}
 +
++void AppSwapArtifactProvider::GetCachedVersions(
++    const AppSwapSource& source,
++    base::OnceCallback<void(std::vector<std::string>)> callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&ListCachedVersionsBlocking, PackageDir(source)),
++      std::move(callback));
++}
++
 +void AppSwapArtifactProvider::FetchMetadata(
 +    const AppSwapSource& source,
 +    std::map<std::string, std::unique_ptr<network::SimpleURLLoader>>*
@@ -1430,15 +875,7 @@ index 0000000000..3308209f92
 +    const std::string& version,
 +    const std::string& tarball_url,
 +    base::OnceCallback<void(base::FilePath)> callback) {
-+  // Resolve the cache directory for this exact version.
-+  base::FilePath apps_dir;
-+  if (!base::PathService::Get(chrome::DIR_USER_DATA, &apps_dir)) {
-+    base::GetTempDir(&apps_dir);
-+  }
-+  const base::FilePath target_dir =
-+      apps_dir.AppendASCII("AppSwapApps")
-+          .Append(base::FilePath::FromUTF8Unsafe(source.package_name))
-+          .Append(base::FilePath::FromUTF8Unsafe(version));
++  const base::FilePath target_dir = TargetDir(source, version);
 +
 +  auto resource_request = std::make_unique<network::ResourceRequest>();
 +  resource_request->url = GURL(tarball_url);
@@ -1520,10 +957,10 @@ index 0000000000..3308209f92
 +}
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.h b/chrome/browser/app_swap/app_swap_artifact_provider.h
 new file mode 100644
-index 0000000000..d1614cfc56
+index 0000000000000..e031b808837e0
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.h
-@@ -0,0 +1,158 @@
+@@ -0,0 +1,169 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1631,6 +1068,17 @@ index 0000000000..d1614cfc56
 +      base::OnceCallback<void(std::optional<AppSwapPackageMetadata>)>
 +          callback);
 +
++  // Lists the exact versions of `source.package_name` already extracted on
++  // disk, newest first, regardless of dist-tag or in-memory cache state.
++  // Used to offer a fallback when the registry is unreachable and a
++  // navigation has no other version to fall back to. `callback` gets an
++  // empty list if none are cached (including if the package has never been
++  // downloaded at all). Must be called on the UI thread; `callback` runs on
++  // the UI thread.
++  void GetCachedVersions(
++      const AppSwapSource& source,
++      base::OnceCallback<void(std::vector<std::string>)> callback);
++
 + private:
 +  // `loader_map` is the map to keep the in-flight SimpleURLLoader alive in
 +  // (and erase it from on completion) -- callers pick which one so an
@@ -1684,19 +1132,23 @@ index 0000000000..d1614cfc56
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ARTIFACT_PROVIDER_H_
 diff --git a/chrome/browser/app_swap/app_swap_route_matcher.cc b/chrome/browser/app_swap/app_swap_route_matcher.cc
 new file mode 100644
-index 0000000000..b1aee4726c
+index 0000000000000..023bd88bd7086
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_matcher.cc
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,117 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
 +
++#include <string>
 +#include <string_view>
 +
++#include "base/strings/strcat.h"
 +#include "base/strings/string_util.h"
++#include "chrome/browser/app_swap/app_swap_apps_service_factory.h"
++#include "chrome/browser/app_swap/app_swap_route_group_service_factory.h"
 +#include "url/gurl.h"
 +
 +bool AppSwapUrlMatchesPattern(const GURL& url, const std::string& url_pattern) {
@@ -1720,36 +1172,93 @@ index 0000000000..b1aee4726c
 +         url_path[pattern_path.size()] == '/';
 +}
 +
-+const AppSwapRoute* FindAppSwapRouteForUrl(const GURL& url) {
-+  for (const AppSwapRoute& route :
-+       AppSwapRoutesService::GetInstance()->GetRoutesIfLoaded()) {
-+    if (AppSwapUrlMatchesPattern(url, route.url_pattern)) {
-+      return &route;
++GURL ComputeAppSwapRewriteUrl(const GURL& url,
++                              const std::string& url_pattern,
++                              const std::string& target) {
++  const GURL pattern_url(url_pattern);
++  const GURL target_url(target);
++
++  const std::string_view pattern_path = pattern_url.path();
++  const std::string_view url_path = url.path();
++  // Mirrors AppSwapUrlMatchesPattern()'s treatment of an empty/root pattern
++  // path as matching (and thus contributing) the whole request path.
++  std::string_view suffix;
++  if (pattern_path.empty() || pattern_path == "/") {
++    suffix = url_path;
++  } else if (url_path.size() > pattern_path.size()) {
++    suffix = url_path.substr(pattern_path.size());
++  }
++
++  std::string_view target_path = target_url.path();
++  std::string new_path;
++  if (!target_path.empty() && !suffix.empty() && target_path.back() == '/' &&
++      suffix.front() == '/') {
++    // Avoid a doubled slash where the target path and the suffix both
++    // supply one at the join point (e.g. target "/api/" + suffix "/users").
++    new_path = base::StrCat({target_path, suffix.substr(1)});
++  } else {
++    new_path = base::StrCat({target_path, suffix});
++  }
++
++  const std::string query(url.query());
++  GURL::Replacements replacements;
++  replacements.SetPathStr(new_path);
++  if (url.has_query()) {
++    replacements.SetQueryStr(query);
++  } else {
++    replacements.ClearQuery();
++  }
++  return target_url.ReplaceComponents(replacements);
++}
++
++const AppSwapRouteGroupRule* FindAppSwapRouteGroupRuleForUrl(
++    const AppSwapRouteGroup* group,
++    const GURL& url) {
++  if (!group) {
++    return nullptr;
++  }
++  for (const AppSwapRouteGroupRule& rule : group->rules) {
++    if (AppSwapUrlMatchesPattern(url, rule.url_pattern)) {
++      return &rule;
 +    }
 +  }
 +  return nullptr;
 +}
 +
-+const AppSwapApp* FindAppSwapAppById(const std::string& app_id) {
++const AppSwapRouteGroup* FindAppSwapRouteGroupById(
++    Profile* profile,
++    const std::string& group_id) {
++  for (const AppSwapRouteGroup& group :
++       AppSwapRouteGroupServiceFactory::GetForProfile(profile)
++           ->GetRouteGroupsIfLoaded()) {
++    if (group.id == group_id) {
++      return &group;
++    }
++  }
++  return nullptr;
++}
++
++const AppSwapApp* FindAppSwapAppForUrl(Profile* profile, const GURL& url) {
 +  for (const AppSwapApp& app :
-+       AppSwapAppsService::GetInstance()->GetAppsIfLoaded()) {
-+    if (app.id == app_id) {
-+      return &app;
++       AppSwapAppsServiceFactory::GetForProfile(profile)->GetAppsIfLoaded()) {
++    for (const std::string& host : app.hosts) {
++      if (AppSwapUrlMatchesPattern(url, host)) {
++        return &app;
++      }
 +    }
 +  }
 +  return nullptr;
 +}
 +
-+bool IsAppSwapRoutedPage(const GURL& url) {
-+  const AppSwapRoute* route = FindAppSwapRouteForUrl(url);
-+  return route && FindAppSwapAppById(route->app_id);
++bool IsAppSwapRoutedPage(Profile* profile, const GURL& url) {
++  return FindAppSwapAppForUrl(profile, url) != nullptr;
 +}
 diff --git a/chrome/browser/app_swap/app_swap_route_matcher.h b/chrome/browser/app_swap/app_swap_route_matcher.h
 new file mode 100644
-index 0000000000..770d08ea53
+index 0000000000000..07d5cc19a8365
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_matcher.h
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,58 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1760,9 +1269,10 @@ index 0000000000..770d08ea53
 +#include <string>
 +
 +#include "chrome/browser/app_swap/app_swap_apps_service.h"
-+#include "chrome/browser/app_swap/app_swap_routes_service.h"
++#include "chrome/browser/app_swap/app_swap_route_group_service.h"
 +
 +class GURL;
++class Profile;
 +
 +// Returns whether `url` falls under `url_pattern`: same scheme/host/port, and
 +// `url`'s path is equal to or nested under the pattern's path (so
@@ -1772,942 +1282,44 @@ index 0000000000..770d08ea53
 +// "https://my-website.com" never matches "https://my-website.com.evil.com".
 +bool AppSwapUrlMatchesPattern(const GURL& url, const std::string& url_pattern);
 +
-+// Finds the first configured route whose pattern matches `url`, or nullptr.
-+// Only consults already-loaded routes; see
-+// AppSwapRoutesService::GetRoutesIfLoaded.
-+const AppSwapRoute* FindAppSwapRouteForUrl(const GURL& url);
-+
-+// Finds the app with the given id among already-loaded apps, or nullptr; see
++// Finds the first app configured in `profile` whose `hosts` matches `url`, or
++// nullptr. Only consults already-loaded apps; see
 +// AppSwapAppsService::GetAppsIfLoaded.
-+const AppSwapApp* FindAppSwapAppById(const std::string& app_id);
++const AppSwapApp* FindAppSwapAppForUrl(Profile* profile, const GURL& url);
 +
-+// Whether `url` is currently served by a configured AppSwap route (an npm
-+// package swapped in for some other origin), regardless of `url`'s own
-+// scheme.
-+bool IsAppSwapRoutedPage(const GURL& url);
++// For a `url_pattern` that AppSwapUrlMatchesPattern() has already matched
++// against `url` (see AppSwapRouteGroupRule), returns the URL to actually
++// request: `target` with the portion of `url`'s path beyond `url_pattern`'s
++// own path appended, plus `url`'s original query string. Behavior is
++// unspecified if `url_pattern` didn't actually match `url`.
++GURL ComputeAppSwapRewriteUrl(const GURL& url,
++                              const std::string& url_pattern,
++                              const std::string& target);
++
++// Finds the first rule in `group` whose pattern matches `url`, or nullptr.
++// `group` may be null (e.g. no route group pinned for the requesting tab),
++// in which case this always returns nullptr -- no group pinned means no
++// rewriting, same as an explicit empty group.
++const AppSwapRouteGroupRule* FindAppSwapRouteGroupRuleForUrl(
++    const AppSwapRouteGroup* group,
++    const GURL& url);
++
++// Finds the route group with the given id configured in `profile`, or
++// nullptr. Only consults already-loaded groups; see
++// AppSwapRouteGroupService::GetRouteGroupsIfLoaded.
++const AppSwapRouteGroup* FindAppSwapRouteGroupById(
++    Profile* profile,
++    const std::string& group_id);
++
++// Whether `url` is currently served by a configured AppSwap app (an npm
++// package swapped in for some other origin) in `profile`, regardless of
++// `url`'s own scheme.
++bool IsAppSwapRoutedPage(Profile* profile, const GURL& url);
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_MATCHER_H_
-diff --git a/chrome/browser/app_swap/app_swap_routes_service.cc b/chrome/browser/app_swap/app_swap_routes_service.cc
-new file mode 100644
-index 0000000000..07ae514bd8
---- /dev/null
-+++ b/chrome/browser/app_swap/app_swap_routes_service.cc
-@@ -0,0 +1,201 @@
-+// Copyright 2026 The AppSwap Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "chrome/browser/app_swap/app_swap_routes_service.h"
-+
-+#include <optional>
-+#include <string>
-+#include <utility>
-+
-+#include "base/files/file_util.h"
-+#include "base/functional/bind.h"
-+#include "base/json/json_reader.h"
-+#include "base/json/json_writer.h"
-+#include "base/no_destructor.h"
-+#include "base/path_service.h"
-+#include "base/task/thread_pool.h"
-+#include "base/uuid.h"
-+#include "base/values.h"
-+#include "chrome/common/chrome_paths.h"
-+
-+namespace {
-+
-+base::DictValue RouteToDict(const AppSwapRoute& route) {
-+  base::DictValue dict;
-+  dict.Set("id", route.id);
-+  dict.Set("url_pattern", route.url_pattern);
-+  dict.Set("app_id", route.app_id);
-+  return dict;
-+}
-+
-+std::optional<AppSwapRoute> RouteFromDict(const base::DictValue& dict) {
-+  const std::string* id = dict.FindString("id");
-+  const std::string* url_pattern = dict.FindString("url_pattern");
-+  const std::string* app_id = dict.FindString("app_id");
-+  if (!id || !url_pattern || !app_id) {
-+    return std::nullopt;
-+  }
-+  AppSwapRoute route;
-+  route.id = *id;
-+  route.url_pattern = *url_pattern;
-+  route.app_id = *app_id;
-+  return route;
-+}
-+
-+// Reads and parses the config file. Runs on a MayBlock task runner.
-+std::vector<AppSwapRoute> ReadConfigFile(const base::FilePath& path) {
-+  std::vector<AppSwapRoute> routes;
-+  std::string json;
-+  if (!base::ReadFileToString(path, &json)) {
-+    return routes;
-+  }
-+  std::optional<base::DictValue> parsed =
-+      base::JSONReader::ReadDict(json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
-+  if (!parsed) {
-+    return routes;
-+  }
-+  const base::ListValue* routes_list = parsed->FindList("routes");
-+  if (!routes_list) {
-+    return routes;
-+  }
-+  for (size_t i = 0; i < routes_list->size(); ++i) {
-+    const base::Value& value = (*routes_list)[i];
-+    if (!value.is_dict()) {
-+      continue;
-+    }
-+    if (std::optional<AppSwapRoute> route = RouteFromDict(value.GetDict())) {
-+      routes.push_back(std::move(*route));
-+    }
-+  }
-+  return routes;
-+}
-+
-+}  // namespace
-+
-+AppSwapRoutesService::AppSwapRoutesService() = default;
-+AppSwapRoutesService::~AppSwapRoutesService() = default;
-+
-+// static
-+AppSwapRoutesService* AppSwapRoutesService::GetInstance() {
-+  static base::NoDestructor<AppSwapRoutesService> instance;
-+  return instance.get();
-+}
-+
-+base::FilePath AppSwapRoutesService::ConfigPath() {
-+  base::FilePath dir;
-+  if (!base::PathService::Get(chrome::DIR_USER_DATA, &dir)) {
-+    base::GetTempDir(&dir);
-+  }
-+  return dir.Append(FILE_PATH_LITERAL("AppSwap"))
-+      .Append(FILE_PATH_LITERAL("routes.json"));
-+}
-+
-+void AppSwapRoutesService::GetRoutes(
-+    base::OnceCallback<void(std::vector<AppSwapRoute>)> callback) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+
-+  if (loaded_) {
-+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-+        FROM_HERE, base::BindOnce(std::move(callback), routes_));
-+    return;
-+  }
-+
-+  pending_load_.push_back(base::BindOnce(
-+      [](AppSwapRoutesService* self,
-+         base::OnceCallback<void(std::vector<AppSwapRoute>)> callback) {
-+        self->GetRoutes(std::move(callback));
-+      },
-+      base::Unretained(this), std::move(callback)));
-+
-+  if (loading_) {
-+    return;
-+  }
-+  loading_ = true;
-+
-+  base::ThreadPool::PostTaskAndReplyWithResult(
-+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-+      base::BindOnce(&ReadConfigFile, ConfigPath()),
-+      base::BindOnce(&AppSwapRoutesService::OnConfigLoaded,
-+                     base::Unretained(this)));
-+}
-+
-+const std::vector<AppSwapRoute>& AppSwapRoutesService::GetRoutesIfLoaded()
-+    const {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  static const base::NoDestructor<std::vector<AppSwapRoute>> kEmpty;
-+  return loaded_ ? routes_ : *kEmpty;
-+}
-+
-+void AppSwapRoutesService::OnConfigLoaded(std::vector<AppSwapRoute> routes) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  routes_ = std::move(routes);
-+  loaded_ = true;
-+  loading_ = false;
-+
-+  std::vector<base::OnceClosure> pending = std::move(pending_load_);
-+  pending_load_.clear();
-+  for (base::OnceClosure& callback : pending) {
-+    std::move(callback).Run();
-+  }
-+}
-+
-+void AppSwapRoutesService::AddRoute(AppSwapRoute route) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
-+  if (route.id.empty()) {
-+    route.id = base::Uuid::GenerateRandomV4().AsLowercaseString();
-+  }
-+  routes_.push_back(std::move(route));
-+  ScheduleSave();
-+}
-+
-+void AppSwapRoutesService::UpdateRoute(AppSwapRoute route) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
-+  for (AppSwapRoute& existing : routes_) {
-+    if (existing.id == route.id) {
-+      existing = std::move(route);
-+      ScheduleSave();
-+      return;
-+    }
-+  }
-+}
-+
-+void AppSwapRoutesService::RemoveRoute(const std::string& id) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
-+  for (auto it = routes_.begin(); it != routes_.end(); ++it) {
-+    if (it->id == id) {
-+      routes_.erase(it);
-+      ScheduleSave();
-+      return;
-+    }
-+  }
-+}
-+
-+void AppSwapRoutesService::ScheduleSave() {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+
-+  base::DictValue root;
-+  base::ListValue routes_list;
-+  for (const AppSwapRoute& route : routes_) {
-+    routes_list.Append(RouteToDict(route));
-+  }
-+  root.Set("routes", std::move(routes_list));
-+
-+  std::string json;
-+  if (!base::JSONWriter::Write(root, &json)) {
-+    return;
-+  }
-+
-+  const base::FilePath path = ConfigPath();
-+  base::ThreadPool::PostTask(
-+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-+      base::BindOnce(
-+          [](base::FilePath path, std::string json) {
-+            base::CreateDirectory(path.DirName());
-+            base::WriteFile(path, json);
-+          },
-+          std::move(path), std::move(json)));
-+}
-diff --git a/chrome/browser/app_swap/app_swap_routes_service.h b/chrome/browser/app_swap/app_swap_routes_service.h
-new file mode 100644
-index 0000000000..f065478b13
---- /dev/null
-+++ b/chrome/browser/app_swap/app_swap_routes_service.h
-@@ -0,0 +1,67 @@
-+// Copyright 2026 The AppSwap Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_SERVICE_H_
-+#define CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_SERVICE_H_
-+
-+#include <string>
-+#include <vector>
-+
-+#include "base/files/file_path.h"
-+#include "base/functional/callback.h"
-+#include "base/sequence_checker.h"
-+
-+// A configured route: requests whose URL matches `url_pattern` (an origin,
-+// optionally with a path prefix) are served from the app identified by
-+// `app_id` instead of the network.
-+struct AppSwapRoute {
-+  std::string id;           // GUID, generated on creation.
-+  std::string url_pattern;  // e.g. "https://my-website.com" or
-+                             // "https://my-website.com/docs"
-+  std::string app_id;       // -> AppSwapApp.id
-+};
-+
-+// Owns the persistent route configuration, stored as JSON in the user data
-+// directory. Mirrors AppSwapAppsService: the file is read/written on a
-+// background (MayBlock) task runner.
-+class AppSwapRoutesService {
-+ public:
-+  AppSwapRoutesService();
-+  ~AppSwapRoutesService();
-+
-+  AppSwapRoutesService(const AppSwapRoutesService&) = delete;
-+  AppSwapRoutesService& operator=(const AppSwapRoutesService&) = delete;
-+
-+  static AppSwapRoutesService* GetInstance();
-+
-+  // Loads the config from disk (on first call) and invokes |callback| with
-+  // the routes on the UI thread.
-+  void GetRoutes(base::OnceCallback<void(std::vector<AppSwapRoute>)> callback);
-+
-+  // Returns the loaded routes synchronously, or an empty list if the config
-+  // hasn't finished loading yet. See AppSwapAppsService::GetAppsIfLoaded for
-+  // why this exists alongside GetRoutes().
-+  const std::vector<AppSwapRoute>& GetRoutesIfLoaded() const;
-+
-+  // Mutations. Must only be called after the config has been loaded (i.e.
-+  // after a GetRoutes callback has run). They update the in-memory list and
-+  // schedule an asynchronous save.
-+  void AddRoute(AppSwapRoute route);
-+  void UpdateRoute(AppSwapRoute route);
-+  void RemoveRoute(const std::string& id);
-+
-+ private:
-+  void OnConfigLoaded(std::vector<AppSwapRoute> routes);
-+  void ScheduleSave();
-+
-+  base::FilePath ConfigPath();
-+
-+  std::vector<AppSwapRoute> routes_;
-+  bool loaded_ = false;
-+  bool loading_ = false;
-+  std::vector<base::OnceClosure> pending_load_;
-+  SEQUENCE_CHECKER(sequence_checker_);
-+};
-+
-+#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_SERVICE_H_
-diff --git a/chrome/browser/app_swap/app_swap_routes_ui.cc b/chrome/browser/app_swap/app_swap_routes_ui.cc
-new file mode 100644
-index 0000000000..a4b99164cb
---- /dev/null
-+++ b/chrome/browser/app_swap/app_swap_routes_ui.cc
-@@ -0,0 +1,597 @@
-+// Copyright 2026 The AppSwap Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "chrome/browser/app_swap/app_swap_routes_ui.h"
-+
-+#include <memory>
-+#include <string>
-+#include <utility>
-+#include <vector>
-+
-+#include "base/functional/bind.h"
-+#include "base/memory/ref_counted_memory.h"
-+#include "base/memory/weak_ptr.h"
-+#include "base/values.h"
-+#include "chrome/browser/app_swap/app_swap_apps_service.h"
-+#include "chrome/browser/app_swap/app_swap_routes_service.h"
-+#include "chrome/browser/profiles/profile.h"
-+#include "chrome/grit/theme_resources.h"
-+#include "content/public/browser/web_ui.h"
-+#include "content/public/browser/web_ui_data_source.h"
-+#include "content/public/browser/web_ui_message_handler.h"
-+#include "content/public/common/url_constants.h"
-+#include "services/network/public/mojom/content_security_policy.mojom.h"
-+
-+namespace {
-+
-+constexpr char kRoutesHtml[] = R"html(<!doctype html>
-+<html>
-+<head>
-+<title>AppSwap Routes</title>
-+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
-+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-+<meta charset="utf-8">
-+<style>
-+  :root {
-+    --bg: #f6f6f8;
-+    --surface: #ffffff;
-+    --border: #e3e3e8;
-+    --text: #1e1e24;
-+    --text-muted: #6c6c78;
-+    --primary: #4f46e5;
-+    --primary-hover: #4338ca;
-+    --danger: #dc2626;
-+    --danger-bg: #fef2f2;
-+    --shadow: 0 1px 2px rgba(20, 20, 30, 0.04), 0 2px 10px rgba(20, 20, 30, 0.05);
-+    --shadow-hover: 0 6px 20px rgba(20, 20, 30, 0.10);
-+    --radius: 14px;
-+  }
-+  @media (prefers-color-scheme: dark) {
-+    :root {
-+      --bg: #19191d;
-+      --surface: #222227;
-+      --border: #34343c;
-+      --text: #eceef0;
-+      --text-muted: #9a9aa4;
-+      --primary: #6366f1;
-+      --primary-hover: #818cf8;
-+      --danger: #f87171;
-+      --danger-bg: #3a1d1d;
-+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 10px rgba(0, 0, 0, 0.3);
-+      --shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.4);
-+    }
-+  }
-+  * { box-sizing: border-box; }
-+  body {
-+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
-+    background: var(--bg);
-+    color: var(--text);
-+    margin: 0;
-+    padding: 2rem clamp(1.25rem, 4vw, 3rem) 3rem;
-+  }
-+  header {
-+    display: flex;
-+    align-items: center;
-+    justify-content: space-between;
-+    gap: 1rem;
-+    margin-bottom: 1.75rem;
-+  }
-+  .titlebar { display: flex; align-items: center; gap: 1.25rem; }
-+  h1 {
-+    font-size: 1.35rem;
-+    margin: 0;
-+    display: flex;
-+    align-items: center;
-+    gap: 0.5rem;
-+  }
-+  h1 .count {
-+    font-weight: 400;
-+    color: var(--text-muted);
-+    font-size: 0.95rem;
-+  }
-+  nav.tabs { display: flex; gap: 0.25rem; }
-+  nav.tabs a {
-+    color: var(--text-muted);
-+    text-decoration: none;
-+    font-size: 0.88rem;
-+    font-weight: 600;
-+    padding: 0.4rem 0.7rem;
-+    border-radius: 7px;
-+  }
-+  nav.tabs a:hover { background: var(--surface); color: var(--text); }
-+  nav.tabs a.active { background: var(--surface); color: var(--primary); box-shadow: var(--shadow); }
-+  button { font: inherit; }
-+  .btn-primary {
-+    background: var(--primary);
-+    color: #fff;
-+    border: none;
-+    padding: 0.55rem 1.1rem;
-+    border-radius: 9px;
-+    font-size: 0.9rem;
-+    font-weight: 600;
-+    cursor: pointer;
-+    display: inline-flex;
-+    align-items: center;
-+    gap: 0.4rem;
-+    transition: background 0.12s ease;
-+  }
-+  .btn-primary:hover { background: var(--primary-hover); }
-+  .grid {
-+    display: grid;
-+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-+    gap: 1rem;
-+  }
-+  .card {
-+    background: var(--surface);
-+    border: 1px solid var(--border);
-+    border-radius: var(--radius);
-+    padding: 1.1rem;
-+    box-shadow: var(--shadow);
-+    display: flex;
-+    flex-direction: column;
-+    gap: 0.7rem;
-+    transition: transform 0.12s ease, box-shadow 0.12s ease;
-+  }
-+  .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
-+  .route-pattern {
-+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-+    font-size: 0.9rem;
-+    font-weight: 600;
-+    overflow: hidden;
-+    text-overflow: ellipsis;
-+    white-space: nowrap;
-+  }
-+  .route-arrow { color: var(--text-muted); font-size: 0.85rem; display: flex; align-items: center; gap: 0.4rem; }
-+  .meta { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-+  .badge {
-+    font-size: 0.72rem;
-+    padding: 0.15rem 0.55rem;
-+    border-radius: 999px;
-+    background: var(--bg);
-+    border: 1px solid var(--border);
-+    color: var(--text-muted);
-+    max-width: 100%;
-+    overflow: hidden;
-+    text-overflow: ellipsis;
-+    white-space: nowrap;
-+  }
-+  .badge.missing { color: var(--danger); border-color: var(--danger); background: var(--danger-bg); }
-+  .card-actions {
-+    margin-top: auto;
-+    display: flex;
-+    gap: 0.25rem;
-+    justify-content: flex-end;
-+    padding-top: 0.5rem;
-+    border-top: 1px solid var(--border);
-+  }
-+  .icon-btn {
-+    background: transparent;
-+    border: none;
-+    color: var(--text-muted);
-+    cursor: pointer;
-+    padding: 0.35rem 0.6rem;
-+    border-radius: 7px;
-+    font-size: 0.82rem;
-+  }
-+  .icon-btn:hover { background: var(--bg); color: var(--text); }
-+  .icon-btn.danger:hover { background: var(--danger-bg); color: var(--danger); }
-+  .empty {
-+    text-align: center;
-+    padding: 5rem 1rem;
-+    color: var(--text-muted);
-+  }
-+  .empty .glyph { font-size: 2.5rem; margin-bottom: 0.75rem; }
-+  .empty p { margin: 0 0 1.25rem; }
-+  .empty a { color: var(--primary); }
-+
-+  dialog {
-+    border: none;
-+    border-radius: var(--radius);
-+    padding: 0;
-+    background: var(--surface);
-+    color: var(--text);
-+    width: min(28rem, 92vw);
-+    box-shadow: var(--shadow-hover);
-+  }
-+  dialog::backdrop { background: rgba(20, 20, 30, 0.45); }
-+  .dialog-body { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
-+  .dialog-body h2 { margin: 0; font-size: 1.1rem; }
-+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
-+  .field label { font-size: 0.82rem; color: var(--text-muted); font-weight: 600; }
-+  .field input, .field select {
-+    padding: 0.5rem 0.6rem;
-+    font-size: 0.9rem;
-+    border: 1px solid var(--border);
-+    border-radius: 8px;
-+    background: var(--bg);
-+    color: var(--text);
-+  }
-+  .field input:focus, .field select:focus {
-+    outline: none;
-+    border-color: var(--primary);
-+  }
-+  .preview {
-+    font-size: 0.8rem;
-+    color: var(--text-muted);
-+    background: var(--bg);
-+    border: 1px solid var(--border);
-+    border-radius: 8px;
-+    padding: 0.5rem 0.6rem;
-+  }
-+  .dialog-actions {
-+    display: flex;
-+    justify-content: flex-end;
-+    gap: 0.5rem;
-+    margin-top: 0.25rem;
-+  }
-+  .btn-secondary {
-+    background: transparent;
-+    border: 1px solid var(--border);
-+    color: var(--text);
-+    padding: 0.5rem 1rem;
-+    border-radius: 8px;
-+    cursor: pointer;
-+    font-size: 0.9rem;
-+  }
-+  .btn-secondary:hover { background: var(--bg); }
-+</style>
-+</head>
-+<body>
-+  <header>
-+    <div class="titlebar">
-+      <h1>Routes <span class="count" id="count"></span></h1>
-+      <nav class="tabs">
-+        <a href="appswap://apps">Apps</a>
-+        <a href="appswap://routes" class="active">Routes</a>
-+        <a href="appswap://profiles">Profiles</a>
-+      </nav>
-+    </div>
-+    <button class="btn-primary" id="openAdd" type="button">+ Add route</button>
-+  </header>
-+  <div id="content"></div>
-+
-+  <dialog id="dialog">
-+    <form class="dialog-body" id="form" method="dialog">
-+      <h2 id="dialogTitle">Add route</h2>
-+      <div class="field">
-+        <label for="urlPattern">URL pattern</label>
-+        <input id="urlPattern" placeholder="https://my-website.com" required>
-+      </div>
-+      <div class="field">
-+        <label for="appId">App</label>
-+        <select id="appId" required></select>
-+      </div>
-+      <div class="preview" id="preview"></div>
-+      <div class="dialog-actions">
-+        <button class="btn-secondary" id="cancel" type="button">Cancel</button>
-+        <button class="btn-primary" id="save" type="submit">Add route</button>
-+      </div>
-+    </form>
-+  </dialog>
-+
-+  <script>
-+    let editingId = null;
-+    let apps = [];
-+    let routes = [];
-+    const field = (id) => document.getElementById(id);
-+    const dialog = field('dialog');
-+
-+    function appById(id) {
-+      return apps.find((app) => app.id === id);
-+    }
-+
-+    function hostnameOf(url) {
-+      try {
-+        return new URL(url).hostname;
-+      } catch (e) {
-+        return url;
-+      }
-+    }
-+
-+    function renderAppOptions() {
-+      const select = field('appId');
-+      select.replaceChildren();
-+      for (const app of apps) {
-+        const option = document.createElement('option');
-+        option.value = app.id;
-+        option.textContent = app.title + ' (' + app.package + ')';
-+        select.appendChild(option);
-+      }
-+    }
-+
-+    function updatePreview() {
-+      const app = appById(field('appId').value);
-+      field('preview').textContent = app
-+          ? 'Serves ' + app.package + '@' + app.version + ' from ' + hostnameOf(app.registry)
-+          : apps.length ? 'Select an app.' : 'No apps configured yet — add one on the Apps page first.';
-+    }
-+
-+    function render() {
-+      const content = field('content');
-+      content.replaceChildren();
-+      field('count').textContent = routes.length ? '(' + routes.length + ')' : '';
-+
-+      if (!routes.length) {
-+        const empty = document.createElement('div');
-+        empty.className = 'empty';
-+        empty.innerHTML = '<div class="glyph">&#128279;</div>' +
-+            '<p>No routes configured yet.</p>';
-+        const btn = document.createElement('button');
-+        btn.className = 'btn-primary';
-+        btn.type = 'button';
-+        btn.textContent = '+ Add your first route';
-+        btn.addEventListener('click', openAddDialog);
-+        empty.appendChild(btn);
-+        content.appendChild(empty);
-+        return;
-+      }
-+
-+      const grid = document.createElement('div');
-+      grid.className = 'grid';
-+      for (const route of routes) {
-+        grid.appendChild(buildCard(route));
-+      }
-+      content.appendChild(grid);
-+    }
-+
-+    function buildCard(route) {
-+      const app = appById(route.app_id);
-+      const card = document.createElement('div');
-+      card.className = 'card';
-+
-+      const pattern = document.createElement('div');
-+      pattern.className = 'route-pattern';
-+      pattern.textContent = route.url_pattern;
-+      pattern.title = route.url_pattern;
-+
-+      const arrow = document.createElement('div');
-+      arrow.className = 'route-arrow';
-+      arrow.textContent = '→ serves';
-+
-+      const meta = document.createElement('div');
-+      meta.className = 'meta';
-+      const appBadge = document.createElement('span');
-+      if (app) {
-+        appBadge.className = 'badge';
-+        appBadge.textContent = app.title;
-+        appBadge.title = app.package + '@' + app.version;
-+      } else {
-+        appBadge.className = 'badge missing';
-+        appBadge.textContent = 'app not found';
-+      }
-+      meta.appendChild(appBadge);
-+
-+      const actions = document.createElement('div');
-+      actions.className = 'card-actions';
-+      const editBtn = document.createElement('button');
-+      editBtn.className = 'icon-btn';
-+      editBtn.type = 'button';
-+      editBtn.textContent = 'Edit';
-+      editBtn.addEventListener('click', () => openEditDialog(route));
-+      const rmBtn = document.createElement('button');
-+      rmBtn.className = 'icon-btn danger';
-+      rmBtn.type = 'button';
-+      rmBtn.textContent = 'Remove';
-+      rmBtn.addEventListener('click', () => {
-+        if (confirm('Remove route "' + route.url_pattern + '"?')) {
-+          chrome.send('removeRoute', [route.id]);
-+        }
-+      });
-+      actions.appendChild(editBtn);
-+      actions.appendChild(rmBtn);
-+
-+      card.appendChild(pattern);
-+      card.appendChild(arrow);
-+      card.appendChild(meta);
-+      card.appendChild(actions);
-+      return card;
-+    }
-+
-+    function openAddDialog() {
-+      editingId = null;
-+      field('dialogTitle').textContent = 'Add route';
-+      field('save').textContent = 'Add route';
-+      field('urlPattern').value = '';
-+      renderAppOptions();
-+      if (apps.length) field('appId').value = apps[0].id;
-+      updatePreview();
-+      dialog.showModal();
-+      field('urlPattern').focus();
-+    }
-+
-+    function openEditDialog(route) {
-+      editingId = route.id;
-+      field('dialogTitle').textContent = 'Edit route';
-+      field('save').textContent = 'Save';
-+      field('urlPattern').value = route.url_pattern;
-+      renderAppOptions();
-+      field('appId').value = route.app_id;
-+      updatePreview();
-+      dialog.showModal();
-+      field('urlPattern').focus();
-+    }
-+
-+    field('openAdd').addEventListener('click', openAddDialog);
-+    field('cancel').addEventListener('click', () => dialog.close());
-+    field('appId').addEventListener('change', updatePreview);
-+
-+    field('form').addEventListener('submit', (event) => {
-+      event.preventDefault();
-+      const urlPattern = field('urlPattern').value.trim();
-+      const appId = field('appId').value;
-+      if (!urlPattern || !appId) return;
-+      if (editingId) {
-+        chrome.send('updateRoute', [editingId, urlPattern, appId]);
-+      } else {
-+        chrome.send('addRoute', [urlPattern, appId]);
-+      }
-+      dialog.close();
-+    });
-+
-+    window.setData = (data) => {
-+      apps = data.apps;
-+      routes = data.routes;
-+      render();
-+    };
-+    chrome.send('getData');
-+  </script>
-+</body>
-+</html>
-+)html";
-+
-+class AppSwapRoutesHandler : public content::WebUIMessageHandler {
-+ public:
-+  void RegisterMessages() override {
-+    web_ui()->RegisterMessageCallback(
-+        "getData", base::BindRepeating(&AppSwapRoutesHandler::HandleGetData,
-+                                       base::Unretained(this)));
-+    web_ui()->RegisterMessageCallback(
-+        "addRoute", base::BindRepeating(&AppSwapRoutesHandler::HandleAddRoute,
-+                                        base::Unretained(this)));
-+    web_ui()->RegisterMessageCallback(
-+        "updateRoute",
-+        base::BindRepeating(&AppSwapRoutesHandler::HandleUpdateRoute,
-+                            base::Unretained(this)));
-+    web_ui()->RegisterMessageCallback(
-+        "removeRoute",
-+        base::BindRepeating(&AppSwapRoutesHandler::HandleRemoveRoute,
-+                            base::Unretained(this)));
-+  }
-+
-+ private:
-+  void SendData() {
-+    AppSwapAppsService::GetInstance()->GetApps(base::BindOnce(
-+        &AppSwapRoutesHandler::OnAppsLoaded, weak_factory_.GetWeakPtr()));
-+  }
-+
-+  void OnAppsLoaded(std::vector<AppSwapApp> apps) {
-+    AppSwapRoutesService::GetInstance()->GetRoutes(
-+        base::BindOnce(&AppSwapRoutesHandler::OnRoutesLoaded,
-+                       weak_factory_.GetWeakPtr(), std::move(apps)));
-+  }
-+
-+  void OnRoutesLoaded(std::vector<AppSwapApp> apps,
-+                      std::vector<AppSwapRoute> routes) {
-+    base::ListValue apps_list;
-+    for (const AppSwapApp& app : apps) {
-+      base::DictValue dict;
-+      dict.Set("id", app.id);
-+      dict.Set("title", app.title);
-+      dict.Set("package", app.package_name);
-+      dict.Set("version", app.version);
-+      dict.Set("registry", app.registry);
-+      apps_list.Append(std::move(dict));
-+    }
-+
-+    base::ListValue routes_list;
-+    for (const AppSwapRoute& route : routes) {
-+      base::DictValue dict;
-+      dict.Set("id", route.id);
-+      dict.Set("url_pattern", route.url_pattern);
-+      dict.Set("app_id", route.app_id);
-+      routes_list.Append(std::move(dict));
-+    }
-+
-+    base::DictValue data;
-+    data.Set("apps", std::move(apps_list));
-+    data.Set("routes", std::move(routes_list));
-+    CallJavascriptFunction("setData", data);
-+  }
-+
-+  void HandleGetData(const base::ListValue& args) {
-+    AllowJavascript();
-+    SendData();
-+  }
-+
-+  void HandleAddRoute(const base::ListValue& args) {
-+    AllowJavascript();
-+    if (args.size() < 2) {
-+      return;
-+    }
-+    const std::string* url_pattern = args[0].GetIfString();
-+    const std::string* app_id = args[1].GetIfString();
-+    if (!url_pattern || !app_id) {
-+      return;
-+    }
-+
-+    AppSwapRoute route;
-+    route.url_pattern = *url_pattern;
-+    route.app_id = *app_id;
-+    AppSwapRoutesService::GetInstance()->AddRoute(std::move(route));
-+    SendData();
-+  }
-+
-+  void HandleUpdateRoute(const base::ListValue& args) {
-+    AllowJavascript();
-+    if (args.size() < 3) {
-+      return;
-+    }
-+    const std::string* id = args[0].GetIfString();
-+    const std::string* url_pattern = args[1].GetIfString();
-+    const std::string* app_id = args[2].GetIfString();
-+    if (!id || !url_pattern || !app_id) {
-+      return;
-+    }
-+
-+    AppSwapRoute route;
-+    route.id = *id;
-+    route.url_pattern = *url_pattern;
-+    route.app_id = *app_id;
-+    AppSwapRoutesService::GetInstance()->UpdateRoute(std::move(route));
-+    SendData();
-+  }
-+
-+  void HandleRemoveRoute(const base::ListValue& args) {
-+    AllowJavascript();
-+    if (args.empty()) {
-+      return;
-+    }
-+    const std::string* id = args[0].GetIfString();
-+    if (!id) {
-+      return;
-+    }
-+    AppSwapRoutesService::GetInstance()->RemoveRoute(*id);
-+    SendData();
-+  }
-+
-+  base::WeakPtrFactory<AppSwapRoutesHandler> weak_factory_{this};
-+};
-+
-+}  // namespace
-+
-+AppSwapRoutesUI::AppSwapRoutesUI(content::WebUI* web_ui)
-+    : content::WebUIController(web_ui) {
-+  // Lets this page's renderer navigate directly to appswap:// links (e.g. the
-+  // nav tabs), which ChildProcessSecurityPolicy would otherwise block as an
-+  // unrequestable scheme even though it's just an alias rewritten to this
-+  // same chrome:// page.
-+  web_ui->AddRequestableScheme(content::kAppSwapUIScheme);
-+  content::WebUIDataSource* source =
-+      content::WebUIDataSource::CreateAndAdd(Profile::FromWebUI(web_ui),
-+                                             "appswap-routes");
-+  // Allow the inline script in the page.
-+  source->OverrideContentSecurityPolicy(
-+      network::mojom::CSPDirectiveName::ScriptSrc,
-+      "script-src chrome://resources 'self' 'unsafe-inline';");
-+  source->AddResourcePath("favicon-16.png", IDR_PRODUCT_LOGO_16);
-+  source->AddResourcePath("favicon-32.png", IDR_PRODUCT_LOGO_32);
-+  // Serve the single HTML document for the root URL (both "" and "/" paths).
-+  source->SetRequestFilter(
-+      base::BindRepeating(
-+          [](const std::string& path) { return path.empty() || path == "/"; }),
-+      base::BindRepeating(
-+          [](const std::string& path,
-+             content::WebUIDataSource::GotDataCallback callback) {
-+            std::move(callback).Run(
-+                base::MakeRefCounted<base::RefCountedString>(
-+                    std::string(kRoutesHtml)));
-+          }));
-+  web_ui->AddMessageHandler(std::make_unique<AppSwapRoutesHandler>());
-+}
-+
-+AppSwapRoutesUI::~AppSwapRoutesUI() = default;
-+
-+AppSwapRoutesUIConfig::AppSwapRoutesUIConfig()
-+    : content::DefaultWebUIConfig<AppSwapRoutesUI>(content::kChromeUIScheme,
-+                                                   "appswap-routes") {}
-diff --git a/chrome/browser/app_swap/app_swap_routes_ui.h b/chrome/browser/app_swap/app_swap_routes_ui.h
-new file mode 100644
-index 0000000000..e2d91642c7
---- /dev/null
-+++ b/chrome/browser/app_swap/app_swap_routes_ui.h
-@@ -0,0 +1,29 @@
-+// Copyright 2026 The AppSwap Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_UI_H_
-+#define CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_UI_H_
-+
-+#include "content/public/browser/web_ui_controller.h"
-+#include "content/public/browser/webui_config.h"
-+
-+namespace content {
-+class WebUI;
-+}  // namespace content
-+
-+// Serves the AppSwap route configuration UI (appswap://routes, served as
-+// chrome://appswap-routes).
-+class AppSwapRoutesUI : public content::WebUIController {
-+ public:
-+  explicit AppSwapRoutesUI(content::WebUI* web_ui);
-+  ~AppSwapRoutesUI() override;
-+};
-+
-+class AppSwapRoutesUIConfig
-+    : public content::DefaultWebUIConfig<AppSwapRoutesUI> {
-+ public:
-+  AppSwapRoutesUIConfig();
-+};
-+
-+#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTES_UI_H_
 diff --git a/chrome/browser/app_swap/app_swap_source.h b/chrome/browser/app_swap/app_swap_source.h
 new file mode 100644
-index 0000000000..707f425096
+index 0000000000000..707f425096a7c
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_source.h
 @@ -0,0 +1,18 @@
@@ -2731,10 +1343,10 @@ index 0000000000..707f425096
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000..88ff587393
+index 0000000000000..57340fe2f6f83
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,428 @@
+@@ -0,0 +1,950 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2746,6 +1358,7 @@ index 0000000000..88ff587393
 +#include <string>
 +#include <string_view>
 +#include <utility>
++#include <vector>
 +
 +#include "base/files/file.h"
 +#include "base/files/file_path.h"
@@ -2754,29 +1367,49 @@ index 0000000000..88ff587393
 +#include "base/functional/callback_helpers.h"
 +#include "base/memory/self_deleting.h"
 +#include "base/no_destructor.h"
++#include "base/strings/escape.h"
 +#include "base/strings/string_number_conversions.h"
 +#include "base/task/thread_pool.h"
 +#include "chrome/browser/app_swap/app_swap_apps_service.h"
++#include "chrome/browser/app_swap/app_swap_apps_service_factory.h"
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
++#include "chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h"
++#include "chrome/browser/app_swap/app_swap_route_group_service.h"
++#include "chrome/browser/app_swap/app_swap_route_group_service_factory.h"
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
-+#include "chrome/browser/app_swap/app_swap_routes_service.h"
 +#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_update_checker.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
++#include "chrome/browser/net/system_network_context_manager.h"
++#include "chrome/browser/profiles/profile.h"
++#include "content/public/browser/browser_context.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/navigation_entry.h"
 +#include "content/public/browser/render_frame_host.h"
 +#include "content/public/browser/web_contents.h"
++#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 +#include "mojo/public/cpp/system/data_pipe.h"
 +#include "mojo/public/cpp/system/data_pipe_producer.h"
 +#include "mojo/public/cpp/system/file_data_source.h"
++#include "mojo/public/cpp/system/string_data_source.h"
++#include "net/base/isolation_info.h"
 +#include "net/base/mime_util.h"
 +#include "net/base/net_errors.h"
++#include "net/base/url_util.h"
++#include "net/cookies/site_for_cookies.h"
 +#include "net/http/http_request_headers.h"
 +#include "net/http/http_response_headers.h"
++#include "net/url_request/redirect_info.h"
 +#include "services/network/public/cpp/parsed_headers.h"
 +#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
++#include "services/network/public/cpp/url_loader_completion_status.h"
++#include "services/network/public/mojom/early_hints.mojom.h"
 +#include "services/network/public/mojom/url_loader.mojom.h"
++#include "services/network/public/mojom/url_loader_factory.mojom.h"
 +#include "services/network/public/mojom/url_response_head.mojom.h"
 +#include "url/gurl.h"
++#include "url/origin.h"
 +
 +namespace {
 +
@@ -3010,10 +1643,333 @@ index 0000000000..88ff587393
 +                     accepts_html, std::move(loader), std::move(client)));
 +}
 +
-+// Continuation after an npm artifact is resolved (downloaded + extracted).
-+void ServeAfterResolve(
++// A URLLoader+URLLoaderClient pair for a matched AppSwapRewriteRule: fetches
++// `request_` (the rewritten URL) via a cloned real network factory and
++// relays the response back to the original client verbatim -- a proper
++// reverse proxy at the network level, so the renderer/DevTools only ever
++// see ONE request/response, for the *original* URL, never the rewritten
++// one. (An earlier attempt issued a real HTTP redirect to the rewritten URL
++// instead -- necessary to avoid a site-isolation cross-origin rejection
++// when just swapping network::ResourceRequest::url and forwarding directly,
++// since a navigation's renderer process/SiteInstance is already selected
++// based on the *original* URL before this factory ever runs -- but a
++// redirect inherently surfaces the rewritten URL as a second, visible
++// request, which isn't what a reverse proxy is supposed to look like. This
++// class avoids that: it makes its own outbound request from the browser
++// process using the system network context -- like
++// AppSwapArtifactProvider's tarball/metadata fetches do, and *not* a clone
++// of the frame's own scoped `target_factory_` -- so there's neither a
++// renderer-visible cross-origin hop for site isolation to react to, nor any
++// dependency on whatever trust boundaries (NetworkIsolationKey, CORS
++// assumptions, etc.) that per-frame factory carries for the *original*
++// URL's origin, which have no reason to permit fetching a completely
++// different origin (confirmed by testing: cloning and using
++// `target_factory_` for the rewritten URL fails outright).
++class AppSwapRewriteProxyLoader : public network::mojom::URLLoader,
++                                  public network::mojom::URLLoaderClient {
++ public:
++  AppSwapRewriteProxyLoader(
++      int32_t request_id,
++      uint32_t options,
++      network::ResourceRequest rewritten_request,
++      mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
++      : client_(std::move(client)),
++        request_id_(request_id),
++        // kURLLoadOptionBlockLocalRequest is a safety net the renderer sets
++        // on ordinary cross-origin fetches to stop a public-looking page
++        // from reaching a local/private address (Local Network Access). It
++        // must not carry over here: after the rewrite, this fetch's actual
++        // target is often a local address on purpose (e.g. a route group
++        // pointing at localhost for a dev backend), issued by this trusted
++        // browser-process proxy rather than the renderer directly -- kept
++        // set, every such rewrite would fail with ERR_BLOCKED_BY_CLIENT
++        // (confirmed by testing).
++        options_(options & ~network::mojom::kURLLoadOptionBlockLocalRequest),
++        request_(std::move(rewritten_request)),
++        traffic_annotation_(traffic_annotation) {
++    scoped_refptr<network::SharedURLLoaderFactory> factory =
++        SystemNetworkContextManager::GetInstance()->GetSharedURLLoaderFactory();
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client_remote;
++    client_receiver_.Bind(client_remote.InitWithNewPipeAndPassReceiver());
++    factory->CreateLoaderAndStart(
++        target_loader_.BindNewPipeAndPassReceiver(), request_id_, options_,
++        request_, std::move(client_remote), traffic_annotation_);
++  }
++
++  AppSwapRewriteProxyLoader(const AppSwapRewriteProxyLoader&) = delete;
++  AppSwapRewriteProxyLoader& operator=(const AppSwapRewriteProxyLoader&) =
++      delete;
++
++  ~AppSwapRewriteProxyLoader() override = default;
++
++  // network::mojom::URLLoader (downstream: what the original caller, e.g.
++  // the navigation loader, controls):
++  void FollowRedirect(
++      network::HttpRequestHeadersUpdateParams headers_update_params,
++      const std::optional<GURL>& new_url) override {
++    if (target_loader_) {
++      target_loader_->FollowRedirect(std::move(headers_update_params), new_url);
++    }
++  }
++  void SetPriority(net::RequestPriority priority,
++                   int32_t intra_priority_value) override {
++    if (target_loader_) {
++      target_loader_->SetPriority(priority, intra_priority_value);
++    }
++  }
++
++  // network::mojom::URLLoaderClient (upstream: what the cloned real
++  // factory's loader for the rewritten URL calls back into):
++  void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override {
++    client_->OnReceiveEarlyHints(std::move(early_hints));
++  }
++  void OnReceiveResponse(
++      network::mojom::URLResponseHeadPtr head,
++      mojo::ScopedDataPipeConsumerHandle body,
++      std::optional<mojo_base::BigBuffer> cached_metadata) override {
++    client_->OnReceiveResponse(std::move(head), std::move(body),
++                               std::move(cached_metadata));
++  }
++  void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
++                         network::mojom::URLResponseHeadPtr head) override {
++    // The rewritten target itself redirected somewhere; relay it as-is
++    // rather than trying to keep it hidden behind the original URL -- doing
++    // that properly would mean rewriting the Location header's origin too,
++    // which needs its own AppSwapRewriteRule match against the redirect
++    // target to be correct, not a blind rewrite of whatever it points to.
++    client_->OnReceiveRedirect(redirect_info, std::move(head));
++  }
++  void OnUploadProgress(int64_t current_position,
++                        int64_t total_size,
++                        base::OnceCallback<void()> callback) override {
++    client_->OnUploadProgress(current_position, total_size,
++                              std::move(callback));
++  }
++  void OnTransferSizeUpdated(int32_t transfer_size_diff) override {
++    client_->OnTransferSizeUpdated(transfer_size_diff);
++  }
++  void OnComplete(const network::URLLoaderCompletionStatus& status) override {
++    client_->OnComplete(status);
++  }
++
++ private:
++  mojo::Remote<network::mojom::URLLoaderClient> client_;
++  int32_t request_id_;
++  uint32_t options_;
++  network::ResourceRequest request_;
++  net::MutableNetworkTrafficAnnotationTag traffic_annotation_;
++
++  mojo::Receiver<network::mojom::URLLoaderClient> client_receiver_{this};
++  mojo::Remote<network::mojom::URLLoader> target_loader_;
++};
++
++// Self-owned URLLoader that streams an in-memory string as the response --
++// used only for the small generated "registry unreachable" recovery page,
++// never for real app content (which always comes from disk via
++// AppSwapFileLoader above). Unlike that class, this doesn't need the serve
++// task runner: there's no blocking file I/O involved.
++class AppSwapStringLoader : public network::mojom::URLLoader {
++ public:
++  static void CreateAndStart(
++      std::string body,
++      GURL url,
++      mojo::PendingReceiver<network::mojom::URLLoader> loader,
++      mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
++    // Owns itself; deleted once both bindings are closed.
++    auto* string_loader = new AppSwapStringLoader();
++    string_loader->Start(std::move(body), std::move(url), std::move(loader),
++                         std::move(client));
++  }
++
++  AppSwapStringLoader(const AppSwapStringLoader&) = delete;
++  AppSwapStringLoader& operator=(const AppSwapStringLoader&) = delete;
++
++  // network::mojom::URLLoader:
++  void FollowRedirect(
++      network::HttpRequestHeadersUpdateParams /*headers_update_params*/,
++      const std::optional<GURL>& /*new_url*/) override {}
++  void SetPriority(net::RequestPriority /*priority*/,
++                   int32_t /*intra_priority_value*/) override {}
++
++ private:
++  AppSwapStringLoader() = default;
++  ~AppSwapStringLoader() override = default;
++
++  void Start(std::string body,
++             GURL url,
++             mojo::PendingReceiver<network::mojom::URLLoader> loader,
++             mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
++    receiver_.Bind(std::move(loader));
++    receiver_.set_disconnect_handler(base::BindOnce(
++        &AppSwapStringLoader::OnMojoDisconnect, base::Unretained(this)));
++    client_.Bind(std::move(client));
++
++    auto head = network::mojom::URLResponseHead::New();
++    head->response_type = network::mojom::FetchResponseType::kBasic;
++    head->headers =
++        base::MakeRefCounted<net::HttpResponseHeaders>("HTTP/1.1 200 OK");
++    head->mime_type = "text/html";
++    head->headers->AddHeader(net::HttpRequestHeaders::kContentType,
++                             "text/html; charset=utf-8");
++    head->headers->AddHeader(net::HttpRequestHeaders::kContentLength,
++                             base::NumberToString(body.size()));
++    head->headers->AddHeader(net::HttpRequestHeaders::kCacheControl,
++                             "no-store");
++    head->content_length = body.size();
++    content_length_ = static_cast<int64_t>(body.size());
++    head->parsed_headers =
++        network::PopulateParsedHeaders(head->headers.get(), url);
++    const base::TimeTicks now_ticks = base::TimeTicks::Now();
++    const base::Time now_time = base::Time::Now();
++    head->request_time = now_time;
++    head->request_start = now_ticks;
++    head->response_time = now_time;
++    head->response_start = now_ticks;
++    head->load_timing.request_start_time = now_time;
++    head->load_timing.request_start = now_ticks;
++    head->load_timing.receive_headers_start = now_ticks;
++    head->load_timing.receive_headers_end = now_ticks;
++
++    mojo::ScopedDataPipeProducerHandle producer_handle;
++    mojo::ScopedDataPipeConsumerHandle consumer_handle;
++    if (mojo::CreateDataPipe(/*options=*/nullptr, producer_handle,
++                             consumer_handle) != MOJO_RESULT_OK) {
++      OnClientComplete(net::ERR_FAILED);
++      return;
++    }
++
++    client_->OnReceiveResponse(std::move(head), std::move(consumer_handle),
++                               std::nullopt);
++
++    if (body.empty()) {
++      OnClientComplete(net::OK);
++      return;
++    }
++
++    data_producer_ = std::make_unique<mojo::DataPipeProducer>(
++        std::move(producer_handle));
++    data_producer_->Write(
++        std::make_unique<mojo::StringDataSource>(
++            base::span(body),
++            mojo::StringDataSource::AsyncWritingMode::
++                STRING_MAY_BE_INVALIDATED_BEFORE_COMPLETION),
++        base::BindOnce(&AppSwapStringLoader::OnWritten,
++                       base::Unretained(this)));
++  }
++
++  void OnWritten(MojoResult result) {
++    data_producer_.reset();
++    OnClientComplete(result == MOJO_RESULT_OK ? net::OK : net::ERR_FAILED);
++  }
++
++  void OnClientComplete(net::Error error) {
++    network::URLLoaderCompletionStatus status(error);
++    if (error == net::OK) {
++      const auto size = static_cast<uint64_t>(content_length_);
++      status.encoded_data_length = base::ByteSize(size);
++      status.encoded_body_length = base::ByteSize(size);
++      status.decoded_body_length = base::ByteSize(size);
++    }
++    client_->OnComplete(status);
++    client_.reset();
++    MaybeDeleteSelf();
++  }
++
++  void OnMojoDisconnect() {
++    data_producer_.reset();
++    receiver_.reset();
++    client_.reset();
++    MaybeDeleteSelf();
++  }
++
++  void MaybeDeleteSelf() {
++    if (!receiver_.is_bound() && !client_.is_bound()) {
++      delete this;
++    }
++  }
++
++  mojo::Receiver<network::mojom::URLLoader> receiver_{this};
++  mojo::Remote<network::mojom::URLLoaderClient> client_;
++  std::unique_ptr<mojo::DataPipeProducer> data_producer_;
++  int64_t content_length_ = 0;
++};
++
++// Builds the body of the recovery page shown in place of a navigation that
++// failed to resolve because the registry is unreachable and this tab has no
++// version of its own to fall back to (e.g. a brand-new tab). Offers
++// whatever versions of this package are already on disk from other tabs or
++// past sessions, if any -- `cached_versions` is never empty when this is
++// called (see the call site).
++std::string BuildRegistryUnreachableHtml(
++    const GURL& app_url,
++    const std::vector<std::string>& cached_versions) {
++  std::string rows;
++  for (const std::string& version : cached_versions) {
++    GURL link = net::AppendOrReplaceQueryParameter(app_url, kAppSwapUseVersionQueryKey,
++                                                    version);
++    base::StrAppend(
++        &rows, {"<li><a href=\"", base::EscapeForHTML(link.spec()), "\">",
++                base::EscapeForHTML(version), "</a></li>"});
++  }
++  return base::StrCat(
++      {"<!doctype html><meta charset=utf-8>"
++       "<title>Can't reach the registry</title>"
++       "<style>body{font:14px/1.5 system-ui,sans-serif;max-width:420px;"
++       "margin:15vh auto 0;padding:0 20px;color:#3c4043}"
++       "h1{font-size:17px}ul{padding-left:20px}"
++       "a{color:#1a73e8;text-decoration:none}a:hover{text-decoration:"
++       "underline}</style>"
++       "<h1>Can&rsquo;t reach the package registry</h1>"
++       "<p>AppSwap couldn&rsquo;t resolve this app&rsquo;s latest version. "
++       "You can load a version that&rsquo;s already downloaded instead:</p>"
++       "<ul>",
++       rows, "</ul>"});
++}
++
++// Posts a request to serve `body` as the response, for the recovery page
++// above -- no serve-task-runner hop needed, unlike ServeFromDir(), since
++// there's no file I/O.
++void ServeHtml(std::string body,
++               GURL url,
++               mojo::PendingReceiver<network::mojom::URLLoader> loader,
++               mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
++  AppSwapStringLoader::CreateAndStart(std::move(body), std::move(url),
++                                      std::move(loader), std::move(client));
++}
++
++// Records the exact version a navigation actually resolved to, so the
++// chip/Page Info/checker for *this* tab reflect it rather than whatever
++// AppSwapArtifactProvider's shared per-tag cache happens to hold right now
++// (which another tab's own navigation could have moved on since), then
++// serves it. Only ever called for a navigation, not a subresource -- a
++// page's own scripts/styles/images resolve the same source and would just
++// overwrite this with the same value repeatedly.
++void SetCommittedVersionAndServe(
 +    GURL url,
-+    bool accepts_html,
++    content::GlobalRenderFrameHostId frame_id,
++    mojo::PendingReceiver<network::mojom::URLLoader> loader,
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++    base::FilePath dir) {
++  if (content::RenderFrameHost* frame =
++          content::RenderFrameHost::FromID(frame_id)) {
++    if (content::WebContents* web_contents =
++            content::WebContents::FromRenderFrameHost(frame)) {
++      if (AppSwapUpdateAvailableTabHelper* helper =
++              AppSwapUpdateAvailableTabHelper::FromWebContents(
++                  web_contents)) {
++        helper->SetCommittedVersion(dir.BaseName().AsUTF8Unsafe());
++      }
++    }
++  }
++  ServeFromDir(dir, std::move(url), /*accepts_html=*/true, std::move(loader),
++               std::move(client));
++}
++
++// Terminal continuation for the committed-version fallback below -- doesn't
++// retry again on failure, just serves or fails.
++void ServeAfterFallbackResolve(
++    GURL url,
 +    content::GlobalRenderFrameHostId frame_id,
 +    mojo::PendingReceiver<network::mojom::URLLoader> loader,
 +    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
@@ -3023,25 +1979,84 @@ index 0000000000..88ff587393
 +        ->OnComplete(network::URLLoaderCompletionStatus(net::ERR_FAILED));
 +    return;
 +  }
-+  // Record the exact version this navigation actually resolved to, so the
-+  // chip/Page Info/checker for *this* tab reflect it rather than whatever
-+  // AppSwapArtifactProvider's shared per-tag cache happens to hold right
-+  // now (which another tab's own navigation could have moved on since).
-+  // Only for the navigation itself, not subresources -- a page's own
-+  // scripts/styles/images resolve the same source and would just overwrite
-+  // this with the same value repeatedly.
-+  if (accepts_html) {
-+    if (content::RenderFrameHost* frame =
-+            content::RenderFrameHost::FromID(frame_id)) {
-+      if (content::WebContents* web_contents =
-+              content::WebContents::FromRenderFrameHost(frame)) {
-+        if (AppSwapUpdateAvailableTabHelper* helper =
-+                AppSwapUpdateAvailableTabHelper::FromWebContents(
-+                    web_contents)) {
-+          helper->SetCommittedVersion(dir.BaseName().AsUTF8Unsafe());
++  SetCommittedVersionAndServe(std::move(url), frame_id, std::move(loader),
++                              std::move(client), std::move(dir));
++}
++
++// Terminal continuation for a tab with no committed version of its own
++// (e.g. a brand-new tab) whose navigation failed to resolve -- offers
++// whatever's cached on disk, if anything, instead of failing outright.
++void ServeCachedVersionsOrFail(
++    GURL url,
++    mojo::PendingReceiver<network::mojom::URLLoader> loader,
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++    std::vector<std::string> cached_versions) {
++  if (cached_versions.empty()) {
++    mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
++        ->OnComplete(network::URLLoaderCompletionStatus(net::ERR_FAILED));
++    return;
++  }
++  std::string html = BuildRegistryUnreachableHtml(url, cached_versions);
++  ServeHtml(std::move(html), std::move(url), std::move(loader),
++           std::move(client));
++}
++
++// Continuation after an npm artifact is resolved (downloaded + extracted).
++void ServeAfterResolve(
++    AppSwapSource source,
++    GURL url,
++    bool accepts_html,
++    content::GlobalRenderFrameHostId frame_id,
++    mojo::PendingReceiver<network::mojom::URLLoader> loader,
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++    base::FilePath dir) {
++  if (dir.empty()) {
++    // For a navigation, fall back rather than failing outright -- most
++    // commonly hit when the registry is unreachable and a dist-tag can't
++    // be re-resolved. Subresources of an already-loading page don't get
++    // this treatment; a failure there is real (e.g. a genuinely missing
++    // file), not a registry hiccup worth working around.
++    if (accepts_html) {
++      if (content::RenderFrameHost* frame =
++              content::RenderFrameHost::FromID(frame_id)) {
++        if (content::WebContents* web_contents =
++                content::WebContents::FromRenderFrameHost(frame)) {
++          if (AppSwapUpdateAvailableTabHelper* helper =
++                  AppSwapUpdateAvailableTabHelper::FromWebContents(
++                      web_contents)) {
++            // First choice: whatever exact version this tab is already
++            // showing, presumably still on disk from when it was first
++            // loaded. AppSwapArtifactProvider::GetOrDownload() checks disk
++            // before the network for an exact version, so this succeeds
++            // without needing connectivity.
++            if (std::optional<std::string> committed =
++                    helper->committed_version()) {
++              source.version = *committed;
++              AppSwapArtifactProvider::GetInstance()->GetOrDownload(
++                  source, base::BindOnce(&ServeAfterFallbackResolve,
++                                         std::move(url), frame_id,
++                                         std::move(loader), std::move(client)));
++              return;
++            }
++          }
++          // No committed version for this tab -- e.g. a brand-new tab that
++          // has never loaded this app before. Offer whatever's cached on
++          // disk from any tab or past session instead of failing outright.
++          AppSwapArtifactProvider::GetInstance()->GetCachedVersions(
++              source, base::BindOnce(&ServeCachedVersionsOrFail, url,
++                                     std::move(loader), std::move(client)));
++          return;
 +        }
 +      }
 +    }
++    mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
++        ->OnComplete(network::URLLoaderCompletionStatus(net::ERR_FAILED));
++    return;
++  }
++  if (accepts_html) {
++    SetCommittedVersionAndServe(std::move(url), frame_id, std::move(loader),
++                                std::move(client), std::move(dir));
++    return;
 +  }
 +  ServeFromDir(dir, std::move(url), accepts_html, std::move(loader),
 +               std::move(client));
@@ -3051,34 +2066,63 @@ index 0000000000..88ff587393
 +
 +// static
 +void AppSwapProxyingURLLoaderFactory::MaybeProxyRequest(
++    content::BrowserContext* browser_context,
 +    content::RenderFrameHost* frame,
 +    network::URLLoaderFactoryBuilder& builder) {
-+  if (!frame) {
++  // `frame` is null for factories not tied to a single frame -- notably
++  // service worker script fetches (URLLoaderFactoryType::kServiceWorkerScript,
++  // see ServiceWorkerContextWrapper::GetLoaderFactoryForUpdateCheck), which
++  // still need to go through rewrite-rule matching. The resulting
++  // GlobalRenderFrameHostId is simply invalid, and every frame_id_ use below
++  // already null-checks RenderFrameHost::FromID() (the same as a tab closing
++  // mid-request), so app-route serving degrades gracefully instead of
++  // matching. `browser_context` is passed separately (rather than derived
++  // from `frame`) because it's what's actually available at every call site,
++  // frame or not -- see ServiceWorkerContextWrapper's own call, which passes
++  // its own browser_context with a null frame.
++  content::GlobalRenderFrameHostId frame_id =
++      frame ? frame->GetGlobalId() : content::GlobalRenderFrameHostId();
++
++  // Kick off (or continue) loading the app/route-group configuration as
++  // early as possible, so it's likely ready by the time a request needs to
++  // be matched. Actual matching uses the synchronous *IfLoaded() accessors
++  // below rather than waiting on these callbacks, since a URLLoaderFactory
++  // can't block request dispatch on a file read; a request that races the
++  // very first load on a cold start simply falls through to the network,
++  // same as an unconfigured route.
++  Profile* profile = Profile::FromBrowserContext(browser_context);
++  AppSwapAppsService* apps_service =
++      AppSwapAppsServiceFactory::GetForProfile(profile);
++  AppSwapRouteGroupService* route_group_service =
++      AppSwapRouteGroupServiceFactory::GetForProfile(profile);
++  // Both factories only build an instance for regular profiles
++  // (ProfileKeyedServiceFactory's default ProfileSelections excludes
++  // System/Guest) -- e.g. the System Profile that ProfilePicker::Show()
++  // navigates internally hits this for its own WebUI resource fetches.
++  // AppSwap simply doesn't apply there: skip installing the proxying factory
++  // entirely rather than threading a null check through every downstream
++  // lookup (FindAppSwapAppForUrl/FindAppSwapRouteGroupById in
++  // CreateLoaderAndStart below both assume a valid service).
++  if (!apps_service || !route_group_service) {
 +    return;
 +  }
-+
-+  // Kick off (or continue) loading the route/app configuration as early as
-+  // possible, so it's likely ready by the time a request needs to be
-+  // matched. Actual matching uses the synchronous *IfLoaded() accessors below
-+  // rather than waiting on these callbacks, since a URLLoaderFactory can't
-+  // block request dispatch on a file read; a request that races the very
-+  // first load on a cold start simply falls through to the network, same as
-+  // an unconfigured route.
-+  AppSwapRoutesService::GetInstance()->GetRoutes(base::DoNothing());
-+  AppSwapAppsService::GetInstance()->GetApps(base::DoNothing());
++  apps_service->GetApps(base::DoNothing());
++  route_group_service->GetRouteGroups(base::DoNothing());
 +  AppSwapUpdateChecker::GetInstance()->EnsureStarted();
 +
 +  auto [receiver, remote] = builder.Append();
 +  base::MakeSelfDeleting<AppSwapProxyingURLLoaderFactory>(
-+      std::move(receiver), std::move(remote), frame->GetGlobalId());
++      std::move(receiver), std::move(remote), browser_context, frame_id);
 +}
 +
 +AppSwapProxyingURLLoaderFactory::AppSwapProxyingURLLoaderFactory(
 +    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
 +    mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
++    content::BrowserContext* browser_context,
 +    content::GlobalRenderFrameHostId frame_id,
 +    base::SelfDeletingPassKey pass_key)
 +    : network::SelfDeletingURLLoaderFactory(std::move(receiver), pass_key),
++      browser_context_(browser_context->GetWeakPtr()),
 +      frame_id_(frame_id) {
 +  target_factory_.Bind(std::move(target_factory));
 +  target_factory_.set_disconnect_handler(base::BindOnce(
@@ -3099,23 +2143,92 @@ index 0000000000..88ff587393
 +    const network::ResourceRequest& request,
 +    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
 +    const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
-+  // Only static GET/HEAD requests are served from disk; everything else is
-+  // forwarded to the network.
-+  if (request.method == net::HttpRequestHeaders::kGetMethod ||
-+      request.method == net::HttpRequestHeaders::kHeadMethod) {
-+    if (const AppSwapRoute* route = FindAppSwapRouteForUrl(request.url)) {
-+      const AppSwapApp* app = FindAppSwapAppById(route->app_id);
-+      if (!app) {
-+        // The route points at an app that no longer exists (e.g. deleted
-+        // from appswap://apps); fail rather than silently falling through to
-+        // the real network, since the user explicitly routed this origin
-+        // away from it.
-+        mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
-+            ->OnComplete(
-+                network::URLLoaderCompletionStatus(net::ERR_FILE_NOT_FOUND));
-+        return;
-+      }
++  content::BrowserContext* browser_context = browser_context_.get();
++  if (!browser_context) {
++    // The Profile this factory belongs to has already been destroyed (its
++    // mojo disconnect is processed asynchronously, so this can outlive the
++    // Profile itself -- see the comment on browser_context_). Nothing left
++    // to resolve Apps/Route Groups against; just pass the request through.
++    target_factory_->CreateLoaderAndStart(std::move(loader), request_id,
++                                          options, request, std::move(client),
++                                          traffic_annotation);
++    return;
++  }
++  Profile* profile = Profile::FromBrowserContext(browser_context);
 +
++  // Route Group rules are checked independently of, and before, apps -- they
++  // have no notion of "app" at all (see AppSwapRouteGroupRule), and apply to
++  // every HTTP method, not just GET/HEAD, since this is a URL-level proxy
++  // (e.g. an API prefix), not served file content. Which group applies (if
++  // any) is per-tab, not project-wide -- see AppSwapRouteGroupPinTabHelper.
++  const AppSwapRouteGroup* pinned_group = nullptr;
++  if (content::RenderFrameHost* frame =
++          content::RenderFrameHost::FromID(frame_id_)) {
++    if (content::WebContents* web_contents =
++            content::WebContents::FromRenderFrameHost(frame)) {
++      if (AppSwapRouteGroupPinTabHelper* pin_helper =
++              AppSwapRouteGroupPinTabHelper::FromWebContents(web_contents)) {
++        if (std::optional<std::string> group_id =
++                pin_helper->GetPinnedGroup()) {
++          pinned_group = FindAppSwapRouteGroupById(profile, *group_id);
++        }
++      }
++    }
++  }
++  if (const AppSwapRouteGroupRule* rule =
++          FindAppSwapRouteGroupRuleForUrl(pinned_group, request.url)) {
++    network::ResourceRequest rewritten_request = request;
++    rewritten_request.url = ComputeAppSwapRewriteUrl(
++        request.url, rule->url_pattern, rule->target);
++    // The site/isolation info on `request` describes the original URL (e.g.
++    // for a main-frame navigation, site_for_cookies is scoped to it). Since
++    // the actual bytes are now being fetched from a different origin, that
++    // info must be updated to match -- the network service DCHECKs that a
++    // main-frame navigation's site_for_cookies is same-site with the URL
++    // actually being fetched. This mirrors what happens on a real redirect.
++    url::Origin rewritten_origin = url::Origin::Create(rewritten_request.url);
++    rewritten_request.site_for_cookies =
++        net::SiteForCookies::FromUrl(rewritten_request.url);
++    if (rewritten_request.trusted_params) {
++      rewritten_request.trusted_params->isolation_info =
++          rewritten_request.trusted_params->isolation_info.CreateForRedirect(
++              rewritten_origin);
++    }
++    // Subresource requests (e.g. a font fetched in CORS mode) carry the
++    // page's own origin as `request_initiator`. Left pointing at the
++    // original origin, the network service sees a genuine cross-origin
++    // fetch to the rewritten URL and requires an Access-Control-Allow-Origin
++    // header the target server has no reason to send. Rewriting it to match
++    // the fetched origin makes the fetch same-origin from CORS's point of
++    // view, matching the site_for_cookies/isolation_info treatment above.
++    if (rewritten_request.request_initiator) {
++      rewritten_request.request_initiator = rewritten_origin;
++    }
++    // The renderer already computed `referrer` against the *original* URL
++    // (e.g. "https://my-shop.dev/") under the page's referrer policy. If the
++    // rewritten target has different security properties -- most commonly
++    // dropping from https to plain http, as a "localhost:5000" dev backend
++    // target typically does -- that already-computed referrer now violates
++    // the request's own policy for its *actual* destination (an https->http
++    // downgrade must omit the referrer entirely), and net::URLRequest
++    // cancels the request outright with ERR_BLOCKED_BY_CLIENT rather than
++    // send it (confirmed by testing). Clearing it is always policy-compliant
++    // regardless of policy, matching what a real cross-origin downgrade
++    // would send.
++    rewritten_request.referrer = GURL();
++    mojo::MakeSelfOwnedReceiver(
++        std::make_unique<AppSwapRewriteProxyLoader>(
++            request_id, options, std::move(rewritten_request),
++            std::move(client), traffic_annotation),
++        std::move(loader));
++    return;
++  }
++
++  if (const AppSwapApp* app = FindAppSwapAppForUrl(profile, request.url)) {
++    // Only static GET/HEAD requests are served from disk; everything else
++    // falls through to the real network below.
++    if (request.method == net::HttpRequestHeaders::kGetMethod ||
++        request.method == net::HttpRequestHeaders::kHeadMethod) {
 +      bool accepts_html = false;
 +      if (const std::optional<std::string> accept =
 +              request.headers.GetHeader(net::HttpRequestHeaders::kAccept);
@@ -3128,6 +2241,27 @@ index 0000000000..88ff587393
 +              content::RenderFrameHost::FromID(frame_id_)) {
 +        if (content::WebContents* web_contents =
 +                content::WebContents::FromRenderFrameHost(frame)) {
++          // A click on the "registry unreachable" recovery page's list of
++          // cached versions (see BuildRegistryUnreachableHtml()) carries
++          // this query param -- pin the tab to it now, before the pin
++          // lookup right below, so it takes effect immediately for this
++          // very navigation rather than only on the next one. The address
++          // bar still briefly shows the full URL with this parameter while
++          // the navigation is in flight; overriding the pending entry's
++          // virtual URL here makes it settle on the clean version once the
++          // navigation commits, same trick chrome://newtab-style pages use
++          // to display a URL other than the one actually requested.
++          if (std::string use_version;
++              net::GetValueForKeyInQuery(request.url, kAppSwapUseVersionQueryKey,
++                                         &use_version)) {
++            AppSwapVersionPinTabHelper::GetOrCreateForWebContents(web_contents)
++                ->SetPinnedVersion(app->id, use_version);
++            if (content::NavigationEntry* entry =
++                    web_contents->GetController().GetPendingEntry()) {
++              entry->SetVirtualURL(net::AppendOrReplaceQueryParameter(
++                  request.url, kAppSwapUseVersionQueryKey, std::nullopt));
++            }
++          }
 +          if (AppSwapVersionPinTabHelper* pin_helper =
 +                  AppSwapVersionPinTabHelper::FromWebContents(web_contents)) {
 +            if (std::optional<std::string> pinned_version =
@@ -3145,7 +2279,7 @@ index 0000000000..88ff587393
 +      // Reload button's "Update" click just a plain reload: any refresh is a
 +      // navigation, so it already re-resolves the tag here.
 +      auto resolve_callback = base::BindOnce(
-+          &ServeAfterResolve, request.url, accepts_html, frame_id_,
++          &ServeAfterResolve, source, request.url, accepts_html, frame_id_,
 +          std::move(loader), std::move(client));
 +      if (accepts_html) {
 +        AppSwapArtifactProvider::GetInstance()->EnsureFreshThenGetOrDownload(
@@ -3165,10 +2299,10 @@ index 0000000000..88ff587393
 +}
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.h b/chrome/browser/app_swap/app_swap_url_loader_factory.h
 new file mode 100644
-index 0000000000..4b82b1280f
+index 0000000000000..fe601f5a4a79b
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.h
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,85 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3176,6 +2310,7 @@ index 0000000000..4b82b1280f
 +#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 +#define CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 +
++#include "base/memory/weak_ptr.h"
 +#include "content/public/browser/global_routing_id.h"
 +#include "mojo/public/cpp/bindings/pending_receiver.h"
 +#include "mojo/public/cpp/bindings/pending_remote.h"
@@ -3184,20 +2319,32 @@ index 0000000000..4b82b1280f
 +#include "services/network/public/cpp/url_loader_factory_builder.h"
 +
 +namespace content {
++class BrowserContext;
 +class RenderFrameHost;
 +}  // namespace content
++
++// A request for an AppSwap-routed URL carrying this query parameter pins
++// the tab to the given exact version and serves it directly (no registry
++// round-trip, since it must already be on disk to be named this way) --
++// used both by the "registry unreachable" recovery page's list of cached
++// versions and by the "Copy link to this version" action in Page Info, so
++// the resulting link is bookmarkable/shareable and reproduces the exact
++// version when opened later.
++inline constexpr char kAppSwapUseVersionQueryKey[] = "__appswap_use_version";
 +
 +// A URLLoaderFactory interceptor that serves AppSwap-routed requests from disk
 +// and forwards everything else to the wrapped network factory.
 +class AppSwapProxyingURLLoaderFactory
 +    : public network::SelfDeletingURLLoaderFactory {
 + public:
-+  static void MaybeProxyRequest(content::RenderFrameHost* frame,
++  static void MaybeProxyRequest(content::BrowserContext* browser_context,
++                                content::RenderFrameHost* frame,
 +                                network::URLLoaderFactoryBuilder& builder);
 +
 +  AppSwapProxyingURLLoaderFactory(
 +      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
 +      mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
++      content::BrowserContext* browser_context,
 +      content::GlobalRenderFrameHostId frame_id,
 +      base::SelfDeletingPassKey pass_key);
 +  AppSwapProxyingURLLoaderFactory(const AppSwapProxyingURLLoaderFactory&) =
@@ -3222,6 +2369,17 @@ index 0000000000..4b82b1280f
 +
 +  mojo::Remote<network::mojom::URLLoaderFactory> target_factory_;
 +
++  // The Profile (== Project) this factory resolves Apps/Route Groups
++  // against. Held as a WeakPtr, not a raw pointer: this factory is
++  // self-deleting and only torn down when its mojo pipe disconnects, which
++  // is NOT guaranteed to happen before the owning Profile is destroyed --
++  // confirmed by a real crash (BackupRefPtr's dangling-pointer detector
++  // firing in this class's destructor) when closing the last window of one
++  // Profile while another Profile's window was still open. A raw_ptr member
++  // dangling across that reordering trips the safety check even if never
++  // dereferenced afterwards; a WeakPtr degrades safely to null instead.
++  const base::WeakPtr<content::BrowserContext> browser_context_;
++
 +  // The frame this factory serves requests for. Looked up fresh (rather than
 +  // held as a raw content::RenderFrameHost*) since a RenderFrameHost can
 +  // outlive or be swapped independently of this factory's lifetime; an ID
@@ -3231,19 +2389,20 @@ index 0000000000..4b82b1280f
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index dde051181f..23b7073471 100644
+index dde051181fa13..a3f29515c07cc 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -644,6 +644,8 @@
+@@ -644,6 +644,9 @@
  
  #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
      BUILDFLAG(IS_CHROMEOS)
 +#include "chrome/browser/app_swap/app_swap_profiles_service.h"
++#include "chrome/browser/app_swap/app_swap_profiles_service_factory.h"
 +#include "chrome/browser/app_swap/app_swap_url_loader_factory.h"
  #include "chrome/browser/enterprise/network_header_injection/http_header_injection_proxying_url_loader_factory.h"
  #include "chrome/browser/enterprise/network_header_injection/http_header_injection_utils.h"
  #include "components/webapps/isolated_web_apps/scheme.h"
-@@ -1802,6 +1804,33 @@ ChromeContentBrowserClient::GetStoragePartitionConfigForSite(
+@@ -1802,6 +1805,44 @@ ChromeContentBrowserClient::GetStoragePartitionConfigForSite(
    }
  #endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE) && !BUILDFLAG(IS_ANDROID)
  
@@ -3261,14 +2420,25 @@ index dde051181f..23b7073471 100644
 +  // own warm-up for the Apps/Routes services it needs), since the
 +  // SiteInstance/partition for a navigation is chosen before its
 +  // URLLoaderFactory is created.
-+  AppSwapProfilesService::GetInstance()->GetProfiles(base::DoNothing());
++  // This runs for every navigation in every BrowserContext, including the
++  // System Profile that ProfilePicker::Show() navigates internally (its
++  // WebUI's own StoragePartitionConfig lookup for chrome://profile-picker).
++  // AppSwapProfilesServiceFactory only builds an instance for regular
++  // profiles (ProfileKeyedServiceFactory's default ProfileSelections
++  // excludes System/Guest), so GetForProfile() legitimately returns nullptr
++  // there -- AppSwap Profiles simply don't apply to those contexts.
++  if (AppSwapProfilesService* appswap_profiles_service =
++          AppSwapProfilesServiceFactory::GetForProfile(
++              Profile::FromBrowserContext(browser_context))) {
++    appswap_profiles_service->GetProfiles(base::DoNothing());
 +
-+  if (site.SchemeIsHTTPOrHTTPS()) {
-+    if (std::optional<std::string> profile_id =
-+            AppSwapProfilesService::GetInstance()->GetActiveProfileIdIfLoaded()) {
-+      return content::StoragePartitionConfig::Create(
-+          browser_context, kAppSwapProfilePartitionDomain,
-+          /*partition_name=*/*profile_id, /*in_memory=*/false);
++    if (site.SchemeIsHTTPOrHTTPS()) {
++      if (std::optional<std::string> profile_id =
++              appswap_profiles_service->GetActiveProfileIdIfLoaded()) {
++        return content::StoragePartitionConfig::Create(
++            browser_context, kAppSwapProfilePartitionDomain,
++            /*partition_name=*/*profile_id, /*in_memory=*/false);
++      }
 +    }
 +  }
 +#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
@@ -3277,7 +2447,7 @@ index dde051181f..23b7073471 100644
    return default_storage_partition_config;
  }
  
-@@ -4981,6 +5010,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
+@@ -4981,6 +5022,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
    handler->AddHandlerPair(&HandleChromeAboutAndChromeSyncRewrite,
                            BrowserURLHandler::null_handler());
  
@@ -3289,17 +2459,18 @@ index dde051181f..23b7073471 100644
  #if BUILDFLAG(IS_ANDROID)
    // Handler to rewrite chrome://newtab on Android.
    handler->AddHandlerPair(&chrome::android::HandleAndroidNativePageURL,
-@@ -6599,6 +6633,8 @@ void ChromeContentBrowserClient::WillCreateURLLoaderFactory(
+@@ -6599,6 +6645,9 @@ void ChromeContentBrowserClient::WillCreateURLLoaderFactory(
        frame, type == URLLoaderFactoryType::kNavigation, request_initiator,
        isolation_info, factory_builder);
  
-+  AppSwapProxyingURLLoaderFactory::MaybeProxyRequest(frame, factory_builder);
++  AppSwapProxyingURLLoaderFactory::MaybeProxyRequest(browser_context, frame,
++                                                     factory_builder);
 +
  #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
    if (disable_secure_dns) {
      WebContents* web_contents = WebContents::FromRenderFrameHost(frame);
 diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
-index 17a9289e00..857fec9218 100644
+index 17a9289e00ac8..de8b852c459c4 100644
 --- a/chrome/browser/ui/webui/BUILD.gn
 +++ b/chrome/browser/ui/webui/BUILD.gn
 @@ -53,6 +53,7 @@ source_set("configs") {
@@ -3310,36 +2481,33 @@ index 17a9289e00..857fec9218 100644
      "//chrome/browser/actor/ui:actor_overlay",
      "//chrome/browser/contextual_tasks:ui",
      "//chrome/browser/glic",
-@@ -114,6 +115,7 @@ source_set("configs") {
+@@ -114,6 +115,8 @@ source_set("configs") {
        "//chrome/browser/actor/ui:actor_overlay_web_view",
        "//chrome/browser/ui/webui/access_code_cast",
        "//chrome/browser/ui/webui/app_service_internals",
++      "//chrome/browser/ui/webui/app_swap_projects",
 +      "//chrome/browser/ui/webui/app_swap_version_picker",
        "//chrome/browser/ui/webui/autofill_ml_internals",
        "//chrome/browser/ui/webui/color_pipeline_internals",
        "//chrome/browser/ui/webui/history",
 diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-index 7a947c092b..c05b3331b7 100644
+index 7a947c092bfaf..01b55b0253cea 100644
 --- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-@@ -13,6 +13,10 @@
+@@ -13,6 +13,8 @@
  #include "chrome/browser/optimization_guide/optimization_guide_internals_ui.h"
  #include "chrome/browser/ui/webui/about/about_ui.h"
  #include "chrome/browser/ui/webui/accessibility/accessibility_ui.h"
-+#include "chrome/browser/app_swap/app_swap_apps_ui.h"
-+#include "chrome/browser/app_swap/app_swap_profiles_ui.h"
-+#include "chrome/browser/app_swap/app_swap_routes_ui.h"
++#include "chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.h"
 +#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h"
  #include "chrome/browser/ui/webui/actor_internals/actor_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/autofill_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/password_manager_internals_ui.h"
-@@ -252,6 +256,10 @@ void RegisterChromeWebUIConfigs() {
+@@ -252,6 +254,8 @@ void RegisterChromeWebUIConfigs() {
  
    auto& map = content::WebUIConfigMap::GetInstance();
    map.AddWebUIConfig(std::make_unique<AccessibilityUIConfig>());
-+  map.AddWebUIConfig(std::make_unique<AppSwapAppsUIConfig>());
-+  map.AddWebUIConfig(std::make_unique<AppSwapRoutesUIConfig>());
-+  map.AddWebUIConfig(std::make_unique<AppSwapProfilesUIConfig>());
++  map.AddWebUIConfig(std::make_unique<AppSwapProjectsUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapVersionPickerUIConfig>());
    map.AddWebUIConfig(std::make_unique<AutofillInternalsUIConfig>());
    map.AddWebUIConfig(std::make_unique<BluetoothInternalsUIConfig>());
