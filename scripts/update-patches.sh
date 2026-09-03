@@ -52,7 +52,55 @@ gen_devtools() {
   fi
 }
 
+# Binary icon assets (PNG/ICO/ICNS) are tracked as plain files under
+# resources/, at the same path they occupy in src/, rather than as diffs in
+# a *.patch -- a `git diff --binary` of an image is an opaque base64 blob
+# that can't be reviewed and re-encodes the *entire* file on every
+# regeneration, even for a one-pixel change. sync_binary_resources() below
+# just copies src/<path> to resources/<path>; apply-patches.sh copies them
+# back afterwards (see its own "Restoring binary resources" step). Text
+# assets that sit alongside these (BRANDING, product_logo.svg, the
+# Contents.json manifests inside Assets.xcassets) stay in the normal
+# patches/ flow below -- they diff and review just like any other text file.
+BINARY_RESOURCES=(
+  chrome/app/theme/chromium/product_logo_128.png
+  chrome/app/theme/chromium/product_logo_16.png
+  chrome/app/theme/chromium/product_logo_22_mono.png
+  chrome/app/theme/chromium/product_logo_24.png
+  chrome/app/theme/chromium/product_logo_256.png
+  chrome/app/theme/chromium/product_logo_48.png
+  chrome/app/theme/chromium/product_logo_64.png
+  chrome/app/theme/chromium/win/chromium.ico
+  chrome/app/theme/chromium/mac/app.icns
+  chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_16.png
+  chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_32.png
+  chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_64.png
+  chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_128.png
+  chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_256.png
+  chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_512.png
+  chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_1024.png
+  chrome/app/theme/chromium/mac/Assets.xcassets/Icon.iconset/icon_256x256.png
+  chrome/app/theme/chromium/mac/Assets.xcassets/Icon.iconset/icon_256x256@2x.png
+  chrome/app/theme/default_100_percent/chromium/product_logo_16.png
+  chrome/app/theme/default_100_percent/chromium/product_logo_32.png
+  chrome/app/theme/default_100_percent/chromium/linux/product_logo_16.png
+  chrome/app/theme/default_100_percent/chromium/linux/product_logo_32.png
+  chrome/app/theme/default_200_percent/chromium/product_logo_16.png
+  chrome/app/theme/default_200_percent/chromium/product_logo_32.png
+)
+
+sync_binary_resources() {
+  echo "Syncing binary resources..."
+  for rel in "${BINARY_RESOURCES[@]}"; do
+    local dest="$ROOT/resources/$rel"
+    mkdir -p "$(dirname "$dest")"
+    cp "$rel" "$dest"
+  done
+}
+
 echo "Generating patches..."
+
+sync_binary_resources
 
 gen 0001-branding.patch \
   chrome/app/chromium_strings.grd \
@@ -63,23 +111,9 @@ gen 0001-branding.patch \
   extensions/strings/extensions_chromium_strings.grdp \
   'extensions/strings/extensions_strings_*.xtb' \
   chrome/app/theme/chromium/BRANDING \
-  chrome/app/theme/chromium/product_logo_128.png \
-  chrome/app/theme/chromium/product_logo_16.png \
-  chrome/app/theme/chromium/product_logo_22_mono.png \
-  chrome/app/theme/chromium/product_logo_24.png \
-  chrome/app/theme/chromium/product_logo_256.png \
-  chrome/app/theme/chromium/product_logo_48.png \
-  chrome/app/theme/chromium/product_logo_64.png \
-  chrome/app/theme/chromium/win/chromium.ico \
-  chrome/app/theme/chromium/mac/app.icns \
-  chrome/app/theme/chromium/mac/Assets.xcassets \
-  chrome/app/theme/chromium/product_logo.svg \
-  chrome/app/theme/default_100_percent/chromium/product_logo_16.png \
-  chrome/app/theme/default_100_percent/chromium/product_logo_32.png \
-  chrome/app/theme/default_100_percent/chromium/linux/product_logo_16.png \
-  chrome/app/theme/default_100_percent/chromium/linux/product_logo_32.png \
-  chrome/app/theme/default_200_percent/chromium/product_logo_16.png \
-  chrome/app/theme/default_200_percent/chromium/product_logo_32.png
+  chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/Contents.json \
+  chrome/app/theme/chromium/mac/Assets.xcassets/Contents.json \
+  chrome/app/theme/chromium/product_logo.svg
 
 gen 0002-binary-rename.patch \
   build/win/reorder-imports.py \
@@ -433,12 +467,30 @@ gen 0016-project-selector-and-terminology.patch \
   chrome/browser/ui/webui/settings/settings_ui.h \
   chrome/common/webui_url_constants.h
 
-# Warn about any changed file not covered by one of the patches above.
+# Whether `f` (a path relative to src/) is one of the images tracked under
+# resources/ instead of as a patch -- sync_binary_resources() above already
+# copied it there, so it's covered even though it won't appear in any
+# *.patch text.
+is_binary_resource() {
+  local f="$1"
+  for rel in "${BINARY_RESOURCES[@]}"; do
+    if [[ "$rel" == "$f" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Warn about any changed file not covered by one of the patches above (or by
+# resources/, for binary assets).
 echo "Checking for uncovered changes..."
 for f in $(git status --porcelain --untracked-files=no | cut -c4-); do
   case "$f" in
     third_party/win_build_output/*) continue ;;  # generated MIDL output
   esac
+  if is_binary_resource "$f"; then
+    continue
+  fi
   if ! grep -qF "$f" "$ROOT"/patches/*.patch; then
     echo "warning: '$f' is changed but not present in any patch" >&2
   fi

@@ -42,4 +42,19 @@ for patch in "$ROOT"/patches/*.patch; do
   fi
 done
 
+# Binary icon assets (PNG/ICO/ICNS) live under resources/ as plain files,
+# not as diffs in a *.patch -- see update-patches.sh's BINARY_RESOURCES for
+# why. Restoring them is a plain copy, at the same relative path, over
+# whatever git reset --hard just put back (vanilla Chromium's own icon, in
+# every case here).
+if [[ -d "$ROOT/resources" ]]; then
+  echo "Restoring binary resources..."
+  while IFS= read -r -d '' resource; do
+    rel="${resource#"$ROOT/resources/"}"
+    dest="$ROOT/src/$rel"
+    mkdir -p "$(dirname "$dest")"
+    cp "$resource" "$dest"
+  done < <(find "$ROOT/resources" -type f -print0)
+fi
+
 echo "All patches applied."
