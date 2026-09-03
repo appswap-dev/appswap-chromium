@@ -311,9 +311,40 @@ gen 0014-npm-version-picker-webui.patch \
 # new: the *_service_factory.* files, the new route-group service/pin-helper,
 # the profiles KeyedService registration, the whole appswap://projects
 # WebUI, and the new tab-strip button.
+#
+# Follow-up from a review of the whole patch series. AppSwapConfigStore is
+# new here: the three config services had each hand-rolled the same load/save
+# machinery, and each copy posted its writes with an unordered
+# base::ThreadPool::PostTask (so two quick saves could persist the older
+# snapshot) via a non-atomic base::WriteFile (so an interrupted write
+# truncated the config), and guarded mutations only with DCHECK(loaded_) --
+# in release, an add racing the initial read appended to an empty list and
+# then wrote *that* over the real file. The store fixes all three at once and
+# the services now just parse/serialize. The unittests are new too: the
+# config store's ordering/clobber guarantees, the pure URL matching and
+# rewriting logic, and the version/package path validation described in
+# app_swap_version_utils.h -- which closes a real hole, since a version
+# string reaches the artifact cache path straight from the
+# appswap-use-version query parameter (see
+# AppSwapProxyingURLLoaderFactory::CreateLoaderAndStart), and an unchecked
+# one repointed the serve root anywhere on disk. Also from that review, in
+# files already covered above: the admin page gained the edit/rename/delete
+# operations its mojom never exposed (leaving four Update* service methods
+# dead and the General tab read-only), rewritten route-group requests now go
+# through the tab's own StoragePartition factory rather than
+# SystemNetworkContextManager's cookie-less one, the artifact cache prunes
+# old versions instead of growing forever, served file paths are
+# percent-decoded, the matchers return values rather than pointers into a
+# vector any config mutation reallocates, and SwitchTabsOffAppSwapProfile
+# scopes itself to the calling project's own windows.
 gen 0015-projects.patch \
   chrome/browser/app_swap/app_swap_apps_service_factory.cc \
   chrome/browser/app_swap/app_swap_apps_service_factory.h \
+  chrome/browser/app_swap/app_swap_config_store.cc \
+  chrome/browser/app_swap/app_swap_config_store.h \
+  chrome/browser/app_swap/app_swap_config_store_unittest.cc \
+  chrome/browser/app_swap/app_swap_route_matcher_unittest.cc \
+  chrome/browser/app_swap/app_swap_version_utils_unittest.cc \
   chrome/browser/app_swap/app_swap_profiles_service_factory.cc \
   chrome/browser/app_swap/app_swap_profiles_service_factory.h \
   chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.cc \

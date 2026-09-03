@@ -90,7 +90,7 @@ index 6008e03a8997c..984daa361baab 100644
          "//chrome/browser/resources/geic:resources",
          "//components/headless/command_handler",
 diff --git a/chrome/test/BUILD.gn b/chrome/test/BUILD.gn
-index 283eb14c4e258..548972cee33f0 100644
+index 283eb14c4e258..d45a75e79a236 100644
 --- a/chrome/test/BUILD.gn
 +++ b/chrome/test/BUILD.gn
 @@ -3459,7 +3459,7 @@ if (!is_android) {
@@ -102,6 +102,14 @@ index 283eb14c4e258..548972cee33f0 100644
        deps += [
          "//chrome:other_version",
          "//chrome/app:chrome_dll_resources",
+@@ -5212,6 +5212,7 @@ test("unit_tests") {
+     "//chrome/browser/actor/ui:unit_tests",
+     "//chrome/browser/ai",
+     "//chrome/browser/ai:test_support",
++    "//chrome/browser/app_swap:unit_tests",
+     "//chrome/browser/apps:unit_tests",
+     "//chrome/browser/autocomplete",
+     "//chrome/browser/autocomplete:unit_tests",
 diff --git a/chrome/tools/build/win/create_portable_archive.py b/chrome/tools/build/win/create_portable_archive.py
 new file mode 100644
 index 0000000000000..9809f86348038

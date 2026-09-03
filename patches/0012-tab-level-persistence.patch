@@ -100,10 +100,10 @@ index 0000000000000..d35f326eb2226
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILE_PIN_TAB_HELPER_H_
 diff --git a/chrome/browser/app_swap/app_swap_profile_removal_util.cc b/chrome/browser/app_swap/app_swap_profile_removal_util.cc
 new file mode 100644
-index 0000000000000..dc45b2ed3fe47
+index 0000000000000..ca2cdfa54f1e2
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_removal_util.cc
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,119 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -115,6 +115,7 @@ index 0000000000000..dc45b2ed3fe47
 +
 +#include "base/functional/callback_helpers.h"
 +#include "chrome/browser/app_swap/app_swap_profiles_service.h"
++#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -172,9 +173,15 @@ index 0000000000000..dc45b2ed3fe47
 +
 +}  // namespace
 +
-+void SwitchTabsOffAppSwapProfile(const std::string& profile_id) {
++void SwitchTabsOffAppSwapProfile(const std::string& profile_id,
++                                 content::BrowserContext* browser_context) {
 +  GlobalBrowserCollection::GetInstance()->ForEach(
 +      [&](BrowserWindowInterface* browser) {
++        // Another Project's windows have their own profiles.json and their
++        // own partitions; this id doesn't refer to anything there.
++        if (browser->GetProfile() != browser_context) {
++          return true;
++        }
 +        TabStripModel* tab_strip_model = browser->GetTabStripModel();
 +        for (int i = 0; i < tab_strip_model->count(); ++i) {
 +          content::WebContents* web_contents =
@@ -218,10 +225,10 @@ index 0000000000000..dc45b2ed3fe47
 +}
 diff --git a/chrome/browser/app_swap/app_swap_profile_removal_util.h b/chrome/browser/app_swap/app_swap_profile_removal_util.h
 new file mode 100644
-index 0000000000000..c786acf9f0c31
+index 0000000000000..e05129cc47cc9
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profile_removal_util.h
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,37 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -240,14 +247,21 @@ index 0000000000000..c786acf9f0c31
 +// partition, reloading each tab in place. Call this before removing a
 +// Profile so no open tab is left pointing at a partition that's about to be
 +// cleared out from under it.
-+void SwitchTabsOffAppSwapProfile(const std::string& profile_id);
++//
++// Only windows belonging to `browser_context` are touched. AppSwap Profiles
++// are per-Project (== per-Chromium-Profile) state, so an id from one
++// project's profiles.json says nothing about another project's tabs, and a
++// partition named the same in both is still a different partition -- see
++// ClearAppSwapProfileData(), which likewise resolves the partition within
++// one BrowserContext.
++void SwitchTabsOffAppSwapProfile(const std::string& profile_id,
++                                 content::BrowserContext* browser_context);
 +
 +// Clears all on-disk data (cookies, local storage, IndexedDB, cache, etc.)
-+// for `profile_id`'s storage partition within `browser_context`. AppSwap
-+// Profile partitions live within a single Chrome profile, so any currently
-+// available BrowserContext works. Call SwitchTabsOffAppSwapProfile() first
-+// so nothing is still actively using the partition while it's cleared.
-+// Asynchronous; does not wait for the clear to finish.
++// for `profile_id`'s storage partition within `browser_context`. Call
++// SwitchTabsOffAppSwapProfile() first so nothing is still actively using the
++// partition while it's cleared. Asynchronous; does not wait for the clear to
++// finish.
 +void ClearAppSwapProfileData(const std::string& profile_id,
 +                             content::BrowserContext* browser_context);
 +

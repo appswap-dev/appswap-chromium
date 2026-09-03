@@ -65,13 +65,15 @@ index 8ec3b04f08a10..62e50333a5819 100644
        "//chrome/browser/ui/views:content_setting_bubble_contents",
        "//chrome/browser/ui/views:layout_provider",
 diff --git a/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc b/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
-index 2611503829f48..3d5f2f5b90327 100644
+index 2611503829f48..8ebcb97be9c27 100644
 --- a/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
 +++ b/chrome/browser/ui/views/location_bar/location_icon_state_helper.cc
-@@ -4,8 +4,14 @@
+@@ -4,8 +4,16 @@
  
  #include "chrome/browser/ui/views/location_bar/location_icon_state_helper.h"
  
++#include <optional>
++
 +#include "base/strings/utf_string_conversions.h"
  #include "build/branding_buildflags.h"
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
@@ -83,7 +85,7 @@ index 2611503829f48..3d5f2f5b90327 100644
  #include "chrome/browser/ui/omnibox/omnibox_controller.h"
  #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
  #include "chrome/grit/branded_strings.h"
-@@ -35,6 +41,48 @@
+@@ -35,6 +43,48 @@
  
  namespace location_bar {
  
@@ -98,12 +100,12 @@ index 2611503829f48..3d5f2f5b90327 100644
 +// routed).
 +std::u16string GetAppSwapRoutedPageChipText(const GURL& url,
 +                                            content::WebContents* web_contents) {
-+  const AppSwapApp* app =
++  const std::optional<AppSwapApp> app =
 +      web_contents
 +          ? FindAppSwapAppForUrl(Profile::FromBrowserContext(
 +                                     web_contents->GetBrowserContext()),
 +                                 url)
-+          : nullptr;
++          : std::nullopt;
 +  if (!app) {
 +    return l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
 +  }
@@ -132,7 +134,7 @@ index 2611503829f48..3d5f2f5b90327 100644
  std::u16string GetSecurityChipText(const LocationBarModel* model,
                                     content::WebContents* web_contents,
                                     bool is_editing_or_empty) {
-@@ -42,7 +90,15 @@ std::u16string GetSecurityChipText(const LocationBarModel* model,
+@@ -42,7 +92,15 @@ std::u16string GetSecurityChipText(const LocationBarModel* model,
      return std::u16string();
    }
  
@@ -148,7 +150,7 @@ index 2611503829f48..3d5f2f5b90327 100644
        (contextual_tasks::ShouldShowExpandedSecurityChip() &&
         model->IsContextualTasksPage())) {
      return l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
-@@ -87,6 +143,11 @@ bool ShouldShowSecurityChipText(const LocationBarModel* model,
+@@ -87,6 +145,11 @@ bool ShouldShowSecurityChipText(const LocationBarModel* model,
  
    const GURL& url = model->GetURL();
    if (url.SchemeIs(content::kChromeUIScheme) ||
@@ -183,13 +185,16 @@ index 2db8d679023ad..9d487eaee8729 100644
      "//components/safe_browsing/core/browser:suspicious_site_warning_allowlist",
      "//components/strings:components_branded_strings_grit",
 diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-index ce635526633ef..6e9c2ce674bee 100644
+index ce635526633ef..b3686d2864b4b 100644
 --- a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 +++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-@@ -6,16 +6,25 @@
+@@ -5,17 +5,27 @@
+ #include "chrome/browser/ui/views/page_info/page_info_bubble_view.h"
  
  #include <memory>
- 
+-
++#include <optional>
++
 +#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
@@ -212,7 +217,7 @@ index ce635526633ef..6e9c2ce674bee 100644
  #include "chrome/browser/ui/views/page_info/page_info_bubble_specification.h"
  #include "chrome/browser/ui/views/page_info/page_info_main_view.h"
  #include "chrome/browser/ui/views/page_info/page_info_merchant_trust_content_view.h"
-@@ -27,13 +36,19 @@
+@@ -27,13 +37,19 @@
  #include "components/page_info/core/features.h"
  #include "components/privacy_sandbox/privacy_sandbox_features.h"
  #include "components/strings/grit/components_branded_strings.h"
@@ -232,7 +237,7 @@ index ce635526633ef..6e9c2ce674bee 100644
  #include "ui/views/layout/box_layout.h"
  #include "url/gurl.h"
  
-@@ -85,6 +100,70 @@ bool ShouldRouteToInternalBubble(const GURL& url,
+@@ -85,6 +101,70 @@ bool ShouldRouteToInternalBubble(const GURL& url,
    return IsExtensionPageInfoBubble(url, web_contents);
  }
  
@@ -303,7 +308,7 @@ index ce635526633ef..6e9c2ce674bee 100644
  }  // namespace
  
  // The regular PageInfoBubbleView is not supported for internal Chrome pages and
-@@ -139,7 +218,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
+@@ -139,7 +219,8 @@ InternalPageInfoBubbleView::InternalPageInfoBubbleView(
        text = IDS_PAGE_INFO_READER_MODE_PAGE;
      }
    } else {
@@ -313,7 +318,7 @@ index ce635526633ef..6e9c2ce674bee 100644
    }
  
    // Title insets assume there is content (and thus have no bottom padding). Use
-@@ -222,6 +302,8 @@ PageInfoBubbleView::PageInfoBubbleView(
+@@ -222,6 +303,8 @@ PageInfoBubbleView::PageInfoBubbleView(
    std::unique_ptr<views::View> main_page_view =
        view_factory_->CreateMainPageView(std::move(initialized_callback));
    main_page_view->SetID(PageInfoViewFactory::VIEW_ID_PAGE_INFO_CURRENT_VIEW);
@@ -322,13 +327,13 @@ index ce635526633ef..6e9c2ce674bee 100644
    page_container_ = AddChildView(
        std::make_unique<PageSwitcherView>(std::move(main_page_view)));
  
-@@ -238,6 +320,19 @@ PageInfoBubbleView::~PageInfoBubbleView() {
+@@ -238,6 +321,19 @@ PageInfoBubbleView::~PageInfoBubbleView() {
    RemoveAllChildViews();
  }
  
 +void PageInfoBubbleView::MaybeAddAppSwapPackageInfoView(
 +    views::View* main_page_view) {
-+  const AppSwapApp* app = FindAppSwapAppForUrl(
++  const std::optional<AppSwapApp> app = FindAppSwapAppForUrl(
 +      Profile::FromBrowserContext(web_contents()->GetBrowserContext()),
 +      web_contents()->GetLastCommittedURL());
 +  if (!app) {
@@ -342,7 +347,7 @@ index ce635526633ef..6e9c2ce674bee 100644
  // static
  views::BubbleDialogDelegateView* PageInfoBubbleView::CreatePageInfoBubble(
      std::unique_ptr<PageInfoBubbleSpecification> specification) {
-@@ -270,6 +365,7 @@ void PageInfoBubbleView::OpenMainPage(base::OnceClosure initialized_callback) {
+@@ -270,6 +366,7 @@ void PageInfoBubbleView::OpenMainPage(base::OnceClosure initialized_callback) {
    std::unique_ptr<views::View> main_page_view =
        view_factory_->CreateMainPageView(std::move(initialized_callback));
    main_page_view->SetID(PageInfoViewFactory::VIEW_ID_PAGE_INFO_CURRENT_VIEW);
@@ -350,7 +355,7 @@ index ce635526633ef..6e9c2ce674bee 100644
    page_container_->SwitchToPage(std::move(main_page_view));
  
    auto* close_button = page_container_->GetViewByID(
-@@ -310,6 +406,18 @@ void PageInfoBubbleView::OpenCookiesPage() {
+@@ -310,6 +407,18 @@ void PageInfoBubbleView::OpenCookiesPage() {
    AnnouncePageOpened(l10n_util::GetStringUTF16(IDS_PAGE_INFO_COOKIES));
  }
  
@@ -369,6 +374,21 @@ index ce635526633ef..6e9c2ce674bee 100644
  void PageInfoBubbleView::OpenMerchantTrustPage() {
    CHECK(merchant_trust_coordinator_);
    auto title = l10n_util::GetStringUTF16(IDS_PAGE_INFO_MERCHANT_TRUST_HEADER);
+@@ -331,6 +440,14 @@ void PageInfoBubbleView::CloseBubble() {
+       views::Widget::ClosedReason::kCloseButtonClicked);
+ }
+ 
++void PageInfoBubbleView::NotifyContentSizeChanged() {
++  // Same call ChildPreferredSizeChanged() below makes for every other
++  // subpage; this is the explicit entry point the version picker's WebView
++  // uses instead, for the reason documented on
++  // PageInfoNavigationHandler::NotifyContentSizeChanged().
++  SizeToContents();
++}
++
+ void PageInfoBubbleView::DidChangeVisibleSecurityState() {
+   presenter_->UpdateSecurityState();
+ }
 diff --git a/chrome/browser/ui/views/page_info/page_info_main_view.cc b/chrome/browser/ui/views/page_info/page_info_main_view.cc
 index 5bcdfb8d63a66..8f8b6ed6d5be4 100644
 --- a/chrome/browser/ui/views/page_info/page_info_main_view.cc

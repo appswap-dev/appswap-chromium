@@ -77,6 +77,437 @@ index 0000000000000..a1dc0cf5ed732
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_FACTORY_H_
+diff --git a/chrome/browser/app_swap/app_swap_config_store.cc b/chrome/browser/app_swap/app_swap_config_store.cc
+new file mode 100644
+index 0000000000000..9d8a7f1a8f801
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_config_store.cc
+@@ -0,0 +1,110 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_config_store.h"
++
++#include <optional>
++#include <string>
++#include <utility>
++
++#include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/task/thread_pool.h"
++
++namespace {
++
++// Blocking; runs on the store's task runner.
++base::DictValue ReadConfigFile(const base::FilePath& path) {
++  std::string json;
++  if (!base::ReadFileToString(path, &json)) {
++    return base::DictValue();
++  }
++  std::optional<base::DictValue> parsed =
++      base::JSONReader::ReadDict(json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
++  return parsed ? std::move(*parsed) : base::DictValue();
++}
++
++// Blocking; runs on the store's task runner. Atomic: writes a sibling temp
++// file and renames it over `path`, so an interrupted write leaves the
++// previous config intact rather than a truncated file.
++void WriteConfigFile(const base::FilePath& path, std::string json) {
++  if (!base::CreateDirectory(path.DirName())) {
++    return;
++  }
++  base::ImportantFileWriter::WriteFileAtomically(path, json);
++}
++
++}  // namespace
++
++AppSwapConfigStore::AppSwapConfigStore(
++    const base::FilePath& profile_path,
++    base::FilePath::StringViewType file_name)
++    : config_path_(
++          profile_path.Append(FILE_PATH_LITERAL("AppSwap")).Append(file_name)),
++      task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
++          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++           base::TaskShutdownBehavior::BLOCK_SHUTDOWN})) {}
++
++AppSwapConfigStore::~AppSwapConfigStore() = default;
++
++bool AppSwapConfigStore::loaded() const {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  return loaded_;
++}
++
++void AppSwapConfigStore::RunWhenLoaded(base::OnceClosure closure) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  if (loaded_) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, std::move(closure));
++    return;
++  }
++
++  pending_load_.push_back(std::move(closure));
++
++  if (loading_) {
++    return;
++  }
++  loading_ = true;
++
++  task_runner_->PostTaskAndReplyWithResult(
++      FROM_HERE, base::BindOnce(&ReadConfigFile, config_path_),
++      base::BindOnce(&AppSwapConfigStore::OnConfigLoaded,
++                     weak_factory_.GetWeakPtr()));
++}
++
++void AppSwapConfigStore::OnConfigLoaded(base::DictValue dict) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  ParseConfig(dict);
++  loaded_ = true;
++  loading_ = false;
++  OnConfigLoadFinished();
++
++  // Swapped out before running anything: `loaded_` is already true above, so
++  // a queued closure that calls RunWhenLoaded() again posts a fresh task
++  // rather than appending here -- but taking the vector first keeps that
++  // true regardless of how this ordering is later changed.
++  std::vector<base::OnceClosure> pending = std::move(pending_load_);
++  pending_load_.clear();
++  for (base::OnceClosure& closure : pending) {
++    std::move(closure).Run();
++  }
++}
++
++void AppSwapConfigStore::Save() {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  std::string json;
++  if (!base::JSONWriter::Write(SerializeConfig(), &json)) {
++    return;
++  }
++  task_runner_->PostTask(
++      FROM_HERE,
++      base::BindOnce(&WriteConfigFile, config_path_, std::move(json)));
++}
+diff --git a/chrome/browser/app_swap/app_swap_config_store.h b/chrome/browser/app_swap/app_swap_config_store.h
+new file mode 100644
+index 0000000000000..105298b5a4ed4
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_config_store.h
+@@ -0,0 +1,99 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_CONFIG_STORE_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_CONFIG_STORE_H_
++
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/functional/callback.h"
++#include "base/memory/weak_ptr.h"
++#include "base/sequence_checker.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/values.h"
++
++// Shared load/save machinery for the per-Project (== per-Chromium-Profile)
++// AppSwap JSON config files -- apps.json, route_groups.json, profiles.json.
++// Each of those services owns exactly one of these; the store handles the
++// file, the load state machine, and ordering, and the subclass supplies only
++// the parse/serialize step for its own entity.
++//
++// Two properties this exists to guarantee, both of which the three
++// hand-rolled copies it replaced got wrong:
++//
++//  * Writes are atomic and strictly ordered. Everything (the initial read
++//    included) runs on one SequencedTaskRunner and goes through
++//    base::ImportantFileWriter, so two saves in quick succession can't land
++//    out of order and persist the older snapshot, and a crash mid-write
++//    can't truncate the file.
++//
++//  * Nothing observes or mutates an unloaded config. Every public entry
++//    point on a subclass -- readers and mutators alike -- runs its work
++//    through RunWhenLoaded(), so a mutation racing the very first read
++//    can't append to an empty in-memory list and then persist *that* as the
++//    entire config, silently discarding the file's real contents.
++class AppSwapConfigStore {
++ public:
++  // `profile_path` is the Chromium Profile directory; the config lives at
++  // <profile_path>/AppSwap/<file_name>.
++  AppSwapConfigStore(const base::FilePath& profile_path,
++                     base::FilePath::StringViewType file_name);
++  virtual ~AppSwapConfigStore();
++
++  AppSwapConfigStore(const AppSwapConfigStore&) = delete;
++  AppSwapConfigStore& operator=(const AppSwapConfigStore&) = delete;
++
++  // Runs `closure` once the config is in memory, kicking off the read if it
++  // hasn't started. Always asynchronous, even when already loaded, so
++  // callers see one consistent ordering. Queued closures run in the order
++  // they were registered, which is what lets a caller sequence a reply
++  // behind a mutation it just requested (see the AddApp/RunWhenLoaded pair
++  // in AppSwapProjectsPageHandler).
++  void RunWhenLoaded(base::OnceClosure closure);
++
++  // Whether the config has finished loading. Callers that must answer
++  // synchronously (e.g. a URLLoaderFactory resolving a route per request,
++  // which can't wait on a callback) use this to decide whether their
++  // *IfLoaded() accessor has real data; everyone else should use
++  // RunWhenLoaded().
++  bool loaded() const;
++
++ protected:
++  // Populates in-memory state from `dict`, which is empty if the file was
++  // missing, unreadable, or unparseable. Called exactly once, on the owning
++  // sequence, before any closure queued with RunWhenLoaded() runs.
++  virtual void ParseConfig(const base::DictValue& dict) = 0;
++
++  // Returns the dict to persist. Called synchronously from Save().
++  virtual base::DictValue SerializeConfig() const = 0;
++
++  // Called once, after ParseConfig() and after loaded() has become true, but
++  // before any closure queued with RunWhenLoaded() runs. Override to notify
++  // observers that the state is now readable -- the ordering matters, since
++  // an observer woken here will immediately call an *IfLoaded() accessor.
++  virtual void OnConfigLoadFinished() {}
++
++  // Serializes the current state and writes it to disk. Cheap to call
++  // repeatedly; each call replaces the file atomically.
++  void Save();
++
++  SEQUENCE_CHECKER(sequence_checker_);
++
++ private:
++  void OnConfigLoaded(base::DictValue dict);
++
++  const base::FilePath config_path_;
++  // One sequence for this file: the initial read and every subsequent write
++  // run on it, in order.
++  const scoped_refptr<base::SequencedTaskRunner> task_runner_;
++
++  bool loaded_ = false;
++  bool loading_ = false;
++  std::vector<base::OnceClosure> pending_load_;
++
++  base::WeakPtrFactory<AppSwapConfigStore> weak_factory_{this};
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_CONFIG_STORE_H_
+diff --git a/chrome/browser/app_swap/app_swap_config_store_unittest.cc b/chrome/browser/app_swap/app_swap_config_store_unittest.cc
+new file mode 100644
+index 0000000000000..28c4a03e1dc01
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_config_store_unittest.cc
+@@ -0,0 +1,204 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_config_store.h"
++
++#include <string>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/test/task_environment.h"
++#include "base/values.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace {
++
++// Minimal concrete store: one list of strings under "items". Stands in for
++// the three real services, which differ only in what they parse.
++class TestConfigStore : public AppSwapConfigStore {
++ public:
++  explicit TestConfigStore(const base::FilePath& profile_path)
++      : AppSwapConfigStore(profile_path, FILE_PATH_LITERAL("test.json")) {}
++
++  void AddItem(const std::string& item) {
++    RunWhenLoaded(base::BindOnce(&TestConfigStore::AddItemNow,
++                                 base::Unretained(this), item));
++  }
++
++  void GetItems(base::OnceCallback<void(std::vector<std::string>)> callback) {
++    RunWhenLoaded(base::BindOnce(
++        [](TestConfigStore* self,
++           base::OnceCallback<void(std::vector<std::string>)> callback) {
++          std::move(callback).Run(self->items_);
++        },
++        base::Unretained(this), std::move(callback)));
++  }
++
++  int parse_count() const { return parse_count_; }
++
++ protected:
++  void ParseConfig(const base::DictValue& dict) override {
++    ++parse_count_;
++    if (const base::ListValue* items = dict.FindList("items")) {
++      for (const base::Value& value : *items) {
++        if (const std::string* item = value.GetIfString()) {
++          items_.push_back(*item);
++        }
++      }
++    }
++  }
++
++  base::DictValue SerializeConfig() const override {
++    base::ListValue items;
++    for (const std::string& item : items_) {
++      items.Append(item);
++    }
++    base::DictValue root;
++    root.Set("items", std::move(items));
++    return root;
++  }
++
++ private:
++  void AddItemNow(const std::string& item) {
++    items_.push_back(item);
++    Save();
++  }
++
++  std::vector<std::string> items_;
++  int parse_count_ = 0;
++};
++
++class AppSwapConfigStoreTest : public testing::Test {
++ protected:
++  void SetUp() override { ASSERT_TRUE(temp_dir_.CreateUniqueTempDir()); }
++
++  base::FilePath profile_path() const { return temp_dir_.GetPath(); }
++
++  base::FilePath ConfigPath() const {
++    return profile_path()
++        .Append(FILE_PATH_LITERAL("AppSwap"))
++        .Append(FILE_PATH_LITERAL("test.json"));
++  }
++
++  void WriteConfig(const std::string& json) {
++    ASSERT_TRUE(base::CreateDirectory(ConfigPath().DirName()));
++    ASSERT_TRUE(base::WriteFile(ConfigPath(), json));
++  }
++
++  std::string ReadConfig() {
++    std::string json;
++    base::ReadFileToString(ConfigPath(), &json);
++    return json;
++  }
++
++  std::vector<std::string> GetItemsAndWait(TestConfigStore& store) {
++    std::vector<std::string> result;
++    store.GetItems(base::BindOnce(
++        [](std::vector<std::string>* out, std::vector<std::string> items) {
++          *out = std::move(items);
++        },
++        &result));
++    task_environment_.RunUntilIdle();
++    return result;
++  }
++
++  base::test::TaskEnvironment task_environment_;
++  base::ScopedTempDir temp_dir_;
++};
++
++TEST_F(AppSwapConfigStoreTest, ReadsExistingConfig) {
++  WriteConfig(R"({"items":["a","b"]})");
++  TestConfigStore store(profile_path());
++  EXPECT_EQ(std::vector<std::string>({"a", "b"}), GetItemsAndWait(store));
++}
++
++TEST_F(AppSwapConfigStoreTest, MissingFileLoadsEmpty) {
++  TestConfigStore store(profile_path());
++  EXPECT_TRUE(GetItemsAndWait(store).empty());
++}
++
++TEST_F(AppSwapConfigStoreTest, MalformedFileLoadsEmptyRatherThanFailing) {
++  WriteConfig("this is not json");
++  TestConfigStore store(profile_path());
++  EXPECT_TRUE(GetItemsAndWait(store).empty());
++}
++
++TEST_F(AppSwapConfigStoreTest, ReadsOnlyOnceForConcurrentCallers) {
++  WriteConfig(R"({"items":["a"]})");
++  TestConfigStore store(profile_path());
++  // Three requests before the first read can finish must share one load, not
++  // race three of them.
++  store.GetItems(base::DoNothing());
++  store.GetItems(base::DoNothing());
++  store.GetItems(base::DoNothing());
++  task_environment_.RunUntilIdle();
++  EXPECT_EQ(1, store.parse_count());
++}
++
++TEST_F(AppSwapConfigStoreTest, MutationBeforeLoadDoesNotDiscardExistingConfig) {
++  // The regression this exists for: a mutation issued before the initial
++  // read finished used to append to an empty in-memory list and then persist
++  // *that* as the whole config, silently dropping everything already in the
++  // file.
++  WriteConfig(R"({"items":["a","b"]})");
++  TestConfigStore store(profile_path());
++  store.AddItem("c");  // Deliberately not waiting for the load first.
++  task_environment_.RunUntilIdle();
++
++  EXPECT_EQ(std::vector<std::string>({"a", "b", "c"}), GetItemsAndWait(store));
++  EXPECT_EQ(R"({"items":["a","b","c"]})", ReadConfig());
++}
++
++TEST_F(AppSwapConfigStoreTest, QueuedWorkRunsInTheOrderItWasRequested) {
++  TestConfigStore store(profile_path());
++  store.AddItem("a");
++  store.AddItem("b");
++  store.AddItem("c");
++  task_environment_.RunUntilIdle();
++  EXPECT_EQ(std::vector<std::string>({"a", "b", "c"}), GetItemsAndWait(store));
++}
++
++TEST_F(AppSwapConfigStoreTest, RapidSavesLeaveTheNewestSnapshotOnDisk) {
++  // Every write goes through one sequenced runner, so the last mutation is
++  // the one that ends up on disk -- with unordered posting, an earlier
++  // snapshot could land last and win.
++  TestConfigStore store(profile_path());
++  for (int i = 0; i < 20; ++i) {
++    store.AddItem(base::NumberToString(i));
++  }
++  task_environment_.RunUntilIdle();
++
++  const std::vector<std::string> items = GetItemsAndWait(store);
++  ASSERT_EQ(20u, items.size());
++  EXPECT_EQ("19", items.back());
++
++  // And a fresh store reading the same file sees exactly that.
++  TestConfigStore reloaded(profile_path());
++  EXPECT_EQ(items, GetItemsAndWait(reloaded));
++}
++
++TEST_F(AppSwapConfigStoreTest, SaveCreatesTheConfigDirectory) {
++  ASSERT_FALSE(base::PathExists(ConfigPath().DirName()));
++  TestConfigStore store(profile_path());
++  store.AddItem("a");
++  task_environment_.RunUntilIdle();
++  EXPECT_TRUE(base::PathExists(ConfigPath()));
++}
++
++TEST_F(AppSwapConfigStoreTest, LoadedIsFalseUntilTheReadCompletes) {
++  WriteConfig(R"({"items":["a"]})");
++  TestConfigStore store(profile_path());
++  EXPECT_FALSE(store.loaded());
++  store.GetItems(base::DoNothing());
++  EXPECT_FALSE(store.loaded());
++  task_environment_.RunUntilIdle();
++  EXPECT_TRUE(store.loaded());
++}
++
++}  // namespace
 diff --git a/chrome/browser/app_swap/app_swap_profiles_service_factory.cc b/chrome/browser/app_swap/app_swap_profiles_service_factory.cc
 new file mode 100644
 index 0000000000000..57abd356a914e
@@ -349,10 +780,10 @@ index 0000000000000..851ef77bf79a9
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_PIN_TAB_HELPER_H_
 diff --git a/chrome/browser/app_swap/app_swap_route_group_service.cc b/chrome/browser/app_swap/app_swap_route_group_service.cc
 new file mode 100644
-index 0000000000000..ccc2472272ca0
+index 0000000000000..7768c8f617afc
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_group_service.cc
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,245 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -363,14 +794,9 @@ index 0000000000000..ccc2472272ca0
 +#include <string>
 +#include <utility>
 +
-+#include "base/files/file_util.h"
 +#include "base/functional/bind.h"
-+#include "base/json/json_reader.h"
-+#include "base/json/json_writer.h"
 +#include "base/no_destructor.h"
-+#include "base/task/thread_pool.h"
 +#include "base/uuid.h"
-+#include "base/values.h"
 +#include "content/public/browser/browser_context.h"
 +
 +namespace {
@@ -432,151 +858,139 @@ index 0000000000000..ccc2472272ca0
 +  return group;
 +}
 +
-+// Reads and parses the config file. Runs on a MayBlock task runner.
-+std::vector<AppSwapRouteGroup> ReadConfigFile(const base::FilePath& path) {
-+  std::vector<AppSwapRouteGroup> groups;
-+  std::string json;
-+  if (!base::ReadFileToString(path, &json)) {
-+    return groups;
-+  }
-+  std::optional<base::DictValue> parsed =
-+      base::JSONReader::ReadDict(json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
-+  if (!parsed) {
-+    return groups;
-+  }
-+  const base::ListValue* groups_list = parsed->FindList("route_groups");
++}  // namespace
++
++AppSwapRouteGroupService::AppSwapRouteGroupService(
++    content::BrowserContext* browser_context)
++    : AppSwapConfigStore(browser_context->GetPath(),
++                         FILE_PATH_LITERAL("route_groups.json")) {}
++AppSwapRouteGroupService::~AppSwapRouteGroupService() = default;
++
++void AppSwapRouteGroupService::ParseConfig(const base::DictValue& dict) {
++  const base::ListValue* groups_list = dict.FindList("route_groups");
 +  if (!groups_list) {
-+    return groups;
++    return;
 +  }
-+  for (size_t i = 0; i < groups_list->size(); ++i) {
-+    const base::Value& value = (*groups_list)[i];
++  for (const base::Value& value : *groups_list) {
 +    if (!value.is_dict()) {
 +      continue;
 +    }
 +    if (std::optional<AppSwapRouteGroup> group =
 +            GroupFromDict(value.GetDict())) {
-+      groups.push_back(std::move(*group));
++      groups_.push_back(std::move(*group));
 +    }
 +  }
-+  return groups;
 +}
 +
-+}  // namespace
-+
-+AppSwapRouteGroupService::AppSwapRouteGroupService(
-+    content::BrowserContext* browser_context)
-+    : profile_path_(browser_context->GetPath()) {}
-+AppSwapRouteGroupService::~AppSwapRouteGroupService() = default;
-+
-+base::FilePath AppSwapRouteGroupService::ConfigPath() const {
-+  return profile_path_.Append(FILE_PATH_LITERAL("AppSwap"))
-+      .Append(FILE_PATH_LITERAL("route_groups.json"));
++base::DictValue AppSwapRouteGroupService::SerializeConfig() const {
++  base::DictValue root;
++  base::ListValue groups_list;
++  for (const AppSwapRouteGroup& group : groups_) {
++    groups_list.Append(GroupToDict(group));
++  }
++  root.Set("route_groups", std::move(groups_list));
++  return root;
 +}
 +
 +void AppSwapRouteGroupService::GetRouteGroups(
 +    base::OnceCallback<void(std::vector<AppSwapRouteGroup>)> callback) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+
-+  if (loaded_) {
-+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-+        FROM_HERE, base::BindOnce(std::move(callback), groups_));
-+    return;
-+  }
-+
-+  pending_load_.push_back(base::BindOnce(
++  RunWhenLoaded(base::BindOnce(
 +      [](AppSwapRouteGroupService* self,
 +         base::OnceCallback<void(std::vector<AppSwapRouteGroup>)> callback) {
-+        self->GetRouteGroups(std::move(callback));
++        std::move(callback).Run(self->groups_);
 +      },
 +      base::Unretained(this), std::move(callback)));
-+
-+  if (loading_) {
-+    return;
-+  }
-+  loading_ = true;
-+
-+  base::ThreadPool::PostTaskAndReplyWithResult(
-+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-+      base::BindOnce(&ReadConfigFile, ConfigPath()),
-+      base::BindOnce(&AppSwapRouteGroupService::OnConfigLoaded,
-+                     base::Unretained(this)));
 +}
 +
 +const std::vector<AppSwapRouteGroup>&
 +AppSwapRouteGroupService::GetRouteGroupsIfLoaded() const {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 +  static const base::NoDestructor<std::vector<AppSwapRouteGroup>> kEmpty;
-+  return loaded_ ? groups_ : *kEmpty;
-+}
-+
-+void AppSwapRouteGroupService::OnConfigLoaded(
-+    std::vector<AppSwapRouteGroup> groups) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  groups_ = std::move(groups);
-+  loaded_ = true;
-+  loading_ = false;
-+
-+  std::vector<base::OnceClosure> pending = std::move(pending_load_);
-+  pending_load_.clear();
-+  for (base::OnceClosure& callback : pending) {
-+    std::move(callback).Run();
-+  }
++  return loaded() ? groups_ : *kEmpty;
 +}
 +
 +void AppSwapRouteGroupService::AddRouteGroup(AppSwapRouteGroup group) {
++  RunWhenLoaded(base::BindOnce(&AppSwapRouteGroupService::AddRouteGroupNow,
++                               base::Unretained(this), std::move(group)));
++}
++
++void AppSwapRouteGroupService::AddRouteGroupNow(AppSwapRouteGroup group) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
 +  if (group.id.empty()) {
 +    group.id = base::Uuid::GenerateRandomV4().AsLowercaseString();
 +  }
 +  groups_.push_back(std::move(group));
-+  ScheduleSave();
++  Save();
 +}
 +
 +void AppSwapRouteGroupService::UpdateRouteGroup(AppSwapRouteGroup group) {
++  RunWhenLoaded(base::BindOnce(&AppSwapRouteGroupService::UpdateRouteGroupNow,
++                               base::Unretained(this), std::move(group)));
++}
++
++void AppSwapRouteGroupService::UpdateRouteGroupNow(AppSwapRouteGroup group) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
 +  for (AppSwapRouteGroup& existing : groups_) {
 +    if (existing.id == group.id) {
++      // Rules aren't part of what the caller edits here (they have their own
++      // Add/Update/RemoveRule entry points), so keep whatever's loaded
++      // rather than letting a group edit silently drop them.
++      group.rules = std::move(existing.rules);
 +      existing = std::move(group);
-+      ScheduleSave();
++      Save();
 +      return;
 +    }
 +  }
 +}
 +
 +void AppSwapRouteGroupService::RemoveRouteGroup(const std::string& id) {
++  RunWhenLoaded(base::BindOnce(&AppSwapRouteGroupService::RemoveRouteGroupNow,
++                               base::Unretained(this), id));
++}
++
++void AppSwapRouteGroupService::RemoveRouteGroupNow(const std::string& id) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
 +  for (auto it = groups_.begin(); it != groups_.end(); ++it) {
 +    if (it->id == id) {
 +      groups_.erase(it);
-+      ScheduleSave();
++      Save();
 +      return;
 +    }
 +  }
 +}
 +
 +void AppSwapRouteGroupService::AddRule(const std::string& group_id,
-+                                        AppSwapRouteGroupRule rule) {
++                                       AppSwapRouteGroupRule rule) {
++  RunWhenLoaded(base::BindOnce(&AppSwapRouteGroupService::AddRuleNow,
++                               base::Unretained(this), group_id,
++                               std::move(rule)));
++}
++
++void AppSwapRouteGroupService::AddRuleNow(const std::string& group_id,
++                                          AppSwapRouteGroupRule rule) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
 +  for (AppSwapRouteGroup& group : groups_) {
 +    if (group.id == group_id) {
 +      if (rule.id.empty()) {
 +        rule.id = base::Uuid::GenerateRandomV4().AsLowercaseString();
 +      }
 +      group.rules.push_back(std::move(rule));
-+      ScheduleSave();
++      Save();
 +      return;
 +    }
 +  }
 +}
 +
 +void AppSwapRouteGroupService::UpdateRule(const std::string& group_id,
-+                                           AppSwapRouteGroupRule rule) {
++                                          AppSwapRouteGroupRule rule) {
++  RunWhenLoaded(base::BindOnce(&AppSwapRouteGroupService::UpdateRuleNow,
++                               base::Unretained(this), group_id,
++                               std::move(rule)));
++}
++
++void AppSwapRouteGroupService::UpdateRuleNow(const std::string& group_id,
++                                             AppSwapRouteGroupRule rule) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
 +  for (AppSwapRouteGroup& group : groups_) {
 +    if (group.id != group_id) {
 +      continue;
@@ -584,7 +998,7 @@ index 0000000000000..ccc2472272ca0
 +    for (AppSwapRouteGroupRule& existing : group.rules) {
 +      if (existing.id == rule.id) {
 +        existing = std::move(rule);
-+        ScheduleSave();
++        Save();
 +        return;
 +      }
 +    }
@@ -593,9 +1007,14 @@ index 0000000000000..ccc2472272ca0
 +}
 +
 +void AppSwapRouteGroupService::RemoveRule(const std::string& group_id,
-+                                           const std::string& rule_id) {
++                                          const std::string& rule_id) {
++  RunWhenLoaded(base::BindOnce(&AppSwapRouteGroupService::RemoveRuleNow,
++                               base::Unretained(this), group_id, rule_id));
++}
++
++void AppSwapRouteGroupService::RemoveRuleNow(const std::string& group_id,
++                                             const std::string& rule_id) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
 +  for (AppSwapRouteGroup& group : groups_) {
 +    if (group.id != group_id) {
 +      continue;
@@ -603,45 +1022,19 @@ index 0000000000000..ccc2472272ca0
 +    for (auto it = group.rules.begin(); it != group.rules.end(); ++it) {
 +      if (it->id == rule_id) {
 +        group.rules.erase(it);
-+        ScheduleSave();
++        Save();
 +        return;
 +      }
 +    }
 +    return;
 +  }
 +}
-+
-+void AppSwapRouteGroupService::ScheduleSave() {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+
-+  base::DictValue root;
-+  base::ListValue groups_list;
-+  for (const AppSwapRouteGroup& group : groups_) {
-+    groups_list.Append(GroupToDict(group));
-+  }
-+  root.Set("route_groups", std::move(groups_list));
-+
-+  std::string json;
-+  if (!base::JSONWriter::Write(root, &json)) {
-+    return;
-+  }
-+
-+  const base::FilePath path = ConfigPath();
-+  base::ThreadPool::PostTask(
-+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-+      base::BindOnce(
-+          [](base::FilePath path, std::string json) {
-+            base::CreateDirectory(path.DirName());
-+            base::WriteFile(path, json);
-+          },
-+          std::move(path), std::move(json)));
-+}
 diff --git a/chrome/browser/app_swap/app_swap_route_group_service.h b/chrome/browser/app_swap/app_swap_route_group_service.h
 new file mode 100644
-index 0000000000000..9ea4a3d29b2ea
+index 0000000000000..d1c3e6c8ff58a
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_group_service.h
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,104 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -652,9 +1045,9 @@ index 0000000000000..9ea4a3d29b2ea
 +#include <string>
 +#include <vector>
 +
-+#include "base/files/file_path.h"
 +#include "base/functional/callback.h"
-+#include "base/sequence_checker.h"
++#include "base/values.h"
++#include "chrome/browser/app_swap/app_swap_config_store.h"
 +#include "components/keyed_service/core/keyed_service.h"
 +
 +namespace content {
@@ -690,13 +1083,14 @@ index 0000000000000..9ea4a3d29b2ea
 +};
 +
 +// Owns the persistent route-group configuration for one Project (== Chromium
-+// Profile), stored as JSON under that profile's own directory. The file is
-+// read/written on a background (MayBlock) task runner. See
++// Profile), stored as JSON under that profile's own directory. See
++// AppSwapConfigStore for the load/save mechanics, and
 +// AppSwapRouteGroupServiceFactory for how to reach the instance for a given
 +// Profile.
-+class AppSwapRouteGroupService : public KeyedService {
++class AppSwapRouteGroupService : public KeyedService,
++                                 public AppSwapConfigStore {
 + public:
-+  AppSwapRouteGroupService(content::BrowserContext* browser_context);
++  explicit AppSwapRouteGroupService(content::BrowserContext* browser_context);
 +  ~AppSwapRouteGroupService() override;
 +
 +  AppSwapRouteGroupService(const AppSwapRouteGroupService&) = delete;
@@ -713,9 +1107,11 @@ index 0000000000000..9ea4a3d29b2ea
 +  // why this exists alongside GetRouteGroups().
 +  const std::vector<AppSwapRouteGroup>& GetRouteGroupsIfLoaded() const;
 +
-+  // Group mutations. Must only be called after the config has been loaded
-+  // (i.e. after a GetRouteGroups callback has run). They update the
-+  // in-memory list and schedule an asynchronous save.
++  // Group mutations. Safe to call at any time: each one is queued behind the
++  // config load (see AppSwapConfigStore::RunWhenLoaded), applies to the
++  // in-memory list, and writes the file. `id` is generated for
++  // AddRouteGroup() if empty; Update/Remove are no-ops if no group has that
++  // id.
 +  void AddRouteGroup(AppSwapRouteGroup group);
 +  void UpdateRouteGroup(AppSwapRouteGroup group);
 +  void RemoveRouteGroup(const std::string& id);
@@ -726,18 +1122,20 @@ index 0000000000000..9ea4a3d29b2ea
 +  void UpdateRule(const std::string& group_id, AppSwapRouteGroupRule rule);
 +  void RemoveRule(const std::string& group_id, const std::string& rule_id);
 +
++ protected:
++  // AppSwapConfigStore:
++  void ParseConfig(const base::DictValue& dict) override;
++  base::DictValue SerializeConfig() const override;
++
 + private:
-+  void OnConfigLoaded(std::vector<AppSwapRouteGroup> groups);
-+  void ScheduleSave();
++  void AddRouteGroupNow(AppSwapRouteGroup group);
++  void UpdateRouteGroupNow(AppSwapRouteGroup group);
++  void RemoveRouteGroupNow(const std::string& id);
++  void AddRuleNow(const std::string& group_id, AppSwapRouteGroupRule rule);
++  void UpdateRuleNow(const std::string& group_id, AppSwapRouteGroupRule rule);
++  void RemoveRuleNow(const std::string& group_id, const std::string& rule_id);
 +
-+  base::FilePath ConfigPath() const;
-+
-+  const base::FilePath profile_path_;
 +  std::vector<AppSwapRouteGroup> groups_;
-+  bool loaded_ = false;
-+  bool loading_ = false;
-+  std::vector<base::OnceClosure> pending_load_;
-+  SEQUENCE_CHECKER(sequence_checker_);
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_SERVICE_H_
@@ -819,6 +1217,251 @@ index 0000000000000..7ff8ae95bde33
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_GROUP_SERVICE_FACTORY_H_
+diff --git a/chrome/browser/app_swap/app_swap_route_matcher_unittest.cc b/chrome/browser/app_swap/app_swap_route_matcher_unittest.cc
+new file mode 100644
+index 0000000000000..7e48eef15c0da
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_route_matcher_unittest.cc
+@@ -0,0 +1,140 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
++
++#include <optional>
++#include <string>
++
++#include "chrome/browser/app_swap/app_swap_route_group_service.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "url/gurl.h"
++
++namespace {
++
++// The two Profile-taking lookups (FindAppSwapAppForUrl,
++// FindAppSwapRouteGroupById) need a KeyedService and are covered by browser
++// tests instead; everything here is the pure matching/rewriting logic those
++// two funnel into, which is where the edge cases actually live.
++
++TEST(AppSwapRouteMatcherTest, MatchesWholeOriginForRootPattern) {
++  const std::string pattern = "https://my-app.dev";
++  EXPECT_TRUE(AppSwapUrlMatchesPattern(GURL("https://my-app.dev/"), pattern));
++  EXPECT_TRUE(
++      AppSwapUrlMatchesPattern(GURL("https://my-app.dev/a/b?c=1"), pattern));
++}
++
++TEST(AppSwapRouteMatcherTest, RequiresSameSchemeHostAndPort) {
++  const std::string pattern = "https://my-app.dev";
++  EXPECT_FALSE(AppSwapUrlMatchesPattern(GURL("http://my-app.dev/"), pattern));
++  EXPECT_FALSE(
++      AppSwapUrlMatchesPattern(GURL("https://other.dev/"), pattern));
++  EXPECT_FALSE(
++      AppSwapUrlMatchesPattern(GURL("https://my-app.dev:8443/"), pattern));
++  // A suffix match on the host would be a serious bug: this is a different
++  // site entirely.
++  EXPECT_FALSE(
++      AppSwapUrlMatchesPattern(GURL("https://my-app.dev.evil.com/"), pattern));
++}
++
++TEST(AppSwapRouteMatcherTest, TreatsDefaultPortAsExplicitPort) {
++  EXPECT_TRUE(AppSwapUrlMatchesPattern(GURL("https://my-app.dev:443/x"),
++                                       "https://my-app.dev"));
++  EXPECT_TRUE(AppSwapUrlMatchesPattern(GURL("https://my-app.dev/x"),
++                                       "https://my-app.dev:443"));
++}
++
++TEST(AppSwapRouteMatcherTest, MatchesOnPathSegmentBoundariesOnly) {
++  const std::string pattern = "https://my-app.dev/docs";
++  EXPECT_TRUE(AppSwapUrlMatchesPattern(GURL("https://my-app.dev/docs"),
++                                       pattern));
++  EXPECT_TRUE(AppSwapUrlMatchesPattern(GURL("https://my-app.dev/docs/intro"),
++                                       pattern));
++  // The case the boundary check exists for.
++  EXPECT_FALSE(AppSwapUrlMatchesPattern(GURL("https://my-app.dev/docs-legacy"),
++                                        pattern));
++  EXPECT_FALSE(AppSwapUrlMatchesPattern(GURL("https://my-app.dev/other"),
++                                        pattern));
++}
++
++TEST(AppSwapRouteMatcherTest, RejectsInvalidPattern) {
++  EXPECT_FALSE(AppSwapUrlMatchesPattern(GURL("https://my-app.dev/"), ""));
++  EXPECT_FALSE(
++      AppSwapUrlMatchesPattern(GURL("https://my-app.dev/"), "not a url"));
++}
++
++TEST(AppSwapRouteMatcherTest, RewriteAppendsSuffixBeyondPatternPath) {
++  EXPECT_EQ(GURL("https://beta.my-app.dev/api/users"),
++            ComputeAppSwapRewriteUrl(GURL("https://my-app.dev/api/users"),
++                                     "https://my-app.dev/api",
++                                     "https://beta.my-app.dev/api"));
++}
++
++TEST(AppSwapRouteMatcherTest, RewritePreservesQuery) {
++  EXPECT_EQ(GURL("https://beta.my-app.dev/api/users?x=1&y=2"),
++            ComputeAppSwapRewriteUrl(GURL("https://my-app.dev/api/users?x=1&y=2"),
++                                     "https://my-app.dev/api",
++                                     "https://beta.my-app.dev/api"));
++}
++
++TEST(AppSwapRouteMatcherTest, RewriteCarriesWholePathForRootPattern) {
++  EXPECT_EQ(GURL("http://localhost:5000/api/users"),
++            ComputeAppSwapRewriteUrl(GURL("https://my-app.dev/api/users"),
++                                     "https://my-app.dev",
++                                     "http://localhost:5000"));
++}
++
++TEST(AppSwapRouteMatcherTest, RewriteDoesNotDoubleSlashAtTheJoin) {
++  EXPECT_EQ(GURL("https://beta.my-app.dev/api/users"),
++            ComputeAppSwapRewriteUrl(GURL("https://my-app.dev/api/users"),
++                                     "https://my-app.dev/api",
++                                     "https://beta.my-app.dev/api/"));
++}
++
++TEST(AppSwapRouteMatcherTest, RewriteOfExactPatternPathHasNoSuffix) {
++  EXPECT_EQ(GURL("https://beta.my-app.dev/v2"),
++            ComputeAppSwapRewriteUrl(GURL("https://my-app.dev/api"),
++                                     "https://my-app.dev/api",
++                                     "https://beta.my-app.dev/v2"));
++}
++
++TEST(AppSwapRouteMatcherTest, NoGroupPinnedMeansNoRule) {
++  EXPECT_FALSE(FindAppSwapRouteGroupRuleForUrl(std::nullopt,
++                                               GURL("https://my-app.dev/api")));
++}
++
++TEST(AppSwapRouteMatcherTest, EmptyGroupMeansNoRule) {
++  // "Prod" is an ordinary group with zero rules, not a special case.
++  AppSwapRouteGroup group;
++  group.id = "g1";
++  group.name = "Prod";
++  EXPECT_FALSE(FindAppSwapRouteGroupRuleForUrl(std::make_optional(group),
++                                               GURL("https://my-app.dev/api")));
++}
++
++TEST(AppSwapRouteMatcherTest, ReturnsFirstMatchingRuleInOrder) {
++  AppSwapRouteGroup group;
++  group.id = "g1";
++  group.name = "Beta";
++  group.rules.push_back(
++      {"r1", "https://my-app.dev/api/v2", "https://beta.my-app.dev/api/v2"});
++  group.rules.push_back(
++      {"r2", "https://my-app.dev/api", "https://beta.my-app.dev/api"});
++
++  const std::optional<AppSwapRouteGroup> opt = group;
++  std::optional<AppSwapRouteGroupRule> rule = FindAppSwapRouteGroupRuleForUrl(
++      opt, GURL("https://my-app.dev/api/v2/users"));
++  ASSERT_TRUE(rule);
++  EXPECT_EQ("r1", rule->id);
++
++  rule = FindAppSwapRouteGroupRuleForUrl(
++      opt, GURL("https://my-app.dev/api/v1/users"));
++  ASSERT_TRUE(rule);
++  EXPECT_EQ("r2", rule->id);
++
++  EXPECT_FALSE(
++      FindAppSwapRouteGroupRuleForUrl(opt, GURL("https://elsewhere.dev/api")));
++}
++
++}  // namespace
+diff --git a/chrome/browser/app_swap/app_swap_version_utils_unittest.cc b/chrome/browser/app_swap/app_swap_version_utils_unittest.cc
+new file mode 100644
+index 0000000000000..d4a8d26f7e8bd
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_version_utils_unittest.cc
+@@ -0,0 +1,93 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_version_utils.h"
++
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace app_swap {
++namespace {
++
++TEST(AppSwapVersionUtilsTest, ComparesNumericallyNotLexically) {
++  // The whole reason this isn't a string compare: "10" sorts before "9".
++  EXPECT_TRUE(IsNewerVersion("1.2.10", "1.2.9"));
++  EXPECT_FALSE(IsNewerVersion("1.2.9", "1.2.10"));
++  EXPECT_TRUE(IsNewerVersion("2.0.0", "1.99.99"));
++  EXPECT_TRUE(IsNewerVersion("1.10.0", "1.9.0"));
++}
++
++TEST(AppSwapVersionUtilsTest, EqualVersionIsNotNewer) {
++  EXPECT_FALSE(IsNewerVersion("1.2.3", "1.2.3"));
++  EXPECT_FALSE(IsNewerVersion("next", "next"));
++}
++
++TEST(AppSwapVersionUtilsTest, MissingComponentsCountAsZero) {
++  EXPECT_TRUE(IsNewerVersion("1.2.1", "1.2"));
++  EXPECT_FALSE(IsNewerVersion("1.2", "1.2.1"));
++  EXPECT_FALSE(IsNewerVersion("1.2.0", "1.2"));
++}
++
++TEST(AppSwapVersionUtilsTest, ComparesNumericPartOfPrereleaseSuffixes) {
++  // Both parse to {1,2,10} and {1,2,9}; without the leading-digit-run
++  // parsing these would fall back to a string compare and get it backwards.
++  EXPECT_TRUE(IsNewerVersion("1.2.10-next", "1.2.9-next"));
++  EXPECT_FALSE(IsNewerVersion("1.2.9-next", "1.2.10-next"));
++}
++
++TEST(AppSwapVersionUtilsTest, UnparseableFallsBackToStringCompare) {
++  // Dist-tag names aren't versions; there's no meaningful ordering, but the
++  // comparison must stay total and not crash.
++  EXPECT_TRUE(IsNewerVersion("next", "latest"));
++  EXPECT_FALSE(IsNewerVersion("latest", "next"));
++}
++
++TEST(AppSwapVersionUtilsTest, AcceptsOrdinaryVersionsAsPaths) {
++  EXPECT_TRUE(IsValidVersionForPath("1.2.3"));
++  EXPECT_TRUE(IsValidVersionForPath("1.2.3-beta.1"));
++  EXPECT_TRUE(IsValidVersionForPath("1.2.3+build_7"));
++  EXPECT_TRUE(IsValidVersionForPath("latest"));
++  EXPECT_TRUE(IsValidVersionForPath("v2"));
++}
++
++TEST(AppSwapVersionUtilsTest, RejectsVersionsThatEscapeTheCacheDirectory) {
++  // The attack this predicate exists for: a page on a configured app host
++  // linking to ?appswap-use-version=<these> would otherwise repoint the
++  // serve root outside the artifact cache.
++  EXPECT_FALSE(IsValidVersionForPath("1/../../../.."));
++  EXPECT_FALSE(IsValidVersionForPath(".."));
++  EXPECT_FALSE(IsValidVersionForPath("../1.2.3"));
++  EXPECT_FALSE(IsValidVersionForPath("1.2.3/../../etc"));
++  EXPECT_FALSE(IsValidVersionForPath("..\\windows"));
++  EXPECT_FALSE(IsValidVersionForPath("C:\\Windows"));
++}
++
++TEST(AppSwapVersionUtilsTest, RejectsEmptyAndHiddenAndEncodedVersions) {
++  EXPECT_FALSE(IsValidVersionForPath(""));
++  EXPECT_FALSE(IsValidVersionForPath("."));
++  EXPECT_FALSE(IsValidVersionForPath(".hidden"));
++  EXPECT_FALSE(IsValidVersionForPath("1.2.3%2f.."));
++  EXPECT_FALSE(IsValidVersionForPath(std::string("1.2.3\0evil", 10)));
++}
++
++TEST(AppSwapVersionUtilsTest, AcceptsPlainAndScopedPackageNames) {
++  EXPECT_TRUE(IsValidPackageNameForPath("myapp"));
++  EXPECT_TRUE(IsValidPackageNameForPath("my-app.thing_2"));
++  EXPECT_TRUE(IsValidPackageNameForPath("@myorg/myapp"));
++}
++
++TEST(AppSwapVersionUtilsTest, RejectsPackageNamesThatEscapeOrMalform) {
++  EXPECT_FALSE(IsValidPackageNameForPath(""));
++  EXPECT_FALSE(IsValidPackageNameForPath(".."));
++  EXPECT_FALSE(IsValidPackageNameForPath("../../etc"));
++  // A "/" is only legal as the single scope separator, never elsewhere.
++  EXPECT_FALSE(IsValidPackageNameForPath("myorg/myapp"));
++  EXPECT_FALSE(IsValidPackageNameForPath("@myorg/my/app"));
++  EXPECT_FALSE(IsValidPackageNameForPath("@myorg"));
++  EXPECT_FALSE(IsValidPackageNameForPath("@/myapp"));
++  EXPECT_FALSE(IsValidPackageNameForPath("@myorg/"));
++  EXPECT_FALSE(IsValidPackageNameForPath("@../myapp"));
++}
++
++}  // namespace
++}  // namespace app_swap
 diff --git a/chrome/browser/profiles/BUILD.gn b/chrome/browser/profiles/BUILD.gn
 index 867d41c79c658..39608f5ae9ca7 100644
 --- a/chrome/browser/profiles/BUILD.gn
@@ -899,10 +1542,10 @@ index 0000000000000..c4c96e22fc0b9
 +}
 diff --git a/chrome/browser/resources/app_swap_projects/app.css b/chrome/browser/resources/app_swap_projects/app.css
 new file mode 100644
-index 0000000000000..9f2264a470493
+index 0000000000000..c903125184a37
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_projects/app.css
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,129 @@
 +/* Copyright 2026 The AppSwap Authors
 + * Use of this source code is governed by a BSD-style license that can be
 + * found in the LICENSE file. */
@@ -1021,12 +1664,23 @@ index 0000000000000..9f2264a470493
 +button:hover {
 +  background: var(--cr-hover-background-color, rgba(0, 0, 0, 0.06));
 +}
++
++/* The one irreversible action on this page (deleting the project itself).
++   Everything else removes a single config entry that can be retyped. */
++button.danger {
++  border-color: var(--google-red-600, #d93025);
++  color: var(--google-red-600, #d93025);
++}
++
++button.danger:hover {
++  background: var(--google-red-50, rgba(217, 48, 37, 0.08));
++}
 diff --git a/chrome/browser/resources/app_swap_projects/app.html.ts b/chrome/browser/resources/app_swap_projects/app.html.ts
 new file mode 100644
-index 0000000000000..415dd8f3dd1d0
+index 0000000000000..c17dd6fc4cb09
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_projects/app.html.ts
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,208 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1046,10 +1700,30 @@ index 0000000000000..415dd8f3dd1d0
 +    ${this.selectedTab_ === 0 ? html`
 +      <section>
 +        <h2>General</h2>
-+        <p>Project name: <strong>${this.projectName_}</strong></p>
-+        <p class="hint">Rename or delete this project from the browser's
-+          profile menu -- a Project is a Chromium Profile, so its identity
-+          is managed there.</p>
++        <div class="form">
++          <h3>Project name</h3>
++          <input placeholder="Project name" data-field="projectNameDraft_"
++              .value="${this.projectNameDraft_}" @input="${this.onFieldInput_}">
++          <button @click="${this.onRenameProjectClick_}">Rename</button>
++        </div>
++        <div class="form">
++          <h3>Delete project</h3>
++          <p class="hint">A Project is a Chromium Profile: deleting it also
++            deletes its bookmarks, history, cookies and open tabs, and closes
++            its windows. This can't be undone.</p>
++          ${this.confirmingDelete_ ? html`
++            <p class="hint">Permanently delete
++              <strong>${this.projectName_}</strong> and everything in it?</p>
++            <button class="danger" @click="${this.onConfirmDeleteProjectClick_}">
++              Delete permanently
++            </button>
++            <button @click="${this.onCancelDeleteProjectClick_}">Cancel</button>
++          ` : html`
++            <button class="danger" @click="${this.onDeleteProjectClick_}">
++              Delete this project
++            </button>
++          `}
++        </div>
 +      </section>
 +    ` : ''}
 +
@@ -1057,7 +1731,29 @@ index 0000000000000..415dd8f3dd1d0
 +      <section>
 +        <h2>Apps</h2>
 +        ${this.apps_.length === 0 ? html`<p class="hint">No apps yet.</p>` : ''}
-+        ${this.apps_.map(app => html`
++        ${this.apps_.map(app => this.editingAppId_ === app.id ? html`
++          <div class="form">
++            <h3>Edit app</h3>
++            <input placeholder="Title" data-field="editAppTitle_"
++                .value="${this.editAppTitle_}" @input="${this.onFieldInput_}">
++            <input placeholder="Package name (e.g. @org/app)"
++                data-field="editAppPackage_" .value="${this.editAppPackage_}"
++                @input="${this.onFieldInput_}">
++            <input placeholder="Version (exact or dist-tag)"
++                data-field="editAppVersion_" .value="${this.editAppVersion_}"
++                @input="${this.onFieldInput_}">
++            <input placeholder="Registry (e.g. https://registry.npmjs.org)"
++                data-field="editAppRegistry_" .value="${this.editAppRegistry_}"
++                @input="${this.onFieldInput_}">
++            <input placeholder="Token (optional)" data-field="editAppToken_"
++                .value="${this.editAppToken_}" @input="${this.onFieldInput_}">
++            <input placeholder="Hosts, comma-separated (e.g. https://my-app.dev)"
++                data-field="editAppHosts_" .value="${this.editAppHosts_}"
++                @input="${this.onFieldInput_}">
++            <button @click="${this.onSaveAppClick_}">Save</button>
++            <button @click="${this.onCancelEditAppClick_}">Cancel</button>
++          </div>
++        ` : html`
 +          <div class="row">
 +            <div class="row-main">
 +              <div class="primary">${app.title}</div>
@@ -1065,6 +1761,7 @@ index 0000000000000..415dd8f3dd1d0
 +                &middot; ${app.registry}</div>
 +              <div class="secondary">Hosts: ${app.hosts.join(', ') || '(none)'}</div>
 +            </div>
++            <button data-id="${app.id}" @click="${this.onEditAppClick_}">Edit</button>
 +            <button data-id="${app.id}" @click="${this.onRemoveAppClick_}">Remove</button>
 +          </div>
 +        `)}
@@ -1095,17 +1792,41 @@ index 0000000000000..415dd8f3dd1d0
 +        ${this.routeGroups_.length === 0 ? html`<p class="hint">No route groups yet.</p>` : ''}
 +        ${this.routeGroups_.map(group => html`
 +          <div class="group">
-+            <div class="group-header">
-+              <strong>${group.name}</strong>
-+              <button data-id="${group.id}" @click="${this.onRemoveRouteGroupClick_}">Remove group</button>
-+            </div>
++            ${this.editingGroupId_ === group.id ? html`
++              <div class="form">
++                <input placeholder="Name (e.g. Beta, Prod)"
++                    data-field="editGroupName_" .value="${this.editGroupName_}"
++                    @input="${this.onFieldInput_}">
++                <button @click="${this.onSaveRouteGroupClick_}">Save</button>
++                <button @click="${this.onCancelEditRouteGroupClick_}">Cancel</button>
++              </div>
++            ` : html`
++              <div class="group-header">
++                <strong>${group.name}</strong>
++                <button data-id="${group.id}" @click="${this.onEditRouteGroupClick_}">Rename</button>
++                <button data-id="${group.id}" @click="${this.onRemoveRouteGroupClick_}">Remove group</button>
++              </div>
++            `}
 +            ${group.rules.length === 0 ? html`<p class="hint">No rules -- direct calls.</p>` : ''}
-+            ${group.rules.map(rule => html`
++            ${group.rules.map(rule => this.editingRuleId_ === rule.id ? html`
++              <div class="form">
++                <input placeholder="URL pattern (e.g. https://api.my-app.dev)"
++                    data-field="editRulePattern_" .value="${this.editRulePattern_}"
++                    @input="${this.onFieldInput_}">
++                <input placeholder="Rewrite target (e.g. https://api.beta.my-app.dev)"
++                    data-field="editRuleTarget_" .value="${this.editRuleTarget_}"
++                    @input="${this.onFieldInput_}">
++                <button @click="${this.onSaveRuleClick_}">Save</button>
++                <button @click="${this.onCancelEditRuleClick_}">Cancel</button>
++              </div>
++            ` : html`
 +              <div class="row">
 +                <div class="row-main">
 +                  <span class="primary">${rule.urlPattern}</span>
 +                  <span class="secondary">&rarr; ${rule.target}</span>
 +                </div>
++                <button data-group-id="${group.id}" data-rule-id="${rule.id}"
++                    @click="${this.onEditRuleClick_}">Edit</button>
 +                <button data-group-id="${group.id}" data-rule-id="${rule.id}"
 +                    @click="${this.onRemoveRuleClick_}">Remove</button>
 +              </div>
@@ -1138,7 +1859,14 @@ index 0000000000000..415dd8f3dd1d0
 +        <p class="hint">A separate storage identity within this project --
 +          e.g. testing two logged-in accounts against the same app.</p>
 +        ${this.profiles_.length === 0 ? html`<p class="hint">No profiles yet.</p>` : ''}
-+        ${this.profiles_.map(profile => html`
++        ${this.profiles_.map(profile => this.editingProfileId_ === profile.id ? html`
++          <div class="form">
++            <input placeholder="Name" data-field="editProfileName_"
++                .value="${this.editProfileName_}" @input="${this.onFieldInput_}">
++            <button @click="${this.onSaveProfileClick_}">Save</button>
++            <button @click="${this.onCancelEditProfileClick_}">Cancel</button>
++          </div>
++        ` : html`
 +          <div class="row">
 +            <div class="row-main">
 +              <span class="primary">${profile.name}</span>
@@ -1147,6 +1875,7 @@ index 0000000000000..415dd8f3dd1d0
 +            ${profile.id !== this.activeProfileId_ ? html`
 +              <button data-id="${profile.id}" @click="${this.onSetActiveProfileClick_}">Set active</button>
 +            ` : ''}
++            <button data-id="${profile.id}" @click="${this.onEditProfileClick_}">Rename</button>
 +            <button data-id="${profile.id}" @click="${this.onRemoveProfileClick_}">Remove</button>
 +          </div>
 +        `)}
@@ -1162,10 +1891,10 @@ index 0000000000000..415dd8f3dd1d0
 +}
 diff --git a/chrome/browser/resources/app_swap_projects/app.ts b/chrome/browser/resources/app_swap_projects/app.ts
 new file mode 100644
-index 0000000000000..eff1f543cb5af
+index 0000000000000..0fa827e04f565
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_projects/app.ts
-@@ -0,0 +1,231 @@
+@@ -0,0 +1,423 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1210,6 +1939,23 @@ index 0000000000000..eff1f543cb5af
 +      newGroupName_: {type: String},
 +      pendingRules_: {type: Object},
 +      newProfileName_: {type: String},
++      projectNameDraft_: {type: String},
++      confirmingDelete_: {type: Boolean},
++      editingAppId_: {type: String},
++      editAppTitle_: {type: String},
++      editAppPackage_: {type: String},
++      editAppVersion_: {type: String},
++      editAppRegistry_: {type: String},
++      editAppToken_: {type: String},
++      editAppHosts_: {type: String},
++      editingGroupId_: {type: String},
++      editGroupName_: {type: String},
++      editingRuleGroupId_: {type: String},
++      editingRuleId_: {type: String},
++      editRulePattern_: {type: String},
++      editRuleTarget_: {type: String},
++      editingProfileId_: {type: String},
++      editProfileName_: {type: String},
 +    };
 +  }
 +
@@ -1239,6 +1985,29 @@ index 0000000000000..eff1f543cb5af
 +
 +  protected accessor newProfileName_: string = '';
 +
++  // Edit state. Only one row anywhere on the page is editable at a time --
++  // the editing*Id_ properties below say which, and the flat draft fields
++  // beside each hold that one row's in-progress values. Opening a second
++  // editor closes the first (see startEditing*_), which is what keeps a
++  // single set of draft fields sufficient.
++  protected accessor projectNameDraft_: string = '';
++  protected accessor confirmingDelete_: boolean = false;
++  protected accessor editingAppId_: string|null = null;
++  protected accessor editAppTitle_: string = '';
++  protected accessor editAppPackage_: string = '';
++  protected accessor editAppVersion_: string = '';
++  protected accessor editAppRegistry_: string = '';
++  protected accessor editAppToken_: string = '';
++  protected accessor editAppHosts_: string = '';
++  protected accessor editingGroupId_: string|null = null;
++  protected accessor editGroupName_: string = '';
++  protected accessor editingRuleGroupId_: string|null = null;
++  protected accessor editingRuleId_: string|null = null;
++  protected accessor editRulePattern_: string = '';
++  protected accessor editRuleTarget_: string = '';
++  protected accessor editingProfileId_: string|null = null;
++  protected accessor editProfileName_: string = '';
++
 +  override connectedCallback() {
 +    super.connectedCallback();
 +    this.refreshAll_();
@@ -1247,6 +2016,7 @@ index 0000000000000..eff1f543cb5af
 +  private async refreshAll_() {
 +    const {name} = await this.apiProxy_.handler.getProjectName();
 +    this.projectName_ = name;
++    this.projectNameDraft_ = name;
 +    await Promise.all([
 +      this.refreshApps_(),
 +      this.refreshRouteGroups_(),
@@ -1314,6 +2084,74 @@ index 0000000000000..eff1f543cb5af
 +    await this.refreshApps_();
 +  }
 +
++  protected onEditAppClick_(e: Event) {
++    const id = (e.currentTarget as HTMLElement).dataset['id']!;
++    const app = this.apps_.find(a => a.id === id);
++    if (!app) {
++      return;
++    }
++    this.editingAppId_ = id;
++    this.editAppTitle_ = app.title;
++    this.editAppPackage_ = app.packageName;
++    this.editAppVersion_ = app.version;
++    this.editAppRegistry_ = app.registry;
++    this.editAppToken_ = app.token;
++    this.editAppHosts_ = app.hosts.join(', ');
++  }
++
++  protected onCancelEditAppClick_() {
++    this.editingAppId_ = null;
++  }
++
++  protected async onSaveAppClick_() {
++    const id = this.editingAppId_;
++    if (!id) {
++      return;
++    }
++    const hosts = this.editAppHosts_.split(',')
++                      .map(h => h.trim())
++                      .filter(h => h.length > 0);
++    await this.apiProxy_.handler.updateApp({
++      id,
++      title: this.editAppTitle_,
++      packageName: this.editAppPackage_,
++      version: this.editAppVersion_,
++      registry: this.editAppRegistry_,
++      token: this.editAppToken_,
++      hosts,
++    });
++    this.editingAppId_ = null;
++    await this.refreshApps_();
++  }
++
++  protected async onRenameProjectClick_() {
++    const name = this.projectNameDraft_.trim();
++    if (!name || name === this.projectName_) {
++      return;
++    }
++    await this.apiProxy_.handler.renameProject(name);
++    const {name: updated} = await this.apiProxy_.handler.getProjectName();
++    this.projectName_ = updated;
++    this.projectNameDraft_ = updated;
++  }
++
++  // Deleting a project takes its bookmarks, history, cookies and open tabs
++  // with it and can't be undone, so it takes two clicks -- every other
++  // destructive action on this page removes one small config entry that can
++  // be retyped. Deliberately an in-page step rather than window.confirm(),
++  // which chrome:// pages can't rely on being shown.
++  protected onDeleteProjectClick_() {
++    this.confirmingDelete_ = true;
++  }
++
++  protected onCancelDeleteProjectClick_() {
++    this.confirmingDelete_ = false;
++  }
++
++  protected async onConfirmDeleteProjectClick_() {
++    await this.apiProxy_.handler.deleteProject();
++  }
++
 +  protected async onAddRouteGroupClick_() {
 +    if (!this.newGroupName_.trim()) {
 +      return;
@@ -1326,6 +2164,65 @@ index 0000000000000..eff1f543cb5af
 +  protected async onRemoveRouteGroupClick_(e: Event) {
 +    const id = (e.currentTarget as HTMLElement).dataset['id']!;
 +    await this.apiProxy_.handler.removeRouteGroup(id);
++    await this.refreshRouteGroups_();
++  }
++
++  protected onEditRouteGroupClick_(e: Event) {
++    const id = (e.currentTarget as HTMLElement).dataset['id']!;
++    const group = this.routeGroups_.find(g => g.id === id);
++    if (!group) {
++      return;
++    }
++    this.editingGroupId_ = id;
++    this.editGroupName_ = group.name;
++  }
++
++  protected onCancelEditRouteGroupClick_() {
++    this.editingGroupId_ = null;
++  }
++
++  protected async onSaveRouteGroupClick_() {
++    const id = this.editingGroupId_;
++    if (!id || !this.editGroupName_.trim()) {
++      return;
++    }
++    await this.apiProxy_.handler.updateRouteGroup(id, this.editGroupName_);
++    this.editingGroupId_ = null;
++    await this.refreshRouteGroups_();
++  }
++
++  protected onEditRuleClick_(e: Event) {
++    const target = e.currentTarget as HTMLElement;
++    const groupId = target.dataset['groupId']!;
++    const ruleId = target.dataset['ruleId']!;
++    const rule = this.routeGroups_.find(g => g.id === groupId)
++                     ?.rules.find(r => r.id === ruleId);
++    if (!rule) {
++      return;
++    }
++    // Deliberately not editingGroupId_: that one drives the group-rename
++    // form, and reusing it here would pop that form open too whenever a rule
++    // inside the group is edited.
++    this.editingRuleGroupId_ = groupId;
++    this.editingRuleId_ = ruleId;
++    this.editRulePattern_ = rule.urlPattern;
++    this.editRuleTarget_ = rule.target;
++  }
++
++  protected onCancelEditRuleClick_() {
++    this.editingRuleId_ = null;
++  }
++
++  protected async onSaveRuleClick_() {
++    const groupId = this.editingRuleGroupId_;
++    const ruleId = this.editingRuleId_;
++    if (!groupId || !ruleId || !this.editRulePattern_.trim() ||
++        !this.editRuleTarget_.trim()) {
++      return;
++    }
++    await this.apiProxy_.handler.updateRule(
++        groupId, ruleId, this.editRulePattern_, this.editRuleTarget_);
++    this.editingRuleId_ = null;
 +    await this.refreshRouteGroups_();
 +  }
 +
@@ -1379,6 +2276,30 @@ index 0000000000000..eff1f543cb5af
 +  protected async onRemoveProfileClick_(e: Event) {
 +    const id = (e.currentTarget as HTMLElement).dataset['id']!;
 +    await this.apiProxy_.handler.removeAppSwapProfile(id);
++    await this.refreshProfiles_();
++  }
++
++  protected onEditProfileClick_(e: Event) {
++    const id = (e.currentTarget as HTMLElement).dataset['id']!;
++    const profile = this.profiles_.find(p => p.id === id);
++    if (!profile) {
++      return;
++    }
++    this.editingProfileId_ = id;
++    this.editProfileName_ = profile.name;
++  }
++
++  protected onCancelEditProfileClick_() {
++    this.editingProfileId_ = null;
++  }
++
++  protected async onSaveProfileClick_() {
++    const id = this.editingProfileId_;
++    if (!id || !this.editProfileName_.trim()) {
++      return;
++    }
++    await this.apiProxy_.handler.updateAppSwapProfile(id, this.editProfileName_);
++    this.editingProfileId_ = null;
 +    await this.refreshProfiles_();
 +  }
 +
@@ -1817,10 +2738,10 @@ index 0000000000000..be480ec55be7e
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_ROUTE_GROUP_TAB_STRIP_BUTTON_H_
 diff --git a/chrome/browser/ui/webui/app_swap_projects/BUILD.gn b/chrome/browser/ui/webui/app_swap_projects/BUILD.gn
 new file mode 100644
-index 0000000000000..60b2bc966e1f2
+index 0000000000000..dde08dca9e7da
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_projects/BUILD.gn
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,39 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -1847,8 +2768,14 @@ index 0000000000000..60b2bc966e1f2
 +    "//base",
 +    "//chrome/browser/app_swap",
 +    "//chrome/browser:browser_process",
++    "//chrome/browser/profiles",
 +    "//chrome/browser/profiles:profile",
 +    "//chrome/browser/resources/app_swap_projects:resources",
++    # For webui::DeleteProfileAtPath (the General tab's "delete project"),
++    # which is its own small source_set rather than part of the giant
++    # //chrome/browser/ui/webui target -- no dependency cycle to work around
++    # here, unlike AppSwapProjectSelectorButton's ProfileMenuCoordinator use.
++    "//chrome/browser/ui/webui:profile_helper",
 +    "//content/public/browser",
 +    "//mojo/public/cpp/bindings",
 +    "//ui/webui",
@@ -1856,10 +2783,10 @@ index 0000000000000..60b2bc966e1f2
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_projects/app_swap_projects.mojom b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects.mojom
 new file mode 100644
-index 0000000000000..66c1244b19f48
+index 0000000000000..ea4c7b24be7bb
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects.mojom
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,84 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1908,32 +2835,48 @@ index 0000000000000..66c1244b19f48
 +interface PageHandler {
 +  // General tab.
 +  GetProjectName() => (string name);
++  // Renames the Chromium Profile backing this project, i.e. what the project
++  // is called everywhere in the UI. No-op for an empty name.
++  RenameProject(string name) => ();
++  // Deletes this project and everything in it -- config, bookmarks,
++  // history, cookies, open tabs. Closes its windows as a side effect, so
++  // nothing more can be expected of this page afterwards. The reply comes
++  // back before the deletion completes.
++  DeleteProject() => ();
 +
-+  // Apps tab.
++  // Apps tab. `app.id` selects which app UpdateApp() edits; every other
++  // field replaces what's stored.
 +  GetApps() => (array<AppInfo> apps);
 +  AddApp(AppInfo app) => ();
++  UpdateApp(AppInfo app) => ();
 +  RemoveApp(string id) => ();
 +
 +  // Routes tab.
 +  GetRouteGroups() => (array<RouteGroupInfo> groups);
 +  AddRouteGroup(string name) => ();
++  // Renames a group; its rules are untouched (they have their own entry
++  // points below).
++  UpdateRouteGroup(string id, string name) => ();
 +  RemoveRouteGroup(string id) => ();
 +  AddRule(string group_id, string url_pattern, string target) => ();
++  UpdateRule(string group_id, string rule_id,
++             string url_pattern, string target) => ();
 +  RemoveRule(string group_id, string rule_id) => ();
 +
 +  // Profiles tab (the storage-partition sub-identity).
 +  GetAppSwapProfiles() => (array<AppSwapProfileInfo> profiles,
 +                           string? active_profile_id);
 +  AddAppSwapProfile(string name) => ();
++  UpdateAppSwapProfile(string id, string name) => ();
 +  RemoveAppSwapProfile(string id) => ();
 +  SetActiveAppSwapProfile(string id) => ();
 +};
 diff --git a/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.cc b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.cc
 new file mode 100644
-index 0000000000000..3367cae164d63
+index 0000000000000..95db92cb2c69d
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.cc
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,356 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1951,11 +2894,13 @@ index 0000000000000..3367cae164d63
 +#include "chrome/browser/app_swap/app_swap_profiles_service_factory.h"
 +#include "chrome/browser/app_swap/app_swap_route_group_service.h"
 +#include "chrome/browser/app_swap/app_swap_route_group_service_factory.h"
++#include "chrome/browser/browser_process.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/profiles/profile_attributes_entry.h"
 +#include "chrome/browser/profiles/profile_attributes_storage.h"
 +#include "chrome/browser/profiles/profile_manager.h"
-+#include "chrome/browser/browser_process.h"
++#include "chrome/browser/profiles/profile_metrics.h"
++#include "chrome/browser/ui/webui/profile_helper.h"
 +
 +AppSwapProjectsPageHandler::AppSwapProjectsPageHandler(
 +    mojo::PendingReceiver<app_swap_projects::mojom::PageHandler> handler,
@@ -1976,6 +2921,8 @@ index 0000000000000..3367cae164d63
 +  return AppSwapProfilesServiceFactory::GetForProfile(profile_);
 +}
 +
++// -- General ---------------------------------------------------------------
++
 +void AppSwapProjectsPageHandler::GetProjectName(
 +    GetProjectNameCallback callback) {
 +  ProfileAttributesEntry* entry =
@@ -1985,6 +2932,50 @@ index 0000000000000..3367cae164d63
 +  std::move(callback).Run(entry ? base::UTF16ToUTF8(entry->GetName())
 +                                : std::string());
 +}
++
++void AppSwapProjectsPageHandler::RenameProject(const std::string& name,
++                                               RenameProjectCallback callback) {
++  if (!name.empty()) {
++    if (ProfileAttributesEntry* entry =
++            g_browser_process->profile_manager()
++                ->GetProfileAttributesStorage()
++                .GetProfileAttributesWithPath(profile_->GetPath())) {
++      // is_default_name=false: this is an explicit choice by the user, and
++      // marking it as such is what stops Chromium from silently renaming the
++      // project again later (it rewrites still-default names when the signed
++      // in account changes).
++      entry->SetLocalProfileName(base::UTF8ToUTF16(name),
++                                 /*is_default_name=*/false);
++    }
++  }
++  std::move(callback).Run();
++}
++
++void AppSwapProjectsPageHandler::DeleteProject(DeleteProjectCallback callback) {
++  // Reply first: this closes every window belonging to `profile_`, this page
++  // included, so a reply sent afterwards would have nowhere to land.
++  std::move(callback).Run();
++  webui::DeleteProfileAtPath(profile_->GetPath(),
++                             ProfileMetrics::DELETE_PROFILE_SETTINGS);
++}
++
++// -- Apps ------------------------------------------------------------------
++
++namespace {
++
++AppSwapApp AppFromMojom(const app_swap_projects::mojom::AppInfoPtr& app) {
++  AppSwapApp result;
++  result.id = app->id;
++  result.title = app->title;
++  result.package_name = app->package_name;
++  result.version = app->version;
++  result.registry = app->registry;
++  result.token = app->token;
++  result.hosts = app->hosts;
++  return result;
++}
++
++}  // namespace
 +
 +void AppSwapProjectsPageHandler::GetApps(GetAppsCallback callback) {
 +  AppSwapAppsService* service = apps_service();
@@ -2013,25 +3004,37 @@ index 0000000000000..3367cae164d63
 +    std::move(callback).Run();
 +    return;
 +  }
-+  AppSwapApp new_app;
-+  new_app.id = app->id;
-+  new_app.title = app->title;
-+  new_app.package_name = app->package_name;
-+  new_app.version = app->version;
-+  new_app.registry = app->registry;
-+  new_app.token = app->token;
-+  new_app.hosts = app->hosts;
-+  service->AddApp(std::move(new_app));
-+  std::move(callback).Run();
++  service->AddApp(AppFromMojom(app));
++  // Replying through the same queue the mutation went into is what makes
++  // the page's follow-up refresh see it: both are ordered behind the config
++  // load, so the reply can't arrive while the add is still waiting on it.
++  service->RunWhenLoaded(std::move(callback));
++}
++
++void AppSwapProjectsPageHandler::UpdateApp(
++    app_swap_projects::mojom::AppInfoPtr app,
++    UpdateAppCallback callback) {
++  AppSwapAppsService* service = apps_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
++  }
++  service->UpdateApp(AppFromMojom(app));
++  service->RunWhenLoaded(std::move(callback));
 +}
 +
 +void AppSwapProjectsPageHandler::RemoveApp(const std::string& id,
 +                                           RemoveAppCallback callback) {
-+  if (AppSwapAppsService* service = apps_service()) {
-+    service->RemoveApp(id);
++  AppSwapAppsService* service = apps_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
 +  }
-+  std::move(callback).Run();
++  service->RemoveApp(id);
++  service->RunWhenLoaded(std::move(callback));
 +}
++
++// -- Routes ----------------------------------------------------------------
 +
 +void AppSwapProjectsPageHandler::GetRouteGroups(
 +    GetRouteGroupsCallback callback) {
@@ -2069,39 +3072,86 @@ index 0000000000000..3367cae164d63
 +  AppSwapRouteGroup group;
 +  group.name = name;
 +  service->AddRouteGroup(std::move(group));
-+  std::move(callback).Run();
++  service->RunWhenLoaded(std::move(callback));
++}
++
++void AppSwapProjectsPageHandler::UpdateRouteGroup(
++    const std::string& id,
++    const std::string& name,
++    UpdateRouteGroupCallback callback) {
++  AppSwapRouteGroupService* service = route_group_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
++  }
++  AppSwapRouteGroup group;
++  group.id = id;
++  group.name = name;
++  // Rules aren't sent over this method; the service preserves whatever the
++  // group already has (see AppSwapRouteGroupService::UpdateRouteGroupNow).
++  service->UpdateRouteGroup(std::move(group));
++  service->RunWhenLoaded(std::move(callback));
 +}
 +
 +void AppSwapProjectsPageHandler::RemoveRouteGroup(
 +    const std::string& id,
 +    RemoveRouteGroupCallback callback) {
-+  if (AppSwapRouteGroupService* service = route_group_service()) {
-+    service->RemoveRouteGroup(id);
++  AppSwapRouteGroupService* service = route_group_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
 +  }
-+  std::move(callback).Run();
++  service->RemoveRouteGroup(id);
++  service->RunWhenLoaded(std::move(callback));
 +}
 +
 +void AppSwapProjectsPageHandler::AddRule(const std::string& group_id,
 +                                         const std::string& url_pattern,
 +                                         const std::string& target,
 +                                         AddRuleCallback callback) {
-+  if (AppSwapRouteGroupService* service = route_group_service()) {
-+    AppSwapRouteGroupRule rule;
-+    rule.url_pattern = url_pattern;
-+    rule.target = target;
-+    service->AddRule(group_id, std::move(rule));
++  AppSwapRouteGroupService* service = route_group_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
 +  }
-+  std::move(callback).Run();
++  AppSwapRouteGroupRule rule;
++  rule.url_pattern = url_pattern;
++  rule.target = target;
++  service->AddRule(group_id, std::move(rule));
++  service->RunWhenLoaded(std::move(callback));
++}
++
++void AppSwapProjectsPageHandler::UpdateRule(const std::string& group_id,
++                                            const std::string& rule_id,
++                                            const std::string& url_pattern,
++                                            const std::string& target,
++                                            UpdateRuleCallback callback) {
++  AppSwapRouteGroupService* service = route_group_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
++  }
++  AppSwapRouteGroupRule rule;
++  rule.id = rule_id;
++  rule.url_pattern = url_pattern;
++  rule.target = target;
++  service->UpdateRule(group_id, std::move(rule));
++  service->RunWhenLoaded(std::move(callback));
 +}
 +
 +void AppSwapProjectsPageHandler::RemoveRule(const std::string& group_id,
 +                                            const std::string& rule_id,
 +                                            RemoveRuleCallback callback) {
-+  if (AppSwapRouteGroupService* service = route_group_service()) {
-+    service->RemoveRule(group_id, rule_id);
++  AppSwapRouteGroupService* service = route_group_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
 +  }
-+  std::move(callback).Run();
++  service->RemoveRule(group_id, rule_id);
++  service->RunWhenLoaded(std::move(callback));
 +}
++
++// -- AppSwap Profiles ------------------------------------------------------
 +
 +void AppSwapProjectsPageHandler::GetAppSwapProfiles(
 +    GetAppSwapProfilesCallback callback) {
@@ -2135,38 +3185,60 @@ index 0000000000000..3367cae164d63
 +  AppSwapProfile profile;
 +  profile.name = name;
 +  service->AddProfile(std::move(profile));
-+  std::move(callback).Run();
++  service->RunWhenLoaded(std::move(callback));
++}
++
++void AppSwapProjectsPageHandler::UpdateAppSwapProfile(
++    const std::string& id,
++    const std::string& name,
++    UpdateAppSwapProfileCallback callback) {
++  AppSwapProfilesService* service = profiles_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
++  }
++  AppSwapProfile profile;
++  profile.id = id;
++  profile.name = name;
++  service->UpdateProfile(std::move(profile));
++  service->RunWhenLoaded(std::move(callback));
 +}
 +
 +void AppSwapProjectsPageHandler::RemoveAppSwapProfile(
 +    const std::string& id,
 +    RemoveAppSwapProfileCallback callback) {
-+  if (AppSwapProfilesService* service = profiles_service()) {
-+    // Reassign any tab currently running under this profile's partition back
-+    // to the default partition before removing it, so nothing is left
-+    // pointing at a partition that's about to be cleared out from under it --
-+    // same ordering appswap://profiles used to follow.
-+    SwitchTabsOffAppSwapProfile(id);
-+    ClearAppSwapProfileData(id, profile_);
-+    service->RemoveProfile(id);
++  AppSwapProfilesService* service = profiles_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
 +  }
-+  std::move(callback).Run();
++  // Reassign any tab currently running under this profile's partition back
++  // to the default partition before removing it, so nothing is left
++  // pointing at a partition that's about to be cleared out from under it --
++  // same ordering appswap://profiles used to follow.
++  SwitchTabsOffAppSwapProfile(id, profile_);
++  ClearAppSwapProfileData(id, profile_);
++  service->RemoveProfile(id);
++  service->RunWhenLoaded(std::move(callback));
 +}
 +
 +void AppSwapProjectsPageHandler::SetActiveAppSwapProfile(
 +    const std::string& id,
 +    SetActiveAppSwapProfileCallback callback) {
-+  if (AppSwapProfilesService* service = profiles_service()) {
-+    service->SetActiveProfile(id);
++  AppSwapProfilesService* service = profiles_service();
++  if (!service) {
++    std::move(callback).Run();
++    return;
 +  }
-+  std::move(callback).Run();
++  service->SetActiveProfile(id);
++  service->RunWhenLoaded(std::move(callback));
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h
 new file mode 100644
-index 0000000000000..6a95777ea966f
+index 0000000000000..b6c2e2e306468
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_projects/app_swap_projects_page_handler.h
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,88 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2204,25 +3276,41 @@ index 0000000000000..6a95777ea966f
 +
 +  // app_swap_projects::mojom::PageHandler:
 +  void GetProjectName(GetProjectNameCallback callback) override;
++  void RenameProject(const std::string& name,
++                     RenameProjectCallback callback) override;
++  void DeleteProject(DeleteProjectCallback callback) override;
 +  void GetApps(GetAppsCallback callback) override;
 +  void AddApp(app_swap_projects::mojom::AppInfoPtr app,
 +             AddAppCallback callback) override;
++  void UpdateApp(app_swap_projects::mojom::AppInfoPtr app,
++                 UpdateAppCallback callback) override;
 +  void RemoveApp(const std::string& id, RemoveAppCallback callback) override;
 +  void GetRouteGroups(GetRouteGroupsCallback callback) override;
 +  void AddRouteGroup(const std::string& name,
 +                     AddRouteGroupCallback callback) override;
++  void UpdateRouteGroup(const std::string& id,
++                        const std::string& name,
++                        UpdateRouteGroupCallback callback) override;
 +  void RemoveRouteGroup(const std::string& id,
 +                        RemoveRouteGroupCallback callback) override;
 +  void AddRule(const std::string& group_id,
 +              const std::string& url_pattern,
 +              const std::string& target,
 +              AddRuleCallback callback) override;
++  void UpdateRule(const std::string& group_id,
++                  const std::string& rule_id,
++                  const std::string& url_pattern,
++                  const std::string& target,
++                  UpdateRuleCallback callback) override;
 +  void RemoveRule(const std::string& group_id,
 +                  const std::string& rule_id,
 +                  RemoveRuleCallback callback) override;
 +  void GetAppSwapProfiles(GetAppSwapProfilesCallback callback) override;
 +  void AddAppSwapProfile(const std::string& name,
 +                         AddAppSwapProfileCallback callback) override;
++  void UpdateAppSwapProfile(const std::string& id,
++                            const std::string& name,
++                            UpdateAppSwapProfileCallback callback) override;
 +  void RemoveAppSwapProfile(const std::string& id,
 +                            RemoveAppSwapProfileCallback callback) override;
 +  void SetActiveAppSwapProfile(

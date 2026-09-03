@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/app_swap/app_swap_version_utils.cc b/chrome/browser/app_swap/app_swap_version_utils.cc
 new file mode 100644
-index 0000000000000..b234e8bcf8c94
+index 0000000000000..383f6cce4f1bc
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_utils.cc
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,118 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -11,6 +11,7 @@ index 0000000000000..b234e8bcf8c94
 +#include "chrome/browser/app_swap/app_swap_version_utils.h"
 +
 +#include <algorithm>
++#include <string_view>
 +#include <vector>
 +
 +#include "base/strings/string_number_conversions.h"
@@ -52,7 +53,54 @@ index 0000000000000..b234e8bcf8c94
 +  return parts;
 +}
 +
++// One path segment's worth of validation, shared by the two public
++// predicates below. Deliberately an allowlist: anything not explicitly
++// permitted (separators, "%", control characters, non-ASCII) is rejected,
++// so no encoding or platform-specific separator handling can slip past.
++bool IsSafePathSegment(std::string_view segment) {
++  if (segment.empty() || segment == "." || segment == "..") {
++    return false;
++  }
++  // A leading dot would make the directory hidden and, more importantly,
++  // keeps ".."-adjacent shapes out of the cache entirely.
++  if (segment.front() == '.') {
++    return false;
++  }
++  for (const char c : segment) {
++    const bool allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
++                         (c >= '0' && c <= '9') || c == '.' || c == '-' ||
++                         c == '+' || c == '_' || c == '~';
++    if (!allowed) {
++      return false;
++    }
++  }
++  return true;
++}
++
 +}  // namespace
++
++bool IsValidVersionForPath(const std::string& version) {
++  return IsSafePathSegment(version);
++}
++
++bool IsValidPackageNameForPath(const std::string& package_name) {
++  if (package_name.empty()) {
++    return false;
++  }
++  if (package_name.front() != '@') {
++    return IsSafePathSegment(package_name);
++  }
++  // Scoped package: "@scope/name", exactly one separator, both halves
++  // validated as ordinary segments.
++  const std::string_view rest = std::string_view(package_name).substr(1);
++  const size_t slash = rest.find('/');
++  if (slash == std::string_view::npos) {
++    return false;
++  }
++  const std::string_view scope = rest.substr(0, slash);
++  const std::string_view name = rest.substr(slash + 1);
++  return IsSafePathSegment(scope) && IsSafePathSegment(name);
++}
 +
 +bool IsNewerVersion(const std::string& candidate, const std::string& current) {
 +  if (candidate == current) {
@@ -76,10 +124,10 @@ index 0000000000000..b234e8bcf8c94
 +}  // namespace app_swap
 diff --git a/chrome/browser/app_swap/app_swap_version_utils.h b/chrome/browser/app_swap/app_swap_version_utils.h
 new file mode 100644
-index 0000000000000..c1d2484f38aec
+index 0000000000000..8ba246424dc25
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_version_utils.h
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,43 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -97,15 +145,38 @@ index 0000000000000..c1d2484f38aec
 +// if either version doesn't parse as dot-separated integers.
 +bool IsNewerVersion(const std::string& candidate, const std::string& current);
 +
++// Whether `version` is safe to use as a single directory name in the on-disk
++// artifact cache (see AppSwapArtifactProvider's TargetDir()). Requires a
++// non-empty string of npm-legal version characters only -- alphanumerics and
++// ".-+_~" -- and rejects anything with a path separator, a leading dot, or a
++// ".." component.
++//
++// This is a security boundary, not a nicety: a version string reaches the
++// cache path straight from the `appswap-use-version` query parameter (see
++// AppSwapProxyingURLLoaderFactory::CreateLoaderAndStart), so any page served
++// on a configured app host could otherwise point the serve root at an
++// arbitrary directory -- "1/../../../.." resolves out of the cache entirely,
++// and every file under wherever it lands would then be readable over http.
++bool IsValidVersionForPath(const std::string& version);
++
++// Whether `package_name` is safe to use as a path under the artifact cache.
++// Accepts the two shapes npm allows -- "name" and "@scope/name" -- with the
++// same character restrictions as IsValidVersionForPath() per segment, so the
++// one legal "/" can't be joined by traversal components. Package names come
++// from the project's own config rather than a URL, so this is a guard
++// against a typo corrupting an unrelated directory rather than against a
++// remote attacker.
++bool IsValidPackageNameForPath(const std::string& package_name);
++
 +}  // namespace app_swap
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_VERSION_UTILS_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc
 new file mode 100644
-index 0000000000000..62fff84694224
+index 0000000000000..d35a7c8d7a47e
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_version_picker_dialog.cc
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,115 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -116,20 +187,75 @@ index 0000000000000..62fff84694224
 +#include <utility>
 +
 +#include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/scoped_observation.h"
++#include "base/task/single_thread_task_runner.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/views/page_info/page_info_navigation_handler.h"
 +#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_context.h"
 +#include "content/public/browser/web_contents.h"
 +#include "ui/gfx/geometry/size.h"
 +#include "ui/views/controls/webview/webview.h"
++#include "ui/views/view_observer.h"
 +#include "url/gurl.h"
 +
 +namespace {
 +
-+// Matches the width Page Info's own sub-pages settle on; tall enough to show
-+// a handful of tag/version rows without the outer bubble growing awkwardly.
++// Every other Page Info subpage's content is a plain views::View tree: a
++// size change happens synchronously inside a Layout() pass and reaches the
++// bubble through the normal ChildPreferredSizeChanged() -> SizeToContents()
++// chain (see PageInfoBubbleView::ChildPreferredSizeChanged, itself already a
++// workaround for crbug.com/343325197). This subpage's content is a WebView
++// instead: its preferred size changes arrive later, as a renderer-process
++// auto-resize IPC landing on a call stack that never goes through a normal
++// Views layout pass. Forwarding to NotifyContentSizeChanged() synchronously
++// from that same notification recomputes against identical state and
++// changes nothing (View::PreferredSizeChanged() fires the
++// ChildPreferredSizeChanged() chain and this observer's own notification
++// from the same call, so by the time this fires SizeToContents() has
++// already run once against the same state) -- deferring to the next task is
++// the part that matters, since it's what actually steps outside whatever
++// unusual call stack the WebView's resize IPC arrived on. Self-owned: holds
++// no state anything else needs to reach, and outlives nothing it shouldn't
++// by dying with the WebView it observes.
++class AppSwapVersionPickerAutoResizeNotifier : public views::ViewObserver {
++ public:
++  AppSwapVersionPickerAutoResizeNotifier(
++      views::View* web_view,
++      base::WeakPtr<PageInfoNavigationHandler> navigation_handler)
++      : navigation_handler_(std::move(navigation_handler)) {
++    observation_.Observe(web_view);
++  }
++  AppSwapVersionPickerAutoResizeNotifier(
++      const AppSwapVersionPickerAutoResizeNotifier&) = delete;
++  AppSwapVersionPickerAutoResizeNotifier& operator=(
++      const AppSwapVersionPickerAutoResizeNotifier&) = delete;
++
++  // views::ViewObserver:
++  void OnViewPreferredSizeChanged(views::View* observed_view) override {
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(&PageInfoNavigationHandler::NotifyContentSizeChanged,
++                       navigation_handler_));
++  }
++  void OnViewIsDeleting(views::View* observed_view) override { delete this; }
++
++ private:
++  ~AppSwapVersionPickerAutoResizeNotifier() override = default;
++
++  base::WeakPtr<PageInfoNavigationHandler> navigation_handler_;
++  base::ScopedObservation<views::View, views::ViewObserver> observation_{
++      this};
++};
++
++// Matches the width Page Info's own sub-pages settle on. The height is a
++// range rather than a single value: the page reports its own content height
++// back through auto-resize (see EnableSizingFromWebContents below), so a
++// package with one tag and one version gets a short panel instead of a fixed
++// tall one padded out with empty space. Past the maximum the page scrolls.
 +constexpr int kSubpageWidth = 320;
-+constexpr int kSubpageHeight = 380;
++constexpr int kSubpageMinHeight = 100;
++constexpr int kSubpageMaxHeight = 400;
 +
 +}  // namespace
 +
@@ -143,13 +269,25 @@ index 0000000000000..62fff84694224
 +          ->GetWeakPtr();
 +  entry.app = app;
 +  entry.close_page_info = base::BindRepeating(
-+      &PageInfoNavigationHandler::CloseBubble, std::move(navigation_handler));
++      &PageInfoNavigationHandler::CloseBubble, navigation_handler);
 +  std::string token =
 +      AppSwapVersionPickerContext::GetInstance()->Stash(std::move(entry));
 +
 +  auto web_view = std::make_unique<views::WebView>(
 +      Profile::FromBrowserContext(web_contents->GetBrowserContext()));
-+  web_view->SetPreferredSize(gfx::Size(kSubpageWidth, kSubpageHeight));
++  // Width is pinned at both ends of the range so only the height tracks the
++  // content -- a panel that changed width as rows are filtered would make
++  // the whole Page Info bubble jump around while typing.
++  web_view->EnableSizingFromWebContents(
++      gfx::Size(kSubpageWidth, kSubpageMinHeight),
++      gfx::Size(kSubpageWidth, kSubpageMaxHeight));
++  // Something to lay out with until the renderer reports its first real
++  // content height, which arrives a frame or two after the page loads.
++  web_view->SetPreferredSize(gfx::Size(kSubpageWidth, kSubpageMinHeight));
++  // Self-owned; see the class comment for why this subpage needs it and the
++  // other Page Info subpages don't.
++  new AppSwapVersionPickerAutoResizeNotifier(web_view.get(),
++                                             std::move(navigation_handler));
 +  web_view->LoadInitialURL(
 +      GURL("chrome://appswap-version-picker/?token=" + token));
 +  return web_view;

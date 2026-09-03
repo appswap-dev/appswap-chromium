@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/app_swap/app_swap_profiles_service.cc b/chrome/browser/app_swap/app_swap_profiles_service.cc
 new file mode 100644
-index 0000000000000..b9e889e6af46e
+index 0000000000000..d25468eb11310
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profiles_service.cc
-@@ -0,0 +1,239 @@
+@@ -0,0 +1,184 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -14,14 +14,9 @@ index 0000000000000..b9e889e6af46e
 +#include <string>
 +#include <utility>
 +
-+#include "base/files/file_util.h"
 +#include "base/functional/bind.h"
-+#include "base/json/json_reader.h"
-+#include "base/json/json_writer.h"
 +#include "base/no_destructor.h"
-+#include "base/task/thread_pool.h"
 +#include "base/uuid.h"
-+#include "base/values.h"
 +#include "content/public/browser/browser_context.h"
 +
 +namespace {
@@ -45,90 +40,69 @@ index 0000000000000..b9e889e6af46e
 +  return profile;
 +}
 +
-+// Reads and parses the config file. Runs on a MayBlock task runner.
-+std::pair<std::vector<AppSwapProfile>, std::optional<std::string>>
-+ReadConfigFile(const base::FilePath& path) {
-+  std::vector<AppSwapProfile> profiles;
-+  std::optional<std::string> active_profile_id;
-+  std::string json;
-+  if (!base::ReadFileToString(path, &json)) {
-+    return {std::move(profiles), std::move(active_profile_id)};
-+  }
-+  std::optional<base::DictValue> parsed =
-+      base::JSONReader::ReadDict(json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
-+  if (!parsed) {
-+    return {std::move(profiles), std::move(active_profile_id)};
-+  }
-+  if (const base::ListValue* profiles_list = parsed->FindList("profiles")) {
-+    for (size_t i = 0; i < profiles_list->size(); ++i) {
-+      const base::Value& value = (*profiles_list)[i];
++}  // namespace
++
++AppSwapProfilesService::AppSwapProfilesService(
++    content::BrowserContext* browser_context)
++    : AppSwapConfigStore(browser_context->GetPath(),
++                         FILE_PATH_LITERAL("profiles.json")) {}
++AppSwapProfilesService::~AppSwapProfilesService() = default;
++
++void AppSwapProfilesService::ParseConfig(const base::DictValue& dict) {
++  if (const base::ListValue* profiles_list = dict.FindList("profiles")) {
++    for (const base::Value& value : *profiles_list) {
 +      if (!value.is_dict()) {
 +        continue;
 +      }
 +      if (std::optional<AppSwapProfile> profile =
 +              ProfileFromDict(value.GetDict())) {
-+        profiles.push_back(std::move(*profile));
++        profiles_.push_back(std::move(*profile));
 +      }
 +    }
 +  }
-+  if (const std::string* active_id = parsed->FindString("active_profile_id")) {
-+    active_profile_id = *active_id;
++  if (const std::string* active_id = dict.FindString("active_profile_id")) {
++    active_profile_id_ = *active_id;
 +  }
-+  return {std::move(profiles), std::move(active_profile_id)};
 +}
 +
-+}  // namespace
++base::DictValue AppSwapProfilesService::SerializeConfig() const {
++  base::DictValue root;
++  base::ListValue profiles_list;
++  for (const AppSwapProfile& profile : profiles_) {
++    profiles_list.Append(ProfileToDict(profile));
++  }
++  root.Set("profiles", std::move(profiles_list));
++  if (active_profile_id_) {
++    root.Set("active_profile_id", *active_profile_id_);
++  }
++  return root;
++}
 +
-+AppSwapProfilesService::AppSwapProfilesService(
-+    content::BrowserContext* browser_context)
-+    : profile_path_(browser_context->GetPath()) {}
-+AppSwapProfilesService::~AppSwapProfilesService() = default;
-+
-+base::FilePath AppSwapProfilesService::ConfigPath() const {
-+  return profile_path_.Append(FILE_PATH_LITERAL("AppSwap"))
-+      .Append(FILE_PATH_LITERAL("profiles.json"));
++void AppSwapProfilesService::OnConfigLoadFinished() {
++  change_callbacks_.Notify();
 +}
 +
 +void AppSwapProfilesService::GetProfiles(
 +    base::OnceCallback<void(std::vector<AppSwapProfile>)> callback) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+
-+  if (loaded_) {
-+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-+        FROM_HERE, base::BindOnce(std::move(callback), profiles_));
-+    return;
-+  }
-+
-+  pending_load_.push_back(base::BindOnce(
++  RunWhenLoaded(base::BindOnce(
 +      [](AppSwapProfilesService* self,
 +         base::OnceCallback<void(std::vector<AppSwapProfile>)> callback) {
-+        self->GetProfiles(std::move(callback));
++        std::move(callback).Run(self->profiles_);
 +      },
 +      base::Unretained(this), std::move(callback)));
-+
-+  if (loading_) {
-+    return;
-+  }
-+  loading_ = true;
-+
-+  base::ThreadPool::PostTaskAndReplyWithResult(
-+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-+      base::BindOnce(&ReadConfigFile, ConfigPath()),
-+      base::BindOnce(&AppSwapProfilesService::OnConfigLoaded,
-+                     base::Unretained(this)));
 +}
 +
 +const std::vector<AppSwapProfile>& AppSwapProfilesService::GetProfilesIfLoaded()
 +    const {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 +  static const base::NoDestructor<std::vector<AppSwapProfile>> kEmpty;
-+  return loaded_ ? profiles_ : *kEmpty;
++  return loaded() ? profiles_ : *kEmpty;
 +}
 +
 +std::optional<std::string> AppSwapProfilesService::GetActiveProfileIdIfLoaded()
 +    const {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  if (!loaded_ || !active_profile_id_) {
++  if (!loaded() || !active_profile_id_) {
 +    return std::nullopt;
 +  }
 +  for (const AppSwapProfile& profile : profiles_) {
@@ -139,60 +113,56 @@ index 0000000000000..b9e889e6af46e
 +  return std::nullopt;  // The recorded active profile no longer exists.
 +}
 +
-+void AppSwapProfilesService::SetActiveProfile(const std::string& profile_id) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
-+  for (const AppSwapProfile& profile : profiles_) {
-+    if (profile.id == profile_id) {
-+      active_profile_id_ = profile_id;
-+      ScheduleSave();
-+      change_callbacks_.Notify();
-+      return;
-+    }
-+  }
-+}
-+
 +base::CallbackListSubscription AppSwapProfilesService::AddChangeCallback(
 +    base::RepeatingClosure callback) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 +  return change_callbacks_.Add(std::move(callback));
 +}
 +
-+void AppSwapProfilesService::OnConfigLoaded(
-+    std::pair<std::vector<AppSwapProfile>, std::optional<std::string>>
-+        loaded) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  profiles_ = std::move(loaded.first);
-+  active_profile_id_ = std::move(loaded.second);
-+  loaded_ = true;
-+  loading_ = false;
++void AppSwapProfilesService::SetActiveProfile(const std::string& profile_id) {
++  RunWhenLoaded(base::BindOnce(&AppSwapProfilesService::SetActiveProfileNow,
++                               base::Unretained(this), profile_id));
++}
 +
-+  std::vector<base::OnceClosure> pending = std::move(pending_load_);
-+  pending_load_.clear();
-+  for (base::OnceClosure& callback : pending) {
-+    std::move(callback).Run();
++void AppSwapProfilesService::SetActiveProfileNow(
++    const std::string& profile_id) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  for (const AppSwapProfile& profile : profiles_) {
++    if (profile.id == profile_id) {
++      active_profile_id_ = profile_id;
++      Save();
++      change_callbacks_.Notify();
++      return;
++    }
 +  }
-+  change_callbacks_.Notify();
 +}
 +
 +void AppSwapProfilesService::AddProfile(AppSwapProfile profile) {
++  RunWhenLoaded(base::BindOnce(&AppSwapProfilesService::AddProfileNow,
++                               base::Unretained(this), std::move(profile)));
++}
++
++void AppSwapProfilesService::AddProfileNow(AppSwapProfile profile) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
 +  if (profile.id.empty()) {
 +    profile.id = base::Uuid::GenerateRandomV4().AsLowercaseString();
 +  }
 +  profiles_.push_back(std::move(profile));
-+  ScheduleSave();
++  Save();
 +  change_callbacks_.Notify();
 +}
 +
 +void AppSwapProfilesService::UpdateProfile(AppSwapProfile profile) {
++  RunWhenLoaded(base::BindOnce(&AppSwapProfilesService::UpdateProfileNow,
++                               base::Unretained(this), std::move(profile)));
++}
++
++void AppSwapProfilesService::UpdateProfileNow(AppSwapProfile profile) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
 +  for (AppSwapProfile& existing : profiles_) {
 +    if (existing.id == profile.id) {
 +      existing = std::move(profile);
-+      ScheduleSave();
++      Save();
 +      change_callbacks_.Notify();
 +      return;
 +    }
@@ -200,55 +170,30 @@ index 0000000000000..b9e889e6af46e
 +}
 +
 +void AppSwapProfilesService::RemoveProfile(const std::string& id) {
++  RunWhenLoaded(base::BindOnce(&AppSwapProfilesService::RemoveProfileNow,
++                               base::Unretained(this), id));
++}
++
++void AppSwapProfilesService::RemoveProfileNow(const std::string& id) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
 +  for (auto it = profiles_.begin(); it != profiles_.end(); ++it) {
 +    if (it->id == id) {
 +      profiles_.erase(it);
 +      if (active_profile_id_ == id) {
 +        active_profile_id_.reset();
 +      }
-+      ScheduleSave();
++      Save();
 +      change_callbacks_.Notify();
 +      return;
 +    }
 +  }
 +}
-+
-+void AppSwapProfilesService::ScheduleSave() {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+
-+  base::DictValue root;
-+  base::ListValue profiles_list;
-+  for (const AppSwapProfile& profile : profiles_) {
-+    profiles_list.Append(ProfileToDict(profile));
-+  }
-+  root.Set("profiles", std::move(profiles_list));
-+  if (active_profile_id_) {
-+    root.Set("active_profile_id", *active_profile_id_);
-+  }
-+
-+  std::string json;
-+  if (!base::JSONWriter::Write(root, &json)) {
-+    return;
-+  }
-+
-+  const base::FilePath path = ConfigPath();
-+  base::ThreadPool::PostTask(
-+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-+      base::BindOnce(
-+          [](base::FilePath path, std::string json) {
-+            base::CreateDirectory(path.DirName());
-+            base::WriteFile(path, json);
-+          },
-+          std::move(path), std::move(json)));
-+}
 diff --git a/chrome/browser/app_swap/app_swap_profiles_service.h b/chrome/browser/app_swap/app_swap_profiles_service.h
 new file mode 100644
-index 0000000000000..264fdc82fdf73
+index 0000000000000..f0253a1d27275
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_profiles_service.h
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,108 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -258,13 +203,12 @@ index 0000000000000..264fdc82fdf73
 +
 +#include <optional>
 +#include <string>
-+#include <utility>
 +#include <vector>
 +
 +#include "base/callback_list.h"
-+#include "base/files/file_path.h"
 +#include "base/functional/callback.h"
-+#include "base/sequence_checker.h"
++#include "base/values.h"
++#include "chrome/browser/app_swap/app_swap_config_store.h"
 +#include "components/keyed_service/core/keyed_service.h"
 +
 +namespace content {
@@ -291,13 +235,13 @@ index 0000000000000..264fdc82fdf73
 +};
 +
 +// Owns the persistent profile configuration for one Project (== Chromium
-+// Profile), stored as JSON under that profile's own directory. The file is
-+// read/written on a background (MayBlock) task runner. See
++// Profile), stored as JSON under that profile's own directory. See
++// AppSwapConfigStore for the load/save mechanics, and
 +// AppSwapProfilesServiceFactory for how to reach the instance for a given
 +// Profile.
-+class AppSwapProfilesService : public KeyedService {
++class AppSwapProfilesService : public KeyedService, public AppSwapConfigStore {
 + public:
-+  AppSwapProfilesService(content::BrowserContext* browser_context);
++  explicit AppSwapProfilesService(content::BrowserContext* browser_context);
 +  ~AppSwapProfilesService() override;
 +
 +  AppSwapProfilesService(const AppSwapProfilesService&) = delete;
@@ -314,9 +258,10 @@ index 0000000000000..264fdc82fdf73
 +  // then use this for the actual per-request lookup.
 +  const std::vector<AppSwapProfile>& GetProfilesIfLoaded() const;
 +
-+  // Mutations. Must only be called after the config has been loaded (i.e.
-+  // after a GetProfiles callback has run). They update the in-memory state
-+  // and schedule an asynchronous save.
++  // Mutations. Safe to call at any time: each one is queued behind the
++  // config load (see AppSwapConfigStore::RunWhenLoaded), applies to the
++  // in-memory state, and writes the file. `id` is generated for AddProfile()
++  // if empty; Update/Remove are no-ops if no profile has that id.
 +  void AddProfile(AppSwapProfile profile);
 +  void UpdateProfile(AppSwapProfile profile);
 +  void RemoveProfile(const std::string& id);
@@ -334,27 +279,26 @@ index 0000000000000..264fdc82fdf73
 +  // Registers `callback` to run whenever the profile list or the active
 +  // profile changes (add/update/remove/switch, or the initial load
 +  // completing) -- e.g. AppSwapProfileTabStripButton uses this to pick up a
-+  // rename made elsewhere (appswap://profiles) without needing its own tab
++  // rename made elsewhere (appswap://projects) without needing its own tab
 +  // to change. Returns a subscription that unregisters on destruction.
 +  base::CallbackListSubscription AddChangeCallback(
 +      base::RepeatingClosure callback);
 +
++ protected:
++  // AppSwapConfigStore:
++  void ParseConfig(const base::DictValue& dict) override;
++  base::DictValue SerializeConfig() const override;
++  void OnConfigLoadFinished() override;
++
 + private:
-+  void OnConfigLoaded(
-+      std::pair<std::vector<AppSwapProfile>, std::optional<std::string>>
-+          loaded);
-+  void ScheduleSave();
++  void AddProfileNow(AppSwapProfile profile);
++  void UpdateProfileNow(AppSwapProfile profile);
++  void RemoveProfileNow(const std::string& id);
++  void SetActiveProfileNow(const std::string& profile_id);
 +
-+  base::FilePath ConfigPath() const;
-+
-+  const base::FilePath profile_path_;
 +  std::vector<AppSwapProfile> profiles_;
 +  std::optional<std::string> active_profile_id_;
-+  bool loaded_ = false;
-+  bool loading_ = false;
-+  std::vector<base::OnceClosure> pending_load_;
 +  base::RepeatingClosureList change_callbacks_;
-+  SEQUENCE_CHECKER(sequence_checker_);
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PROFILES_SERVICE_H_

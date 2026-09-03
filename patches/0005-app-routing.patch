@@ -12,10 +12,10 @@ index 2a3958f78ddb6..4e6f3b49ffa24 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..ab138e6a8e3d9
+index 0000000000000..f81968989afaa
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,89 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -28,6 +28,8 @@ index 0000000000000..ab138e6a8e3d9
 +    "app_swap_apps_service_factory.h",
 +    "app_swap_artifact_provider.cc",
 +    "app_swap_artifact_provider.h",
++    "app_swap_config_store.cc",
++    "app_swap_config_store.h",
 +    "app_swap_prefs.cc",
 +    "app_swap_prefs.h",
 +    "app_swap_profile_pin_tab_helper.cc",
@@ -86,12 +88,29 @@ index 0000000000000..ab138e6a8e3d9
 +    "//url",
 +  ]
 +}
++
++source_set("unit_tests") {
++  testonly = true
++  sources = [
++    "app_swap_config_store_unittest.cc",
++    "app_swap_route_matcher_unittest.cc",
++    "app_swap_version_utils_unittest.cc",
++  ]
++
++  deps = [
++    ":app_swap",
++    "//base",
++    "//base/test:test_support",
++    "//testing/gtest",
++    "//url",
++  ]
++}
 diff --git a/chrome/browser/app_swap/app_swap_apps_service.cc b/chrome/browser/app_swap/app_swap_apps_service.cc
 new file mode 100644
-index 0000000000000..b78566461ba28
+index 0000000000000..cee410ddf458c
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_service.cc
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,157 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -102,14 +121,9 @@ index 0000000000000..b78566461ba28
 +#include <string>
 +#include <utility>
 +
-+#include "base/files/file_util.h"
 +#include "base/functional/bind.h"
-+#include "base/json/json_reader.h"
-+#include "base/json/json_writer.h"
 +#include "base/no_destructor.h"
-+#include "base/task/thread_pool.h"
 +#include "base/uuid.h"
-+#include "base/values.h"
 +#include "content/public/browser/browser_context.h"
 +
 +namespace {
@@ -161,155 +175,102 @@ index 0000000000000..b78566461ba28
 +  return app;
 +}
 +
-+// Reads and parses the config file. Runs on a MayBlock task runner.
-+std::vector<AppSwapApp> ReadConfigFile(const base::FilePath& path) {
-+  std::vector<AppSwapApp> apps;
-+  std::string json;
-+  if (!base::ReadFileToString(path, &json)) {
-+    return apps;
-+  }
-+  std::optional<base::DictValue> parsed =
-+      base::JSONReader::ReadDict(json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
-+  if (!parsed) {
-+    return apps;
-+  }
-+  const base::ListValue* apps_list = parsed->FindList("apps");
++}  // namespace
++
++AppSwapAppsService::AppSwapAppsService(content::BrowserContext* browser_context)
++    : AppSwapConfigStore(browser_context->GetPath(),
++                         FILE_PATH_LITERAL("apps.json")) {}
++AppSwapAppsService::~AppSwapAppsService() = default;
++
++void AppSwapAppsService::ParseConfig(const base::DictValue& dict) {
++  const base::ListValue* apps_list = dict.FindList("apps");
 +  if (!apps_list) {
-+    return apps;
++    return;
 +  }
-+  for (size_t i = 0; i < apps_list->size(); ++i) {
-+    const base::Value& value = (*apps_list)[i];
++  for (const base::Value& value : *apps_list) {
 +    if (!value.is_dict()) {
 +      continue;
 +    }
 +    if (std::optional<AppSwapApp> app = AppFromDict(value.GetDict())) {
-+      apps.push_back(std::move(*app));
-+    }
-+  }
-+  return apps;
-+}
-+
-+}  // namespace
-+
-+AppSwapAppsService::AppSwapAppsService(content::BrowserContext* browser_context)
-+    : profile_path_(browser_context->GetPath()) {}
-+AppSwapAppsService::~AppSwapAppsService() = default;
-+
-+base::FilePath AppSwapAppsService::ConfigPath() const {
-+  return profile_path_.Append(FILE_PATH_LITERAL("AppSwap"))
-+      .Append(FILE_PATH_LITERAL("apps.json"));
-+}
-+
-+void AppSwapAppsService::GetApps(
-+    base::OnceCallback<void(std::vector<AppSwapApp>)> callback) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+
-+  if (loaded_) {
-+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-+        FROM_HERE, base::BindOnce(std::move(callback), apps_));
-+    return;
-+  }
-+
-+  pending_load_.push_back(base::BindOnce(
-+      [](AppSwapAppsService* self,
-+         base::OnceCallback<void(std::vector<AppSwapApp>)> callback) {
-+        self->GetApps(std::move(callback));
-+      },
-+      base::Unretained(this), std::move(callback)));
-+
-+  if (loading_) {
-+    return;
-+  }
-+  loading_ = true;
-+
-+  base::ThreadPool::PostTaskAndReplyWithResult(
-+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-+      base::BindOnce(&ReadConfigFile, ConfigPath()),
-+      base::BindOnce(&AppSwapAppsService::OnConfigLoaded,
-+                     base::Unretained(this)));
-+}
-+
-+const std::vector<AppSwapApp>& AppSwapAppsService::GetAppsIfLoaded() const {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  static const base::NoDestructor<std::vector<AppSwapApp>> kEmpty;
-+  return loaded_ ? apps_ : *kEmpty;
-+}
-+
-+void AppSwapAppsService::OnConfigLoaded(std::vector<AppSwapApp> apps) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  apps_ = std::move(apps);
-+  loaded_ = true;
-+  loading_ = false;
-+
-+  std::vector<base::OnceClosure> pending = std::move(pending_load_);
-+  pending_load_.clear();
-+  for (base::OnceClosure& callback : pending) {
-+    std::move(callback).Run();
-+  }
-+}
-+
-+void AppSwapAppsService::AddApp(AppSwapApp app) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
-+  if (app.id.empty()) {
-+    app.id = base::Uuid::GenerateRandomV4().AsLowercaseString();
-+  }
-+  apps_.push_back(std::move(app));
-+  ScheduleSave();
-+}
-+
-+void AppSwapAppsService::UpdateApp(AppSwapApp app) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
-+  for (AppSwapApp& existing : apps_) {
-+    if (existing.id == app.id) {
-+      existing = std::move(app);
-+      ScheduleSave();
-+      return;
++      apps_.push_back(std::move(*app));
 +    }
 +  }
 +}
 +
-+void AppSwapAppsService::RemoveApp(const std::string& id) {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+  DCHECK(loaded_);
-+  for (auto it = apps_.begin(); it != apps_.end(); ++it) {
-+    if (it->id == id) {
-+      apps_.erase(it);
-+      ScheduleSave();
-+      return;
-+    }
-+  }
-+}
-+
-+void AppSwapAppsService::ScheduleSave() {
-+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+
++base::DictValue AppSwapAppsService::SerializeConfig() const {
 +  base::DictValue root;
 +  base::ListValue apps_list;
 +  for (const AppSwapApp& app : apps_) {
 +    apps_list.Append(AppToDict(app));
 +  }
 +  root.Set("apps", std::move(apps_list));
++  return root;
++}
 +
-+  std::string json;
-+  if (!base::JSONWriter::Write(root, &json)) {
-+    return;
++void AppSwapAppsService::GetApps(
++    base::OnceCallback<void(std::vector<AppSwapApp>)> callback) {
++  RunWhenLoaded(base::BindOnce(
++      [](AppSwapAppsService* self,
++         base::OnceCallback<void(std::vector<AppSwapApp>)> callback) {
++        std::move(callback).Run(self->apps_);
++      },
++      base::Unretained(this), std::move(callback)));
++}
++
++const std::vector<AppSwapApp>& AppSwapAppsService::GetAppsIfLoaded() const {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  static const base::NoDestructor<std::vector<AppSwapApp>> kEmpty;
++  return loaded() ? apps_ : *kEmpty;
++}
++
++void AppSwapAppsService::AddApp(AppSwapApp app) {
++  RunWhenLoaded(base::BindOnce(&AppSwapAppsService::AddAppNow,
++                               base::Unretained(this), std::move(app)));
++}
++
++void AppSwapAppsService::AddAppNow(AppSwapApp app) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if (app.id.empty()) {
++    app.id = base::Uuid::GenerateRandomV4().AsLowercaseString();
 +  }
++  apps_.push_back(std::move(app));
++  Save();
++}
 +
-+  const base::FilePath path = ConfigPath();
-+  base::ThreadPool::PostTask(
-+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-+      base::BindOnce(
-+          [](base::FilePath path, std::string json) {
-+            base::CreateDirectory(path.DirName());
-+            base::WriteFile(path, json);
-+          },
-+          std::move(path), std::move(json)));
++void AppSwapAppsService::UpdateApp(AppSwapApp app) {
++  RunWhenLoaded(base::BindOnce(&AppSwapAppsService::UpdateAppNow,
++                               base::Unretained(this), std::move(app)));
++}
++
++void AppSwapAppsService::UpdateAppNow(AppSwapApp app) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  for (AppSwapApp& existing : apps_) {
++    if (existing.id == app.id) {
++      existing = std::move(app);
++      Save();
++      return;
++    }
++  }
++}
++
++void AppSwapAppsService::RemoveApp(const std::string& id) {
++  RunWhenLoaded(base::BindOnce(&AppSwapAppsService::RemoveAppNow,
++                               base::Unretained(this), id));
++}
++
++void AppSwapAppsService::RemoveAppNow(const std::string& id) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  for (auto it = apps_.begin(); it != apps_.end(); ++it) {
++    if (it->id == id) {
++      apps_.erase(it);
++      Save();
++      return;
++    }
++  }
 +}
 diff --git a/chrome/browser/app_swap/app_swap_apps_service.h b/chrome/browser/app_swap/app_swap_apps_service.h
 new file mode 100644
-index 0000000000000..76f9e21273f98
+index 0000000000000..732081c51250c
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_apps_service.h
 @@ -0,0 +1,87 @@
@@ -323,9 +284,9 @@ index 0000000000000..76f9e21273f98
 +#include <string>
 +#include <vector>
 +
-+#include "base/files/file_path.h"
 +#include "base/functional/callback.h"
-+#include "base/sequence_checker.h"
++#include "base/values.h"
++#include "chrome/browser/app_swap/app_swap_config_store.h"
 +#include "chrome/browser/app_swap/app_swap_source.h"
 +#include "components/keyed_service/core/keyed_service.h"
 +
@@ -355,13 +316,13 @@ index 0000000000000..76f9e21273f98
 +};
 +
 +// Owns the persistent app configuration for one Project (== Chromium
-+// Profile), stored as JSON under that profile's own directory. The file is
-+// read/written on a background (MayBlock) task runner. See
++// Profile), stored as JSON under that profile's own directory. See
++// AppSwapConfigStore for the load/save mechanics, and
 +// AppSwapAppsServiceFactory for how to reach the instance for a given
 +// Profile.
-+class AppSwapAppsService : public KeyedService {
++class AppSwapAppsService : public KeyedService, public AppSwapConfigStore {
 + public:
-+  AppSwapAppsService(content::BrowserContext* browser_context);
++  explicit AppSwapAppsService(content::BrowserContext* browser_context);
 +  ~AppSwapAppsService() override;
 +
 +  AppSwapAppsService(const AppSwapAppsService&) = delete;
@@ -378,34 +339,34 @@ index 0000000000000..76f9e21273f98
 +  // this for the actual per-request lookup.
 +  const std::vector<AppSwapApp>& GetAppsIfLoaded() const;
 +
-+  // Mutations. Must only be called after the config has been loaded (i.e.
-+  // after a GetApps callback has run). They update the in-memory list and
-+  // schedule an asynchronous save.
++  // Mutations. Safe to call at any time: each one is queued behind the
++  // config load (see AppSwapConfigStore::RunWhenLoaded), applies to the
++  // in-memory list, and writes the file. `id` is generated for AddApp() if
++  // empty; Update/Remove are no-ops if no app has that id.
 +  void AddApp(AppSwapApp app);
 +  void UpdateApp(AppSwapApp app);
 +  void RemoveApp(const std::string& id);
 +
++ protected:
++  // AppSwapConfigStore:
++  void ParseConfig(const base::DictValue& dict) override;
++  base::DictValue SerializeConfig() const override;
++
 + private:
-+  void OnConfigLoaded(std::vector<AppSwapApp> apps);
-+  void ScheduleSave();
++  void AddAppNow(AppSwapApp app);
++  void UpdateAppNow(AppSwapApp app);
++  void RemoveAppNow(const std::string& id);
 +
-+  base::FilePath ConfigPath() const;
-+
-+  const base::FilePath profile_path_;
 +  std::vector<AppSwapApp> apps_;
-+  bool loaded_ = false;
-+  bool loading_ = false;
-+  std::vector<base::OnceClosure> pending_load_;
-+  SEQUENCE_CHECKER(sequence_checker_);
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.cc b/chrome/browser/app_swap/app_swap_artifact_provider.cc
 new file mode 100644
-index 0000000000000..01a8501a93e64
+index 0000000000000..76da11307260d
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.cc
-@@ -0,0 +1,549 @@
+@@ -0,0 +1,651 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -429,6 +390,7 @@ index 0000000000000..01a8501a93e64
 +#include "base/path_service.h"
 +#include "base/strings/string_util.h"
 +#include "base/task/thread_pool.h"
++#include "base/time/time.h"
 +#include "base/values.h"
 +#include "chrome/browser/app_swap/app_swap_version_utils.h"
 +#include "chrome/browser/net/system_network_context_manager.h"
@@ -487,7 +449,14 @@ index 0000000000000..01a8501a93e64
 +  return base::StrCat({source.registry, "/", encoded});
 +}
 +
++// Both of these return an empty path for input that isn't safe to put in a
++// filesystem path -- see app_swap::IsValidPackageNameForPath /
++// IsValidVersionForPath, and the callers, which treat an empty path as "this
++// artifact cannot be resolved" rather than falling back to something.
 +base::FilePath PackageDir(const AppSwapSource& source) {
++  if (!app_swap::IsValidPackageNameForPath(source.package_name)) {
++    return base::FilePath();
++  }
 +  base::FilePath apps_dir;
 +  if (!base::PathService::Get(chrome::DIR_USER_DATA, &apps_dir)) {
 +    base::GetTempDir(&apps_dir);
@@ -498,7 +467,49 @@ index 0000000000000..01a8501a93e64
 +
 +base::FilePath TargetDir(const AppSwapSource& source,
 +                         const std::string& version) {
-+  return PackageDir(source).Append(base::FilePath::FromUTF8Unsafe(version));
++  if (!app_swap::IsValidVersionForPath(version)) {
++    return base::FilePath();
++  }
++  const base::FilePath package_dir = PackageDir(source);
++  if (package_dir.empty()) {
++    return base::FilePath();
++  }
++  return package_dir.Append(base::FilePath::FromUTF8Unsafe(version));
++}
++
++// How many extracted versions of one package to keep on disk. Old versions
++// are worth keeping around -- they're what makes the offline fallback and
++// the "registry unreachable" recovery page work -- but without a cap the
++// cache grows for the life of the install, one full copy of the app per
++// release ever navigated to.
++constexpr size_t kMaxCachedVersionsPerPackage = 10;
++
++// Blocking; must run off the UI thread. Deletes all but the
++// `kMaxCachedVersionsPerPackage` most recently modified version directories
++// under `package_dir`, skipping anything in `keep` (versions currently
++// resolved for a live tab, which must not be pulled out from under it).
++void PruneCachedVersionsBlocking(base::FilePath package_dir,
++                                 std::vector<base::FilePath> keep) {
++  std::vector<std::pair<base::Time, base::FilePath>> entries;
++  base::FileEnumerator enumerator(package_dir, /*recursive=*/false,
++                                  base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath name = enumerator.Next(); !name.empty();
++       name = enumerator.Next()) {
++    entries.emplace_back(enumerator.GetInfo().GetLastModifiedTime(), name);
++  }
++  if (entries.size() <= kMaxCachedVersionsPerPackage) {
++    return;
++  }
++  // Newest first, so everything past the cap is the oldest by last use.
++  std::sort(entries.begin(), entries.end(),
++            [](const auto& a, const auto& b) { return a.first > b.first; });
++  for (size_t i = kMaxCachedVersionsPerPackage; i < entries.size(); ++i) {
++    const base::FilePath& dir = entries[i].second;
++    if (std::ranges::contains(keep, dir)) {
++      continue;
++    }
++    base::DeletePathRecursively(dir);
++  }
 +}
 +
 +// Blocking; must run off the UI thread. Each subdirectory of a package's
@@ -659,6 +670,22 @@ index 0000000000000..01a8501a93e64
 +    return;  // Already resolving/downloading this source.
 +  }
 +
++  // A package name or exact version that can't be a cache path is not
++  // resolvable, and must not reach the network either -- see
++  // app_swap::IsValidVersionForPath for why a version in particular is
++  // attacker-influenced. A dist-tag isn't checked here; it's resolved to a
++  // real version by the registry first, and *that* gets validated when the
++  // resolved version is turned into a path.
++  if (PackageDir(source).empty() ||
++      (IsExactVersion(source.version) &&
++       !app_swap::IsValidVersionForPath(source.version))) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(&AppSwapArtifactProvider::Finish,
++                                  base::Unretained(this), source,
++                                  base::FilePath()));
++    return;
++  }
++
 +  if (IsExactVersion(source.version)) {
 +    // Check disk before the network: an exact version that's already been
 +    // extracted (from an earlier session, or resolved under a since-moved
@@ -806,9 +833,16 @@ index 0000000000000..01a8501a93e64
 +    const AppSwapSource& source,
 +    base::OnceCallback<void(std::vector<std::string>)> callback) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  const base::FilePath package_dir = PackageDir(source);
++  if (package_dir.empty()) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(std::move(callback), std::vector<std::string>()));
++    return;
++  }
 +  base::ThreadPool::PostTaskAndReplyWithResult(
 +      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-+      base::BindOnce(&ListCachedVersionsBlocking, PackageDir(source)),
++      base::BindOnce(&ListCachedVersionsBlocking, package_dir),
 +      std::move(callback));
 +}
 +
@@ -876,6 +910,12 @@ index 0000000000000..01a8501a93e64
 +    const std::string& tarball_url,
 +    base::OnceCallback<void(base::FilePath)> callback) {
 +  const base::FilePath target_dir = TargetDir(source, version);
++  // Empty for a version the registry resolved a dist-tag to that isn't safe
++  // as a directory name -- nothing to download it into, so don't ask.
++  if (target_dir.empty()) {
++    std::move(callback).Run(base::FilePath());
++    return;
++  }
 +
 +  auto resource_request = std::make_unique<network::ResourceRequest>();
 +  resource_request->url = GURL(tarball_url);
@@ -943,6 +983,7 @@ index 0000000000000..01a8501a93e64
 +
 +  if (!dir.empty()) {
 +    cache_[key] = dir;
++    PruneCachedVersions(source);
 +  }
 +
 +  auto it = pending_.find(key);
@@ -955,12 +996,34 @@ index 0000000000000..01a8501a93e64
 +    }
 +  }
 +}
++
++void AppSwapArtifactProvider::PruneCachedVersions(
++    const AppSwapSource& source) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  const base::FilePath package_dir = PackageDir(source);
++  if (package_dir.empty()) {
++    return;
++  }
++  // Everything currently resolved, for any package -- a tab pinned to an
++  // older version (or still showing one after the dist-tag moved on) holds
++  // its directory through `cache_`, and deleting it out from under that tab
++  // would break its next subresource fetch.
++  std::vector<base::FilePath> keep;
++  keep.reserve(cache_.size());
++  for (const auto& [key, dir] : cache_) {
++    keep.push_back(dir);
++  }
++  base::ThreadPool::PostTask(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
++      base::BindOnce(&PruneCachedVersionsBlocking, package_dir,
++                     std::move(keep)));
++}
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.h b/chrome/browser/app_swap/app_swap_artifact_provider.h
 new file mode 100644
-index 0000000000000..e031b808837e0
+index 0000000000000..48f4e9eec3485
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.h
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,174 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1102,6 +1165,11 @@ index 0000000000000..e031b808837e0
 +                 std::optional<std::string> body);
 +  void Finish(const AppSwapSource& source, base::FilePath dir);
 +
++  // Caps how many extracted versions of `source`'s package stay on disk,
++  // preserving every version any live tab has currently resolved. Posted to
++  // a blocking sequence; the result is never waited on.
++  void PruneCachedVersions(const AppSwapSource& source);
++
 +  base::FilePath apps_dir_;
 +
 +  // Dedup: pending callbacks keyed by "package@version".
@@ -1132,16 +1200,17 @@ index 0000000000000..e031b808837e0
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_ARTIFACT_PROVIDER_H_
 diff --git a/chrome/browser/app_swap/app_swap_route_matcher.cc b/chrome/browser/app_swap/app_swap_route_matcher.cc
 new file mode 100644
-index 0000000000000..cea77e41a53a9
+index 0000000000000..bc756f55695be
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_matcher.cc
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,134 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
 +
++#include <optional>
 +#include <string>
 +#include <string_view>
 +
@@ -1211,21 +1280,21 @@ index 0000000000000..cea77e41a53a9
 +  return target_url.ReplaceComponents(replacements);
 +}
 +
-+const AppSwapRouteGroupRule* FindAppSwapRouteGroupRuleForUrl(
-+    const AppSwapRouteGroup* group,
++std::optional<AppSwapRouteGroupRule> FindAppSwapRouteGroupRuleForUrl(
++    const std::optional<AppSwapRouteGroup>& group,
 +    const GURL& url) {
 +  if (!group) {
-+    return nullptr;
++    return std::nullopt;
 +  }
 +  for (const AppSwapRouteGroupRule& rule : group->rules) {
 +    if (AppSwapUrlMatchesPattern(url, rule.url_pattern)) {
-+      return &rule;
++      return rule;
 +    }
 +  }
-+  return nullptr;
++  return std::nullopt;
 +}
 +
-+const AppSwapRouteGroup* FindAppSwapRouteGroupById(
++std::optional<AppSwapRouteGroup> FindAppSwapRouteGroupById(
 +    Profile* profile,
 +    const std::string& group_id) {
 +  // AppSwapRouteGroupServiceFactory only builds an instance for regular
@@ -1240,40 +1309,41 @@ index 0000000000000..cea77e41a53a9
 +  AppSwapRouteGroupService* service =
 +      AppSwapRouteGroupServiceFactory::GetForProfile(profile);
 +  if (!service) {
-+    return nullptr;
++    return std::nullopt;
 +  }
 +  for (const AppSwapRouteGroup& group : service->GetRouteGroupsIfLoaded()) {
 +    if (group.id == group_id) {
-+      return &group;
++      return group;
 +    }
 +  }
-+  return nullptr;
++  return std::nullopt;
 +}
 +
-+const AppSwapApp* FindAppSwapAppForUrl(Profile* profile, const GURL& url) {
++std::optional<AppSwapApp> FindAppSwapAppForUrl(Profile* profile,
++                                               const GURL& url) {
 +  AppSwapAppsService* service = AppSwapAppsServiceFactory::GetForProfile(profile);
 +  if (!service) {
-+    return nullptr;
++    return std::nullopt;
 +  }
 +  for (const AppSwapApp& app : service->GetAppsIfLoaded()) {
 +    for (const std::string& host : app.hosts) {
 +      if (AppSwapUrlMatchesPattern(url, host)) {
-+        return &app;
++        return app;
 +      }
 +    }
 +  }
-+  return nullptr;
++  return std::nullopt;
 +}
 +
 +bool IsAppSwapRoutedPage(Profile* profile, const GURL& url) {
-+  return FindAppSwapAppForUrl(profile, url) != nullptr;
++  return FindAppSwapAppForUrl(profile, url).has_value();
 +}
 diff --git a/chrome/browser/app_swap/app_swap_route_matcher.h b/chrome/browser/app_swap/app_swap_route_matcher.h
 new file mode 100644
-index 0000000000000..07d5cc19a8365
+index 0000000000000..6f386a48b2c8b
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_route_matcher.h
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,66 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1281,6 +1351,7 @@ index 0000000000000..07d5cc19a8365
 +#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_MATCHER_H_
 +#define CHROME_BROWSER_APP_SWAP_APP_SWAP_ROUTE_MATCHER_H_
 +
++#include <optional>
 +#include <string>
 +
 +#include "chrome/browser/app_swap/app_swap_apps_service.h"
@@ -1298,9 +1369,15 @@ index 0000000000000..07d5cc19a8365
 +bool AppSwapUrlMatchesPattern(const GURL& url, const std::string& url_pattern);
 +
 +// Finds the first app configured in `profile` whose `hosts` matches `url`, or
-+// nullptr. Only consults already-loaded apps; see
++// nullopt. Only consults already-loaded apps; see
 +// AppSwapAppsService::GetAppsIfLoaded.
-+const AppSwapApp* FindAppSwapAppForUrl(Profile* profile, const GURL& url);
++//
++// Returns a copy rather than a pointer into the service's own vector on
++// purpose: that vector is reallocated by any Add/Update/Remove, so a
++// borrowed pointer is only valid until the next config mutation -- a trap
++// for any caller that holds the result across a task boundary.
++std::optional<AppSwapApp> FindAppSwapAppForUrl(Profile* profile,
++                                               const GURL& url);
 +
 +// For a `url_pattern` that AppSwapUrlMatchesPattern() has already matched
 +// against `url` (see AppSwapRouteGroupRule), returns the URL to actually
@@ -1311,18 +1388,19 @@ index 0000000000000..07d5cc19a8365
 +                              const std::string& url_pattern,
 +                              const std::string& target);
 +
-+// Finds the first rule in `group` whose pattern matches `url`, or nullptr.
-+// `group` may be null (e.g. no route group pinned for the requesting tab),
-+// in which case this always returns nullptr -- no group pinned means no
-+// rewriting, same as an explicit empty group.
-+const AppSwapRouteGroupRule* FindAppSwapRouteGroupRuleForUrl(
-+    const AppSwapRouteGroup* group,
++// Finds the first rule in `group` whose pattern matches `url`, or nullopt.
++// `group` may be nullopt (e.g. no route group pinned for the requesting
++// tab), in which case this always returns nullopt -- no group pinned means
++// no rewriting, same as an explicit empty group.
++std::optional<AppSwapRouteGroupRule> FindAppSwapRouteGroupRuleForUrl(
++    const std::optional<AppSwapRouteGroup>& group,
 +    const GURL& url);
 +
 +// Finds the route group with the given id configured in `profile`, or
-+// nullptr. Only consults already-loaded groups; see
-+// AppSwapRouteGroupService::GetRouteGroupsIfLoaded.
-+const AppSwapRouteGroup* FindAppSwapRouteGroupById(
++// nullopt. Only consults already-loaded groups; see
++// AppSwapRouteGroupService::GetRouteGroupsIfLoaded. Returns a copy, for the
++// same reason FindAppSwapAppForUrl() does.
++std::optional<AppSwapRouteGroup> FindAppSwapRouteGroupById(
 +    Profile* profile,
 +    const std::string& group_id);
 +
@@ -1358,10 +1436,10 @@ index 0000000000000..707f425096a7c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000000..57340fe2f6f83
+index 0000000000000..e7f9cb6bddbc4
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,950 @@
+@@ -0,0 +1,989 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1395,12 +1473,14 @@ index 0000000000000..57340fe2f6f83
 +#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_update_checker.h"
 +#include "chrome/browser/app_swap/app_swap_version_pin_tab_helper.h"
-+#include "chrome/browser/net/system_network_context_manager.h"
++#include "chrome/browser/app_swap/app_swap_version_utils.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "content/public/browser/browser_context.h"
 +#include "content/public/browser/navigation_controller.h"
 +#include "content/public/browser/navigation_entry.h"
 +#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_process_host.h"
++#include "content/public/browser/storage_partition.h"
 +#include "content/public/browser/web_contents.h"
 +#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 +#include "mojo/public/cpp/system/data_pipe.h"
@@ -1453,13 +1533,26 @@ index 0000000000000..57340fe2f6f83
 +      (start == std::string_view::npos) ? std::string_view()
 +                                        : path_view.substr(start);
 +
++  // A URL path is percent-encoded; the filenames on disk are not. Without
++  // decoding, any asset whose name contains a space or a non-ASCII character
++  // (both perfectly ordinary in an npm package's build output) is requested
++  // as "my%20file.js" and never found. The "Safe" variant refuses input with
++  // an *encoded* path separator or control character, so no decoding step
++  // can manufacture a separator that the traversal check below then never
++  // sees; real separators arrive unencoded and are left to it.
++  std::string relative;
++  if (!base::UnescapeBinaryURLComponentSafe(
++          relative_str, /*fail_on_path_separators=*/true, &relative)) {
++    return base::FilePath();
++  }
++
 +  // Reject any path that could escape the serve directory.
-+  if (relative_str.find("..") != std::string_view::npos) {
++  if (relative.find("..") != std::string::npos) {
 +    return base::FilePath();
 +  }
 +
 +  base::FilePath full =
-+      serve_dir.Append(base::FilePath::FromUTF8Unsafe(relative_str))
++      serve_dir.Append(base::FilePath::FromUTF8Unsafe(relative))
 +          .NormalizePathSeparators();
 +
 +  if (base::PathExists(full) && !base::DirectoryExists(full)) {
@@ -1671,19 +1764,27 @@ index 0000000000000..57340fe2f6f83
 +// redirect inherently surfaces the rewritten URL as a second, visible
 +// request, which isn't what a reverse proxy is supposed to look like. This
 +// class avoids that: it makes its own outbound request from the browser
-+// process using the system network context -- like
-+// AppSwapArtifactProvider's tarball/metadata fetches do, and *not* a clone
-+// of the frame's own scoped `target_factory_` -- so there's neither a
++// process, using a trusted browser-process factory rather than a clone of
++// the frame's own scoped `target_factory_` -- so there's neither a
 +// renderer-visible cross-origin hop for site isolation to react to, nor any
 +// dependency on whatever trust boundaries (NetworkIsolationKey, CORS
 +// assumptions, etc.) that per-frame factory carries for the *original*
 +// URL's origin, which have no reason to permit fetching a completely
 +// different origin (confirmed by testing: cloning and using
 +// `target_factory_` for the rewritten URL fails outright).
++//
++// `factory` is the *tab's own StoragePartition's* browser-process factory,
++// so the rewritten request carries the profile's cookies for the target
++// origin. It deliberately isn't SystemNetworkContextManager's factory (what
++// AppSwapArtifactProvider's registry fetches use, and what this class used
++// to use): that network context has no cookie jar at all, which silently
++// turned every rewritten request to an authenticated dev backend into an
++// anonymous one -- exactly the case route groups exist to serve.
 +class AppSwapRewriteProxyLoader : public network::mojom::URLLoader,
 +                                  public network::mojom::URLLoaderClient {
 + public:
 +  AppSwapRewriteProxyLoader(
++      scoped_refptr<network::SharedURLLoaderFactory> factory,
 +      int32_t request_id,
 +      uint32_t options,
 +      network::ResourceRequest rewritten_request,
@@ -1703,8 +1804,6 @@ index 0000000000000..57340fe2f6f83
 +        options_(options & ~network::mojom::kURLLoadOptionBlockLocalRequest),
 +        request_(std::move(rewritten_request)),
 +        traffic_annotation_(traffic_annotation) {
-+    scoped_refptr<network::SharedURLLoaderFactory> factory =
-+        SystemNetworkContextManager::GetInstance()->GetSharedURLLoaderFactory();
 +    mojo::PendingRemote<network::mojom::URLLoaderClient> client_remote;
 +    client_receiver_.Bind(client_remote.InitWithNewPipeAndPassReceiver());
 +    factory->CreateLoaderAndStart(
@@ -2176,9 +2275,10 @@ index 0000000000000..57340fe2f6f83
 +  // every HTTP method, not just GET/HEAD, since this is a URL-level proxy
 +  // (e.g. an API prefix), not served file content. Which group applies (if
 +  // any) is per-tab, not project-wide -- see AppSwapRouteGroupPinTabHelper.
-+  const AppSwapRouteGroup* pinned_group = nullptr;
-+  if (content::RenderFrameHost* frame =
-+          content::RenderFrameHost::FromID(frame_id_)) {
++  content::RenderFrameHost* frame =
++      content::RenderFrameHost::FromID(frame_id_);
++  std::optional<AppSwapRouteGroup> pinned_group;
++  if (frame) {
 +    if (content::WebContents* web_contents =
 +            content::WebContents::FromRenderFrameHost(frame)) {
 +      if (AppSwapRouteGroupPinTabHelper* pin_helper =
@@ -2190,7 +2290,7 @@ index 0000000000000..57340fe2f6f83
 +      }
 +    }
 +  }
-+  if (const AppSwapRouteGroupRule* rule =
++  if (std::optional<AppSwapRouteGroupRule> rule =
 +          FindAppSwapRouteGroupRuleForUrl(pinned_group, request.url)) {
 +    network::ResourceRequest rewritten_request = request;
 +    rewritten_request.url = ComputeAppSwapRewriteUrl(
@@ -2231,15 +2331,24 @@ index 0000000000000..57340fe2f6f83
 +    // regardless of policy, matching what a real cross-origin downgrade
 +    // would send.
 +    rewritten_request.referrer = GURL();
++    // The tab's own StoragePartition, not necessarily the profile's default
++    // one -- a tab pinned to an AppSwap Profile browses in a named
++    // partition, and its rewritten requests have to carry that partition's
++    // cookies rather than the default's, or switching AppSwap Profile would
++    // silently stop applying to anything a route group rewrites.
++    content::StoragePartition* partition =
++        frame ? frame->GetProcess()->GetStoragePartition()
++              : browser_context->GetDefaultStoragePartition();
 +    mojo::MakeSelfOwnedReceiver(
 +        std::make_unique<AppSwapRewriteProxyLoader>(
-+            request_id, options, std::move(rewritten_request),
-+            std::move(client), traffic_annotation),
++            partition->GetURLLoaderFactoryForBrowserProcess(), request_id,
++            options, std::move(rewritten_request), std::move(client),
++            traffic_annotation),
 +        std::move(loader));
 +    return;
 +  }
 +
-+  if (const AppSwapApp* app = FindAppSwapAppForUrl(profile, request.url)) {
++  if (std::optional<AppSwapApp> app = FindAppSwapAppForUrl(profile, request.url)) {
 +    // Only static GET/HEAD requests are served from disk; everything else
 +    // falls through to the real network below.
 +    if (request.method == net::HttpRequestHeaders::kGetMethod ||
@@ -2252,8 +2361,7 @@ index 0000000000000..57340fe2f6f83
 +      }
 +
 +      AppSwapSource source = app->ToSource();
-+      if (content::RenderFrameHost* frame =
-+              content::RenderFrameHost::FromID(frame_id_)) {
++      if (frame) {
 +        if (content::WebContents* web_contents =
 +                content::WebContents::FromRenderFrameHost(frame)) {
 +          // A click on the "registry unreachable" recovery page's list of
@@ -2266,9 +2374,18 @@ index 0000000000000..57340fe2f6f83
 +          // virtual URL here makes it settle on the clean version once the
 +          // navigation commits, same trick chrome://newtab-style pages use
 +          // to display a URL other than the one actually requested.
++          //
++          // This is the one place a *page-controlled* string reaches the
++          // artifact cache path, so it's validated here rather than only
++          // deeper down: any page served on a configured app host can link
++          // to this parameter, and an unchecked value like "1/../../.."
++          // would repoint the serve root outside the cache entirely. An
++          // invalid value is ignored (no pin, no virtual-URL rewrite), so
++          // the navigation just resolves normally.
 +          if (std::string use_version;
 +              net::GetValueForKeyInQuery(request.url, kAppSwapUseVersionQueryKey,
-+                                         &use_version)) {
++                                         &use_version) &&
++              app_swap::IsValidVersionForPath(use_version)) {
 +            AppSwapVersionPinTabHelper::GetOrCreateForWebContents(web_contents)
 +                ->SetPinnedVersion(app->id, use_version);
 +            if (content::NavigationEntry* entry =

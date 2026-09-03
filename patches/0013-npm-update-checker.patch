@@ -53,15 +53,17 @@ index 0000000000000..56d1ba88fffd2
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_PREFS_H_
 diff --git a/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc b/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc
 new file mode 100644
-index 0000000000000..85ca0702ccfaf
+index 0000000000000..e4a81f6986d04
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_available_tab_helper.cc
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,77 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
++
++#include <optional>
 +
 +#include "chrome/browser/app_swap/app_swap_route_matcher.h"
 +#include "chrome/browser/profiles/profile.h"
@@ -113,7 +115,7 @@ index 0000000000000..85ca0702ccfaf
 +  // schedule if this new page also turns out to be update-checkable.
 +  available_version_.reset();
 +
-+  if (const AppSwapApp* app = FindAppSwapAppForUrl(
++  if (std::optional<AppSwapApp> app = FindAppSwapAppForUrl(
 +          Profile::FromBrowserContext(web_contents()->GetBrowserContext()),
 +          web_contents()->GetLastCommittedURL())) {
 +    app_id_ = app->id;
@@ -246,10 +248,10 @@ index 0000000000000..9ec98b53f9cf5
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_AVAILABLE_TAB_HELPER_H_
 diff --git a/chrome/browser/app_swap/app_swap_update_checker.cc b/chrome/browser/app_swap/app_swap_update_checker.cc
 new file mode 100644
-index 0000000000000..4cf2953e84b02
+index 0000000000000..756d911f883e2
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_update_checker.cc
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,150 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -257,6 +259,7 @@ index 0000000000000..4cf2953e84b02
 +#include "chrome/browser/app_swap/app_swap_update_checker.h"
 +
 +#include <map>
++#include <optional>
 +#include <utility>
 +
 +#include "base/functional/bind.h"
@@ -333,7 +336,7 @@ index 0000000000000..4cf2953e84b02
 +          content::WebContents* web_contents =
 +              tab_strip_model->GetWebContentsAt(i);
 +
-+          const AppSwapApp* app = FindAppSwapAppForUrl(
++          std::optional<AppSwapApp> app = FindAppSwapAppForUrl(
 +              Profile::FromBrowserContext(web_contents->GetBrowserContext()),
 +              web_contents->GetLastCommittedURL());
 +          if (!app) {
@@ -350,11 +353,14 @@ index 0000000000000..4cf2953e84b02
 +
 +          AppSwapUpdateAvailableTabHelper* helper =
 +              AppSwapUpdateAvailableTabHelper::FromWebContents(web_contents);
-+          // Nothing meaningful to compare the registry's answer against yet
-+          // -- this tab's own navigation hasn't actually resolved an
-+          // artifact (shouldn't normally happen for a page that's already
-+          // loaded, but skip rather than guess).
-+          if (!helper->committed_version()) {
++          // No helper means this WebContents never went through
++          // AttachTabHelpers (nothing in a normal tab strip, but this walks
++          // whatever the browser collection reports). Nothing meaningful to
++          // compare the registry's answer against either if this tab's own
++          // navigation hasn't actually resolved an artifact -- shouldn't
++          // normally happen for a page that's already loaded, but skip
++          // rather than guess.
++          if (!helper || !helper->committed_version()) {
 +            continue;
 +          }
 +
