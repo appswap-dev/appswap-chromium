@@ -72,6 +72,8 @@ gen 0001-branding.patch \
   chrome/app/theme/chromium/product_logo_64.png \
   chrome/app/theme/chromium/win/chromium.ico \
   chrome/app/theme/chromium/mac/app.icns \
+  chrome/app/theme/chromium/mac/Assets.xcassets \
+  chrome/app/theme/chromium/product_logo.svg \
   chrome/app/theme/default_100_percent/chromium/product_logo_16.png \
   chrome/app/theme/default_100_percent/chromium/product_logo_32.png \
   chrome/app/theme/default_100_percent/chromium/linux/product_logo_16.png \
@@ -379,14 +381,24 @@ gen 0015-projects.patch \
 # Page Info, and the URL loader factory all funnel through) rather than at
 # every caller.
 gen 0016-project-selector-and-terminology.patch \
+  chrome/app/generated_resources.grd \
   chrome/app/profiles_strings.grdp \
   chrome/app/resources/chromium_strings_ru.xtb \
   chrome/app/resources/generated_resources_ru.xtb \
   chrome/app/settings_strings.grdp \
   chrome/browser/resources/settings/route.ts \
+  chrome/browser/resources/settings/page_visibility.ts \
+  chrome/browser/resources/settings/settings_menu/settings_menu.html \
+  chrome/browser/resources/settings/settings_menu/settings_menu.ts \
+  chrome/browser/resources/settings/settings_main/settings_main.html \
+  chrome/browser/resources/settings/people_page/people_page_index.ts \
+  chrome/browser/resources/settings/people_page/people_page_index.html.ts \
+  chrome/browser/resources/settings/people_page/manage_profile.ts \
+  chrome/browser/resources/settings/people_page/manage_profile.html.ts \
   chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc \
   chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h \
   chrome/browser/ui/views/profiles/profile_menu_view.cc \
+  chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc \
   chrome/browser/ui/webui/settings/settings_ui.h \
   chrome/common/webui_url_constants.h
 

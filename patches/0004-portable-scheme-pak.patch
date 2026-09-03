@@ -30,7 +30,7 @@ index 08949a69415df..342b6f2f780ec 100644
                                   content::BrowserContext* context) {
    if (!IsNonNavigationAboutUrl(url)) {
 diff --git a/chrome/browser/browser_about_handler.h b/chrome/browser/browser_about_handler.h
-index 2d90b68550..191717c94e 100644
+index 2d90b6855019a..191717c94ef67 100644
 --- a/chrome/browser/browser_about_handler.h
 +++ b/chrome/browser/browser_about_handler.h
 @@ -17,6 +17,12 @@ bool HandleChromeAboutAndChromeSyncRewrite(
@@ -47,7 +47,7 @@ index 2d90b68550..191717c94e 100644
  // If |context|, URL blocking policies are checked first; if blocked, the
  // action is prevented. Returns true if handled (action occurred or was
 diff --git a/chrome/browser/profiles/profile_io_data.cc b/chrome/browser/profiles/profile_io_data.cc
-index 080e9b0e43..174f4c96b9 100644
+index 080e9b0e43c70..174f4c96b9500 100644
 --- a/chrome/browser/profiles/profile_io_data.cc
 +++ b/chrome/browser/profiles/profile_io_data.cc
 @@ -45,6 +45,7 @@ bool ProfileIOData::IsHandledProtocol(std::string_view scheme) {
@@ -90,7 +90,7 @@ index 6008e03a8997c..984daa361baab 100644
          "//chrome/browser/resources/geic:resources",
          "//components/headless/command_handler",
 diff --git a/chrome/test/BUILD.gn b/chrome/test/BUILD.gn
-index 283eb14c4e..548972cee3 100644
+index 283eb14c4e258..548972cee33f0 100644
 --- a/chrome/test/BUILD.gn
 +++ b/chrome/test/BUILD.gn
 @@ -3459,7 +3459,7 @@ if (!is_android) {
@@ -104,7 +104,7 @@ index 283eb14c4e..548972cee3 100644
          "//chrome/app:chrome_dll_resources",
 diff --git a/chrome/tools/build/win/create_portable_archive.py b/chrome/tools/build/win/create_portable_archive.py
 new file mode 100644
-index 0000000000..9809f86348
+index 0000000000000..9809f86348038
 --- /dev/null
 +++ b/chrome/tools/build/win/create_portable_archive.py
 @@ -0,0 +1,217 @@
@@ -326,7 +326,7 @@ index 0000000000..9809f86348
 +if __name__ == '__main__':
 +    sys.exit(main())
 diff --git a/content/common/url_schemes.cc b/content/common/url_schemes.cc
-index 225e017909..6696342e52 100644
+index 225e017909b88..6696342e52270 100644
 --- a/content/common/url_schemes.cc
 +++ b/content/common/url_schemes.cc
 @@ -61,6 +61,7 @@ void RegisterContentSchemes(bool should_lock_registry) {
@@ -362,7 +362,7 @@ index 225e017909..6696342e52 100644
    // Prevent future modification of the scheme lists. This is to prevent
    // accidental creation of data races in the program. Add*Scheme aren't
 diff --git a/content/public/common/url_constants.h b/content/public/common/url_constants.h
-index 75eb817c98..20303c6e43 100644
+index 75eb817c98106..20303c6e43884 100644
 --- a/content/public/common/url_constants.h
 +++ b/content/public/common/url_constants.h
 @@ -21,6 +21,7 @@ inline constexpr char kChromeErrorScheme[] = "chrome-error";
@@ -374,7 +374,7 @@ index 75eb817c98..20303c6e43 100644
  #if BUILDFLAG(IS_CHROMEOS)
  inline constexpr char kExternalFileScheme[] = "externalfile";
 diff --git a/content/public/common/url_utils.cc b/content/public/common/url_utils.cc
-index 5812b103a6..66a52ed28d 100644
+index 5812b103a6c12..66a52ed28d4b9 100644
 --- a/content/public/common/url_utils.cc
 +++ b/content/public/common/url_utils.cc
 @@ -31,7 +31,8 @@ namespace {
@@ -388,7 +388,7 @@ index 5812b103a6..66a52ed28d 100644
  
  }  // namespace
 diff --git a/ui/base/resource/resource_bundle.cc b/ui/base/resource/resource_bundle.cc
-index d1ee681461..4b54525f84 100644
+index d1ee6814618c7..4b54525f84571 100644
 --- a/ui/base/resource/resource_bundle.cc
 +++ b/ui/base/resource/resource_bundle.cc
 @@ -1075,13 +1075,13 @@ void ResourceBundle::LoadChromeResources() {
@@ -408,7 +408,7 @@ index d1ee681461..4b54525f84 100644
  }
  
 diff --git a/ui/base/resource/resource_bundle_mac.mm b/ui/base/resource/resource_bundle_mac.mm
-index ba901991c9..d37ed6b514 100644
+index ba901991c9ae0..d37ed6b514a68 100644
 --- a/ui/base/resource/resource_bundle_mac.mm
 +++ b/ui/base/resource/resource_bundle_mac.mm
 @@ -53,13 +53,13 @@ base::FilePath GetResourcesPakFilePath(NSString* name, NSString* mac_locale) {

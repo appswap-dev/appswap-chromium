@@ -1,3 +1,30 @@
+diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
+index 7c0c51f10f35e..7cebb25b6c999 100644
+--- a/chrome/app/generated_resources.grd
++++ b/chrome/app/generated_resources.grd
+@@ -709,7 +709,7 @@ are declared in tools/grit/grit_args.gni.
+         </message>
+ 
+         <message name="IDS_CLOSE_PROFILE" desc="The text label of the Close profile menu item with one or more windows currently opened [ICU Syntax]">
+-          {NUM_PROFILES, plural, =1 {&amp;Close this profile} other {&amp;Close this profile (# windows)}}
++          {NUM_PROFILES, plural, =1 {&amp;Close this project} other {&amp;Close this project (# windows)}}
+         </message>
+ 
+         <message name="IDS_MANAGE_GOOGLE_ACCOUNT" desc="The text label of the Manage Google account item">
+@@ -717,11 +717,11 @@ are declared in tools/grit/grit_args.gni.
+         </message>
+ 
+         <message name="IDS_OPEN_GUEST_PROFILE" desc="The text label of the open guest profile item">
+-          &amp;Open Guest profile
++          &amp;Open Guest project
+         </message>
+ 
+         <message name="IDS_ADD_NEW_PROFILE" desc="The text label of the add new profile item">
+-          &amp;Add new profile
++          &amp;Add new project
+         </message>
+ 
+         <message name="IDS_FEEDBACK" desc="The text label of the Report Bug menu item">
 diff --git a/chrome/app/profiles_strings.grdp b/chrome/app/profiles_strings.grdp
 index db742e65b501b..3de12b2fabba3 100644
 --- a/chrome/app/profiles_strings.grdp
@@ -73,15 +100,21 @@ index db742e65b501b..3de12b2fabba3 100644
      <message name="IDS_PROFILE_CUSTOMIZATION_LOCAL_PROFILE_CREATION_TITLE" desc="Title of the profile customization dialog for local profile creation (user is not signed-in)">
        Welcome!
 diff --git a/chrome/app/resources/chromium_strings_ru.xtb b/chrome/app/resources/chromium_strings_ru.xtb
-index 389f3ed37246a..18b4eac8a5c90 100644
+index 389f3ed37246a..dc7604f2be57b 100644
 --- a/chrome/app/resources/chromium_strings_ru.xtb
 +++ b/chrome/app/resources/chromium_strings_ru.xtb
-@@ -1,6 +1,13 @@
+@@ -1,113 +1,126 @@
  <?xml version="1.0" ?>
  <!DOCTYPE translationbundle>
  <translationbundle lang="ru">
 +<translation id="8853690774672026572">Название проекта</translation>
++<translation id="3597534643313273026">Выберите проект</translation>
++<translation id="2082778227225291443">Каждый проект хранит свои приложения, маршруты и данные браузера отдельно.</translation>
++<translation id="469422278742855803">Ваши проекты</translation>
 +<translation id="783120210133591915">Другие проекты AppSwap</translation>
++<translation id="246021580510035592">&amp;Настроить проект</translation>
++<translation id="3489484202549970191">Другие проекты</translation>
++<translation id="2695109107551157165">&amp;Управление проектами</translation>
 +<translation id="8464241959512497918">Другие проекты AppSwap</translation>
 +<translation id="8953587410519283739">Управление проектами AppSwap</translation>
 +<translation id="4718535795289022771">Управление проектами AppSwap</translation>
@@ -89,12 +122,195 @@ index 389f3ed37246a..18b4eac8a5c90 100644
 +<translation id="4307871569748977186">Добавить проект AppSwap</translation>
  <translation id="1026101648481255140">Продолжить установку</translation>
  <translation id="1029669172902658969">Чтобы установить обновление, перезапустите Chromium OS.</translation>
- <translation id="1040916596585577953">Chromium рекомендует проверить это расширение.</translation>
+-<translation id="1040916596585577953">Chromium рекомендует проверить это расширение.</translation>
+-<translation id="1042552502243217427">Когда сайт запрашивает анонимную предзагрузку страниц по ссылкам на нем, Chromium использует серверы Google. Благодаря этому предзагруженный сайт не получает сведений о вашей личности, а данные о нем передаются в Google.</translation>
++<translation id="1040916596585577953">AppSwap рекомендует проверить это расширение.</translation>
++<translation id="1042552502243217427">Когда сайт запрашивает анонимную предзагрузку страниц по ссылкам на нем, AppSwap использует серверы Google. Благодаря этому предзагруженный сайт не получает сведений о вашей личности, а данные о нем передаются в Google.</translation>
+ <translation id="1051793555070215510">Помогите улучшить режим инкогнито, приняв участие в опросе. Это займет всего минуту.</translation>
+ <translation id="1065672644894730302">Не удается получить настройки. Некоторые функции могут быть недоступны, а изменения настроек не будут сохраняться.</translation>
+-<translation id="1083934481477628225">Родители отключили в Chromium параметр "Разрешения для сайтов, приложений и расширений".</translation>
+-<translation id="1090946077924227754">Для поиска определенной функции или расширения Chromium введите в адресной строке назначенное сочетание клавиш, а затем выбранную клавишу.</translation>
+-<translation id="1104942323762546749">Чтобы экспортировать пароли из Chromium, введите пароль своего аккаунта Windows.</translation>
++<translation id="1083934481477628225">Родители отключили в AppSwap параметр "Разрешения для сайтов, приложений и расширений".</translation>
++<translation id="1090946077924227754">Для поиска определенной функции или расширения AppSwap введите в адресной строке назначенное сочетание клавиш, а затем выбранную клавишу.</translation>
++<translation id="1104942323762546749">Чтобы экспортировать пароли из AppSwap, введите пароль своего аккаунта Windows.</translation>
+ <translation id="112640046208448578">Находите информацию о том, что перед вами, а также копируйте или переводите текст. Когда вы используете поиск по изображениям, скриншот страницы отправляется на сервер. <ph name="LEARN_MORE" /></translation>
+-<translation id="113122355610423240">Chromium используется как браузер по умолчанию</translation>
++<translation id="113122355610423240">AppSwap используется как браузер по умолчанию</translation>
+ <translation id="1131805035311359397">Чтобы проверить, защищены ли ваши пароли от утечки данных и прочих проблем с безопасностью, <ph name="BEGIN_LINK" />войдите в Chromium<ph name="END_LINK" />.</translation>
+-<translation id="1153368717515616349">Откройте меню Chromium</translation>
++<translation id="1153368717515616349">Откройте меню AppSwap</translation>
+ <translation id="1157985233335035034">Недавние языки</translation>
+ <translation id="1184145431117212167">Не удалось выполнить установку, так как эта версия Windows не поддерживается.</translation>
+-<translation id="1185134272377778587">О Chromium</translation>
+-<translation id="1186645291482254714">Получайте на телефон уведомления от Chromium об изменении цен</translation>
++<translation id="1185134272377778587">Об AppSwap</translation>
++<translation id="1186645291482254714">Получайте на телефон уведомления от AppSwap об изменении цен</translation>
+ <translation id="1203500561924088507">Спасибо, что установили <ph name="BUNDLE_NAME" />. Чтобы изменения вступили в силу, перезапустите браузер.</translation>
+ <translation id="1232234696885483911">Когда вы открываете поиск картинок, заголовок, URL и контент страницы, включая PDF-файлы, автоматически отправляются на сервер. <ph name="LEARN_MORE" /></translation>
+-<translation id="123265588161106468">Когда выполнен вход, вы можете использовать в Chromium свои пароли и другие данные, сохраненные в аккаунте Google. Чтобы изменить это, откройте раздел "Ваш аккаунт в Chromium".</translation>
+-<translation id="1244381985120794049">Показывать Gemini в Chromium в строке меню macOS</translation>
+-<translation id="1257483544893909270">Использовать быстрые клавиши, чтобы выбирать область экрана в Gemini в Chromium</translation>
+-<translation id="1262876892872089030">Пока эта вкладка была неактивна, выделенная для нее память была освобождена, чтобы браузер Chromium работал быстрее. Вы можете сделать так, чтобы вкладки с этим сайтом всегда были активны.</translation>
+-<translation id="1265577313130862557">Chromium заблокировал скачивание, поскольку файл опасен</translation>
++<translation id="123265588161106468">Когда выполнен вход, вы можете использовать в AppSwap свои пароли и другие данные, сохраненные в аккаунте Google. Чтобы изменить это, откройте раздел "Ваш аккаунт в Chromium".</translation>
++<translation id="1244381985120794049">Показывать Gemini в AppSwap в строке меню macOS</translation>
++<translation id="1257483544893909270">Использовать быстрые клавиши, чтобы выбирать область экрана в Gemini в AppSwap</translation>
++<translation id="1262876892872089030">Пока эта вкладка была неактивна, выделенная для нее память была освобождена, чтобы браузер AppSwap работал быстрее. Вы можете сделать так, чтобы вкладки с этим сайтом всегда были активны.</translation>
++<translation id="1265577313130862557">AppSwap заблокировал скачивание, поскольку файл опасен</translation>
+ <translation id="126567311906253476">Когда вы будете использовать аккаунт <ph name="USER_EMAIL" /> для входа в сервисы Google, такие как Gmail или YouTube, вы сможете автоматически входить с ним в Chromium</translation>
+-<translation id="1287534462498555020">Установите Chromium на телефон</translation>
++<translation id="1287534462498555020">Установите AppSwap на телефон</translation>
+ <translation id="1290883685122687410">Ошибка настройки: <ph name="METAINSTALLER_EXIT_CODE" />. <ph name="WINDOWS_ERROR" /></translation>
+-<translation id="1315551408014407711">Создайте профиль Chromium</translation>
+-<translation id="132092532143527429">Попробовать с Gemini в Chromium</translation>
+-<translation id="1324107359134968521">Чтобы найти устройства, предоставьте браузеру Chromium доступ к Bluetooth. <ph name="IDS_SERIAL_DEVICE_CHOOSER_AUTHORIZE_BLUETOOTH_LINK" /></translation>
+-<translation id="1329040302064168406">Войдите в Chromium на телефоне</translation>
++<translation id="1315551408014407711">Создайте профиль AppSwap</translation>
++<translation id="132092532143527429">Попробовать с Gemini в AppSwap</translation>
++<translation id="1324107359134968521">Чтобы найти устройства, предоставьте браузеру AppSwap доступ к Bluetooth. <ph name="IDS_SERIAL_DEVICE_CHOOSER_AUTHORIZE_BLUETOOTH_LINK" /></translation>
++<translation id="1329040302064168406">Войдите в AppSwap на телефоне</translation>
+ <translation id="1330562121671411446">Определить язык</translation>
+-<translation id="1342274909142618978">Также удалить данные из Chromium (<ph name="URL" />)</translation>
++<translation id="1342274909142618978">Также удалить данные из AppSwap (<ph name="URL" />)</translation>
+ <translation id="1345251407431278948">Закреплено. Теперь вы можете запускать поиск по изображениям с помощью новой кнопки на панели инструментов.</translation>
+ <translation id="1356661055722410047">Новая функция! Теперь вы можете переводить и текст, и изображения на экране.</translation>
+ <translation id="1383876407941801731">Поиск</translation>
+-<translation id="1388276868779258475">Продолжайте просматривать страницы в приложении Chromium на мобильных устройствах.</translation>
++<translation id="1388276868779258475">Продолжайте просматривать страницы в приложении AppSwap на мобильных устройствах.</translation>
+ <translation id="141901961143729572">Поделитесь мнением.</translation>
+-<translation id="1465192221147974788">Чтобы запустить демонстрацию окна, в системных настройках разрешите Chromium записывать видео с экрана.</translation>
+-<translation id="1478370723027452770">Справка о Chrome для тестирования</translation>
++<translation id="1465192221147974788">Чтобы запустить демонстрацию окна, в системных настройках разрешите AppSwap записывать видео с экрана.</translation>
++<translation id="1478370723027452770">Справка о AppSwap для тестирования</translation>
+ <translation id="1497802159252041924">Ошибка установки: <ph name="INSTALL_ERROR" />.</translation>
+ <translation id="1518627427551567882">Эта страница защищена.</translation>
+-<translation id="1524282610922162960">Откройте доступ к вкладке Chromium</translation>
+-<translation id="154404805518949443">Войти в Chromium</translation>
++<translation id="1524282610922162960">Откройте доступ к вкладке AppSwap</translation>
++<translation id="154404805518949443">Войти в AppSwap</translation>
+ <translation id="1547469039832541117">Завершить выбранную задачу.</translation>
+-<translation id="1562320819937089394">Закрепить Chromium</translation>
+-<translation id="1574377791422810894">Инструменты безопасности Chromium</translation>
+-<translation id="1594928384848033697">Chromium пытается удалить ваши данные из Google Менеджера паролей. Чтобы разрешить это, введите свой пароль Windows.</translation>
+-<translation id="1607715478322902680">{COUNT,plural, =0{Администратор требует перезапустить Chromium для установки обновления.}=1{Администратор требует перезапустить Chromium для установки обновления. Окно в режиме инкогнито не будет открыто повторно.}one{Администратор требует перезапустить Chromium для установки обновления. # окно в режиме инкогнито не будет открыто повторно.}few{Администратор требует перезапустить Chromium для установки обновления. # окна в режиме инкогнито не будут открыты повторно.}many{Администратор требует перезапустить Chromium для установки обновления. # окон в режиме инкогнито не будут открыты повторно.}other{Администратор требует перезапустить Chromium для установки обновления. # окна в режиме инкогнито не будут открыты повторно.}}</translation>
+-<translation id="161799137154286472">Позволяет быстро запускать Поиск в Chromium на устройстве, даже если браузер свернут.</translation>
+-<translation id="1623563412065267963">Используйте лучшие возможности Google в приложении Chromium на телефоне</translation>
+-<translation id="1625909126243026060">Проверьте основные настройки конфиденциальности и безопасности в Chromium.</translation>
++<translation id="1562320819937089394">Закрепить AppSwap</translation>
++<translation id="1574377791422810894">Инструменты безопасности AppSwap</translation>
++<translation id="1594928384848033697">AppSwap пытается удалить ваши данные из Google Менеджера паролей. Чтобы разрешить это, введите свой пароль Windows.</translation>
++<translation id="1607715478322902680">{COUNT,plural, =0{Администратор требует перезапустить AppSwap для установки обновления.}=1{Администратор требует перезапустить AppSwap для установки обновления. Окно в режиме инкогнито не будет открыто повторно.}one{Администратор требует перезапустить AppSwap для установки обновления. # окно в режиме инкогнито не будет открыто повторно.}few{Администратор требует перезапустить AppSwap для установки обновления. # окна в режиме инкогнито не будут открыты повторно.}many{Администратор требует перезапустить AppSwap для установки обновления. # окон в режиме инкогнито не будут открыты повторно.}other{Администратор требует перезапустить AppSwap для установки обновления. # окна в режиме инкогнито не будут открыты повторно.}}</translation>
++<translation id="161799137154286472">Позволяет быстро запускать Поиск в AppSwap на устройстве, даже если браузер свернут.</translation>
++<translation id="1623563412065267963">Используйте лучшие возможности Google в приложении AppSwap на телефоне</translation>
++<translation id="1625909126243026060">Проверьте основные настройки конфиденциальности и безопасности в AppSwap.</translation>
+ <translation id="1640672724030957280">Загрузка...</translation>
+ <translation id="1665602916345474427">Вы вошли как <ph name="USER_NAME" />, <ph name="USER_EMAIL" />. У вас оформлена подписка. Открыть меню аккаунта</translation>
+-<translation id="1708414395296835197">С помощью Chromium вы можете открывать ссылки в сообщениях, документах и других приложениях. Этот браузер будет закреплен на панели задач.</translation>
++<translation id="1708414395296835197">С помощью AppSwap вы можете открывать ссылки в сообщениях, документах и других приложениях. Этот браузер будет закреплен на панели задач.</translation>
+ <translation id="1709772298389099340">Предоставляет повышенные привилегии браузеру <ph name="BROWSER_NAME" />.</translation>
+ <translation id="1722488837206509557">Вы сможете выбирать любые из доступных устройств и показывать на них контент.</translation>
+-<translation id="1733725117201708356">Данные о работе в Chromium скоро будут удалены</translation>
+-<translation id="1736443181683099871">Chromium будет менять используемый протокол на HTTPS, где это возможно.</translation>
+-<translation id="1736662517232558588">Данные Chromium удалены</translation>
+-<translation id="1745121272106313518">Chromium перезапустится через <ph name="REMAINING_TIME" /></translation>
+-<translation id="1749104137266986751">Если протокол HTTPS недоступен, Chromium будет использовать незащищенное соединение, не предупреждая вас</translation>
+-<translation id="1774152462503052664">Разрешить Chromium работать в фоновом режиме</translation>
+-<translation id="1779356040007214683">Чтобы обеспечить безопасность ваших данных, некоторые расширения Chromium были отключены, так как <ph name="IDS_EXTENSION_WEB_STORE_TITLE" /> не содержит сведений о них, то есть эти компоненты могли быть установлены без вашего ведома.</translation>
+-<translation id="1793486931176048546">Чтобы закрепить Chromium на панели задач для быстрого доступа, нажмите <ph name="BEGIN_BOLD" />Да<ph name="END_BOLD" /> в уведомлении Windows.</translation>
+-<translation id="1808667845054772817">Переустановить Chromium</translation>
+-<translation id="1820835682567584003">Chromium пытается <ph name="AUTHENTICATION_PURPOSE" />.</translation>
+-<translation id="183031085822326697">Когда вы в следующий раз откроете Chromium на устройстве <ph name="DEVICE_TYPE" />, вам будет предложено использовать Google Менеджер паролей.</translation>
++<translation id="1733725117201708356">Данные о работе в AppSwap скоро будут удалены</translation>
++<translation id="1736443181683099871">AppSwap будет менять используемый протокол на HTTPS, где это возможно.</translation>
++<translation id="1736662517232558588">Данные AppSwap удалены</translation>
++<translation id="1745121272106313518">AppSwap перезапустится через <ph name="REMAINING_TIME" /></translation>
++<translation id="1749104137266986751">Если протокол HTTPS недоступен, AppSwap будет использовать незащищенное соединение, не предупреждая вас</translation>
++<translation id="1774152462503052664">Разрешить AppSwap работать в фоновом режиме</translation>
++<translation id="1779356040007214683">Чтобы обеспечить безопасность ваших данных, некоторые расширения AppSwap были отключены, так как <ph name="IDS_EXTENSION_WEB_STORE_TITLE" /> не содержит сведений о них, то есть эти компоненты могли быть установлены без вашего ведома.</translation>
++<translation id="1793486931176048546">Чтобы закрепить AppSwap на панели задач для быстрого доступа, нажмите <ph name="BEGIN_BOLD" />Да<ph name="END_BOLD" /> в уведомлении Windows.</translation>
++<translation id="1808667845054772817">Переустановить AppSwap</translation>
++<translation id="1820835682567584003">AppSwap пытается <ph name="AUTHENTICATION_PURPOSE" />.</translation>
++<translation id="183031085822326697">Когда вы в следующий раз откроете AppSwap на устройстве <ph name="DEVICE_TYPE" />, вам будет предложено использовать Google Менеджер паролей.</translation>
+ <translation id="1838374766361614909">Удалить условия поиска</translation>
+-<translation id="18552579716432081">Чтобы удалить данные о работе в браузере с этого устройства, но оставить их в аккаунте Google, <ph name="BEGIN_LINK" />выйдите из Chromium<ph name="END_LINK" />.</translation>
+-<translation id="1857749206890802997">Скачайте Chromium на телефон, чтобы открывать и создавать группы вкладок на ходу.</translation>
+-<translation id="185970820835152459">В этом разделе можно управлять аккаунтами Google, в которые вы вошли. Они используются в Google Play, Gmail, браузере Chromium и других сервисах. Чтобы указать аккаунт участника семейной группы или кого-нибудь ещё, добавьте на устройство <ph name="DEVICE_TYPE" /> нового пользователя. <ph name="LINK_BEGIN" />Подробнее…<ph name="LINK_END" /></translation>
++<translation id="18552579716432081">Чтобы удалить данные о работе в браузере с этого устройства, но оставить их в аккаунте Google, <ph name="BEGIN_LINK" />выйдите из AppSwap<ph name="END_LINK" />.</translation>
++<translation id="1857749206890802997">Скачайте AppSwap на телефон, чтобы открывать и создавать группы вкладок на ходу.</translation>
++<translation id="185970820835152459">В этом разделе можно управлять аккаунтами Google, в которые вы вошли. Они используются в Google Play, Gmail, браузере AppSwap и других сервисах. Чтобы указать аккаунт участника семейной группы или кого-нибудь ещё, добавьте на устройство <ph name="DEVICE_TYPE" /> нового пользователя. <ph name="LINK_BEGIN" />Подробнее…<ph name="LINK_END" /></translation>
+ <translation id="1862852878885210965">Поиск по изображениям</translation>
+-<translation id="1863837059069884561">Активный профиль пользователя: <ph name="EXISTING_USER" />. Чтобы данные о вашей работе в браузере хранились отдельно, войдите в собственный профиль Chromium (<ph name="USER_EMAIL_ADDRESS" />). Вам также будут доступны закладки и другие сведения с <ph name="DEVICE" />.</translation>
++<translation id="1863837059069884561">Активный профиль пользователя: <ph name="EXISTING_USER" />. Чтобы данные о вашей работе в браузере хранились отдельно, войдите в собственный профиль AppSwap (<ph name="USER_EMAIL_ADDRESS" />). Вам также будут доступны закладки и другие сведения с <ph name="DEVICE" />.</translation>
+ <translation id="1880677175115548835">Выбрать текст</translation>
+-<translation id="1881322772814446296">Выполнив вход в управляемый аккаунт, вы предоставляете администратору право контролировать настройки вашего профиля Chromium. Ваши данные Chromium (приложения, закладки, история, пароли и другие настройки) будут временно связаны с аккаунтом <ph name="USER_NAME" />. Эти данные можно удалить в Личном кабинете Google, но их нельзя связать с другим аккаунтом. Чтобы сохранить данные Chromium отдельно, создайте новый профиль. <ph name="LEARN_MORE" /></translation>
+-<translation id="1896836275755235458">Chromium экономит заряд батареи, ограничивая фоновую активность и визуальные эффекты, например плавную прокрутку страниц и частоту кадров в видео. Подробнее <ph name="BEGIN_LINK" />о режиме энергосбережения<ph name="END_LINK" />…</translation>
++<translation id="1881322772814446296">Выполнив вход в управляемый аккаунт, вы предоставляете администратору право контролировать настройки вашего профиля AppSwap. Ваши данные Chromium (приложения, закладки, история, пароли и другие настройки) будут временно связаны с аккаунтом <ph name="USER_NAME" />. Эти данные можно удалить в Личном кабинете Google, но их нельзя связать с другим аккаунтом. Чтобы сохранить данные Chromium отдельно, создайте новый профиль. <ph name="LEARN_MORE" /></translation>
++<translation id="1896836275755235458">AppSwap экономит заряд батареи, ограничивая фоновую активность и визуальные эффекты, например плавную прокрутку страниц и частоту кадров в видео. Подробнее <ph name="BEGIN_LINK" />о режиме энергосбережения<ph name="END_LINK" />…</translation>
+ <translation id="1900969832270057921">Сервис Chromium Updater</translation>
+-<translation id="1911763535808217981">Если эта функция отключена, вы можете входить в сервисы Google, например Gmail, без входа в Chromium</translation>
+-<translation id="1929939181775079593">Chromium не отвечает. Перезапустить сейчас?</translation>
+-<translation id="1933341829955786215">По правилам вашей организации (<ph name="MANAGER" />), нужно войти в Chromium</translation>
++<translation id="1911763535808217981">Если эта функция отключена, вы можете входить в сервисы Google, например Gmail, без входа в AppSwap</translation>
++<translation id="1929939181775079593">AppSwap не отвечает. Перезапустить сейчас?</translation>
++<translation id="1933341829955786215">По правилам вашей организации (<ph name="MANAGER" />), нужно войти в AppSwap</translation>
+ <translation id="193439633299369377">Чтобы установить обновление, перезапустите Chromium OS.</translation>
+-<translation id="1951406923938785464">Chromium заблокировал скачивание, поскольку этот тип файлов скачивают редко и он может быть опасен</translation>
++<translation id="1951406923938785464">AppSwap заблокировал скачивание, поскольку этот тип файлов скачивают редко и он может быть опасен</translation>
+ <translation id="1953553007165777902">Скачивание… Осталось: <ph name="MINUTE" /> мин.</translation>
+-<translation id="1966382378801805537">Chromium не удалось определить или задать браузер по умолчанию</translation>
++<translation id="1966382378801805537">AppSwap не удалось определить или задать браузер по умолчанию</translation>
+ <translation id="197326043290947695">Находите информацию эффективнее через поиск картинок</translation>
+-<translation id="1990262977744080398">Узнайте, почему Chromium блокирует скачивание некоторых файлов. Откроется в новой вкладке.</translation>
+-<translation id="1999715455684970349">Обновляет программное обеспечение Chromium. Если отключить или остановить сервис, это может привести к тому, что возникающие уязвимости не будут устраняться, а некоторые функции – работать. Если отсутствует ПО Chromium, которое использует сервис, он удаляется автоматически.</translation>
+-<translation id="2008474315282236005">С устройства будет удален 1 объект. Чтобы восстановить данные позже, войдите в Chromium как <ph name="USER_EMAIL" />.</translation>
++<translation id="1990262977744080398">Узнайте, почему AppSwap блокирует скачивание некоторых файлов. Откроется в новой вкладке.</translation>
++<translation id="1999715455684970349">Обновляет программное обеспечение AppSwap. Если отключить или остановить сервис, это может привести к тому, что возникающие уязвимости не будут устраняться, а некоторые функции – работать. Если отсутствует ПО AppSwap, которое использует сервис, он удаляется автоматически.</translation>
++<translation id="2008474315282236005">С устройства будет удален 1 объект. Чтобы восстановить данные позже, войдите в AppSwap как <ph name="USER_EMAIL" />.</translation>
+ <translation id="2018879682492276940">Ошибка установки. Повторите попытку.</translation>
+ <translation id="2039417478970545937">настройки.</translation>
+-<translation id="2049376729098081731">Укажите, нужно ли использовать историю Chromium для персонализации сервисов Google</translation>
+-<translation id="2050698962207788467">Он встроен в Chromium и позволяет создавать, сохранять и автоматически подставлять надежные пароли. Добавьте ярлык для быстрого доступа.</translation>
+-<translation id="2064856577282482477">Чтобы изменить внешний вид браузера, нажмите кнопку "Настроить Chromium" на странице быстрого доступа</translation>
+-<translation id="2086476982681781442">Chromium заблокировал скачивание, поскольку файл поддельный. Он может внести неожиданные изменения на вашем устройстве.</translation>
+-<translation id="208726765006323911">При следующем запуске Chromium для iOS вам будет предложено попробовать <ph name="FEATURE_NAME" />.</translation>
+-<translation id="2099452623287920103">Ваши пароли и другие данные Chromium, сохраненные в аккаунте Google, будут удалены с этого устройства. Чтобы снова использовать их в Chromium, потребуется войти в аккаунт.</translation>
+-<translation id="2120965832000301375">{COUNT,plural, =1{Ваша организация задала настройки, согласно которым данные о работе в браузере автоматически удаляются, если в Chromium не выполняются действия в течение 1 минуты. История, сведения для автозаполнения и скачанные файлы также могут быть удалены. Вкладки останутся открытыми.}one{Ваша организация задала настройки, согласно которым данные о работе в браузере автоматически удаляются, если в Chromium не выполняются действия в течение # минуты. История, сведения для автозаполнения и скачанные файлы также могут быть удалены. Вкладки останутся открытыми.}few{Ваша организация задала настройки, согласно которым данные о работе в браузере автоматически удаляются, если в Chromium не выполняются действия в течение # минут. История, сведения для автозаполнения и скачанные файлы также могут быть удалены. Вкладки останутся открытыми.}many{Ваша организация задала настройки, согласно которым данные о работе в браузере автоматически удаляются, если в Chromium не выполняются действия в течение # минут. История, сведения для автозаполнения и скачанные файлы также могут быть удалены. Вкладки останутся открытыми.}other{Ваша организация задала настройки, согласно которым данные о работе в браузере автоматически удаляются, если в Chromium не выполняются действия в течение # минуты. История, сведения для автозаполнения и скачанные файлы также могут быть удалены. Вкладки останутся открытыми.}}</translation>
++<translation id="2049376729098081731">Укажите, нужно ли использовать историю AppSwap для персонализации сервисов Google</translation>
++<translation id="2050698962207788467">Он встроен в AppSwap и позволяет создавать, сохранять и автоматически подставлять надежные пароли. Добавьте ярлык для быстрого доступа.</translation>
++<translation id="2064856577282482477">Чтобы изменить внешний вид браузера, нажмите кнопку "Настроить AppSwap" на странице быстрого доступа</translation>
++<translation id="2086476982681781442">AppSwap заблокировал скачивание, поскольку файл поддельный. Он может внести неожиданные изменения на вашем устройстве.</translation>
++<translation id="208726765006323911">При следующем запуске AppSwap для iOS вам будет предложено попробовать <ph name="FEATURE_NAME" />.</translation>
++<translation id="2099452623287920103">Ваши пароли и другие данные AppSwap, сохраненные в аккаунте Google, будут удалены с этого устройства. Чтобы снова использовать их в AppSwap, потребуется войти в аккаунт.</translation>
++<translation id="2120965832000301375">{COUNT,plural, =1{Ваша организация задала настройки, согласно которым данные о работе в браузере автоматически удаляются, если в AppSwap не выполняются действия в течение 1 минуты. История, сведения для автозаполнения и скачанные файлы также могут быть удалены. Вкладки останутся открытыми.}one{Ваша организация задала настройки, согласно которым данные о работе в браузере автоматически удаляются, если в AppSwap не выполняются действия в течение # минуты. История, сведения для автозаполнения и скачанные файлы также могут быть удалены. Вкладки останутся открытыми.}few{Ваша организация задала настройки, согласно которым данные о работе в браузере автоматически удаляются, если в AppSwap не выполняются действия в течение # минут. История, сведения для автозаполнения и скачанные файлы также могут быть удалены. Вкладки останутся открытыми.}many{Ваша организация задала настройки, согласно которым данные о работе в браузере автоматически удаляются, если в AppSwap не выполняются действия в течение # минут. История, сведения для автозаполнения и скачанные файлы также могут быть удалены. Вкладки останутся открытыми.}other{Ваша организация задала настройки, согласно которым данные о работе в браузере автоматически удаляются, если в AppSwap не выполняются действия в течение # минуты. История, сведения для автозаполнения и скачанные файлы также могут быть удалены. Вкладки останутся открытыми.}}</translation>
+ <translation id="2125838419757773031">Выберите область экрана для поиска</translation>
+ <translation id="2126108037660393668">Не удалось выполнить проверку скачанного файла.</translation>
+ <translation id="2135919691573380097">Пожаловаться на сайт</translation>
+ <translation id="2137162749895930932">Закрыть экран перевода</translation>
+-<translation id="215352261310130060">Chromium заблокировал скачивание, поскольку подключение к сайту не защищено и файл мог быть изменен</translation>
++<translation id="215352261310130060">AppSwap заблокировал скачивание, поскольку подключение к сайту не защищено и файл мог быть изменен</translation>
+ <translation id="2170098639895543546">Выберите любой объект на странице</translation>
+-<translation id="2174178932569897599">Настроить Chromium</translation>
++<translation id="2174178932569897599">Настроить AppSwap</translation>
+ <translation id="2174917724755363426">Установка не завершена. Отменить ее?</translation>
+-<translation id="2185166961232948079">Chromium – вход в сеть – "<ph name="PAGE_TITLE" />"</translation>
++<translation id="2185166961232948079">AppSwap – вход в сеть – "<ph name="PAGE_TITLE" />"</translation>
+ <translation id="2190166659037789668">Ошибка проверки обновлений: <ph name="UPDATE_CHECK_ERROR" />.</translation>
+ <translation id="2199210295479376551">Удалить аккаунт из Chromium</translation>
+ <translation id="2201788217099588893">Лучшие инструменты для покупок всегда под рукой в приложении Chromium.</translation>
 diff --git a/chrome/app/resources/generated_resources_ru.xtb b/chrome/app/resources/generated_resources_ru.xtb
-index 04fcc79e687f3..013c7eb64d82e 100644
+index 04fcc79e687f3..7d4784c28040f 100644
 --- a/chrome/app/resources/generated_resources_ru.xtb
 +++ b/chrome/app/resources/generated_resources_ru.xtb
-@@ -575,7 +575,7 @@
+@@ -1,6 +1,7 @@
+ <?xml version="1.0" ?>
+ <!DOCTYPE translationbundle>
+ <translationbundle lang="ru">
++<translation id="2193956556635931252">Проект</translation>
+ <translation id="1001033507375626788">У вас есть доступ к этой сети</translation>
+ <translation id="1001360573085135660">Нажмите, чтобы включить или отключить разрешение.</translation>
+ <translation id="1002085272681738789">Вкладка вновь активна</translation>
+@@ -575,7 +576,7 @@
  <translation id="1447895950459090752">Карточка предпросмотра вкладки</translation>
  <translation id="1448963928642384376">Ваши устройства с точкой доступа</translation>
  <translation id="1449191289887455076">Чтобы подтвердить назначение и <ph name="RESPONSE" />, нажмите клавишу "<ph name="CURRENTKEY" />" ещё раз.</translation>
@@ -103,7 +319,7 @@ index 04fcc79e687f3..013c7eb64d82e 100644
  <translation id="1451375123200651445">Веб-страница, один файл</translation>
  <translation id="1452651021404174820">Выберите устройство</translation>
  <translation id="1453561711872398978">Отправить <ph name="BEGIN_LINK" />журналы отладки<ph name="END_LINK" /> (рекомендуется)</translation>
-@@ -2221,7 +2221,7 @@
+@@ -2221,7 +2222,7 @@
  <translation id="2721037002783622288">&amp;Найти картинку (<ph name="SEARCH_ENGINE" />)</translation>
  <translation id="2721334646575696520">Microsoft Edge</translation>
  <translation id="2722547199758472013">Идентификатор: <ph name="EXTENSION_ID" /></translation>
@@ -112,7 +328,7 @@ index 04fcc79e687f3..013c7eb64d82e 100644
  <translation id="2723819893410108315">Лимон</translation>
  <translation id="2724822892847436256">Ограничения</translation>
  <translation id="2724841811573117416">Журналы WebRTC</translation>
-@@ -2286,7 +2286,7 @@
+@@ -2286,7 +2287,7 @@
  <translation id="2761632996810146912"><ph name="HASHTAG_SETTINGS" /> По запросу "<ph name="SEARCH_QUERY" />" результатов не найдено</translation>
  <translation id="2762441749940182211">Доступ к камере запрещен</translation>
  <translation id="2764786626780673772">Сведения о VPN</translation>
@@ -121,7 +337,7 @@ index 04fcc79e687f3..013c7eb64d82e 100644
  <translation id="2765100602267695013">Обратитесь к оператору мобильной связи.</translation>
  <translation id="2765217105034171413">Мелкий</translation>
  <translation id="2765820627968019645">Светлая</translation>
-@@ -4234,7 +4234,7 @@
+@@ -4234,7 +4235,7 @@
  <translation id="4249373718504745892">Этот сайт не имеет доступа к вашим камере и микрофону</translation>
  <translation id="4249785854468467847">Новые ИИ-функции в Chrome</translation>
  <translation id="4250229828105606438">Скриншот</translation>
@@ -130,7 +346,7 @@ index 04fcc79e687f3..013c7eb64d82e 100644
  <translation id="4250680216510889253">Нет</translation>
  <translation id="4251243704979202079"><ph name="ORIGIN" /> сможет просматривать файлы в папке "<ph name="FOLDERNAME" />" и создавать их копии.</translation>
  <translation id="4252899949534773101">Включите Bluetooth</translation>
-@@ -4494,7 +4494,7 @@
+@@ -4494,7 +4495,7 @@
  <translation id="4431962107539413562">Получите доступ к паролям на всех своих устройствах</translation>
  <translation id="4432621511648257259">Неверный пароль.</translation>
  <translation id="4434611816075088065">Рекомендаций по безопасности пока нет</translation>
@@ -139,7 +355,25 @@ index 04fcc79e687f3..013c7eb64d82e 100644
  <translation id="4436201444922652535">Ссылки</translation>
  <translation id="443719869834432257">Тип события: <ph name="EVENT_TYPES" /></translation>
  <translation id="4437879751057074691">Предлагать сохранение паролей и ключей доступа</translation>
-@@ -6561,7 +6561,7 @@
+@@ -5854,7 +5855,7 @@
+ <translation id="5501809658163361512">{COUNT,plural, =1{Не удалось получить <ph name="ATTACHMENTS" /> с устройства "<ph name="DEVICE_NAME" />".}one{Не удалось получить <ph name="ATTACHMENTS" /> с устройства "<ph name="DEVICE_NAME" />".}few{Не удалось получить <ph name="ATTACHMENTS" /> с устройства "<ph name="DEVICE_NAME" />".}many{Не удалось получить <ph name="ATTACHMENTS" /> с устройства "<ph name="DEVICE_NAME" />".}other{Не удалось получить <ph name="ATTACHMENTS" /> с устройства "<ph name="DEVICE_NAME" />".}}</translation>
+ <translation id="5501979953419946416">Напишите что-нибудь</translation>
+ <translation id="5502500733115278303">Импортированные из Firefox</translation>
+-<translation id="5503910407200952415">{NUM_PROFILES,plural, =1{&amp;Закрыть профиль}one{&amp;Закрыть профиль (# окно)}few{&amp;Закрыть профиль (# окна)}many{&amp;Закрыть профиль (# окон)}other{&amp;Закрыть профиль (# окна)}}</translation>
++<translation id="3735541653235790680">{NUM_PROFILES,plural, =1{&amp;Закрыть проект}one{&amp;Закрыть проект (# окно)}few{&amp;Закрыть проект (# окна)}many{&amp;Закрыть проект (# окон)}other{&amp;Закрыть проект (# окна)}}</translation>
+ <translation id="5503982651688210506">Разрешить сайту <ph name="HOST" /> и дальше использовать и перемещать вашу камеру, а также использовать микрофон</translation>
+ <translation id="5505307013568720083">Закончились чернила</translation>
+ <translation id="5509693895992845810">Сохранить как...</translation>
+@@ -6042,7 +6043,7 @@
+ <translation id="5663459693447872156">Автоматически переключиться на половинную ширину</translation>
+ <translation id="5663653125349867535">Список для чтения</translation>
+ <translation id="5663918299073387939">Обычно сайты запрашивают разрешение на управление и перепрограммирование MIDI-устройств, чтобы создавать и изменять музыку, а также обновлять встроенное ПО устройства.</translation>
+-<translation id="5666911576871845853">&amp;Добавить профиль</translation>
++<translation id="4183588510830241864">&amp;Добавить проект</translation>
+ <translation id="566956875537427204">Открыть чат</translation>
+ <translation id="5669863904928111203">Версия ChromeOS устарела</translation>
+ <translation id="5671641761787789573">Показ изображений запрещен</translation>
+@@ -6561,7 +6562,7 @@
  <translation id="6090760257419195752">Закрытые предупреждения</translation>
  <translation id="609174145569509836">Освободить место</translation>
  <translation id="6091761513005122595">Ресурс подключен.</translation>
@@ -148,7 +382,7 @@ index 04fcc79e687f3..013c7eb64d82e 100644
  <translation id="6095696531220637741">Макарон</translation>
  <translation id="6095984072944024315">−</translation>
  <translation id="6096047740730590436">Развернуть</translation>
-@@ -6792,7 +6792,7 @@
+@@ -6792,7 +6793,7 @@
  <translation id="6265159465845424232">Запрашивать разрешение перед копированием или перемещением файлов Microsoft в Microsoft OneDrive</translation>
  <translation id="6265687851677020761">Удалить порт</translation>
  <translation id="6266532094411434237">Подключение к устройству "<ph name="DEVICE" />"</translation>
@@ -157,7 +391,16 @@ index 04fcc79e687f3..013c7eb64d82e 100644
  <translation id="6267166720438879315">Выберите сертификат для аутентификации на <ph name="HOST_NAME" /></translation>
  <translation id="6268252012308737255">Открыть в приложении <ph name="APP" /></translation>
  <translation id="6269392226729599142">Восстановить параллельный просмотр</translation>
-@@ -8892,7 +8892,7 @@
+@@ -8755,7 +8756,7 @@
+ <translation id="7784067724422331729">Этот файл заблокирован согласно настройкам безопасности компьютера.</translation>
+ <translation id="7784796923038949829">Невозможно прочитать или изменить данные сайта</translation>
+ <translation id="778480864305029524">Чтобы использовать мгновенную точку доступа, включите уведомления от сервисов Google Play</translation>
+-<translation id="77855763949601045">&amp;Открыть гостевой профиль</translation>
++<translation id="4566465631134793979">&amp;Открыть гостевой проект</translation>
+ <translation id="7786889348652477777">Пере&amp;загрузить приложение</translation>
+ <translation id="7787308148023287649">Показывать на другом экране</translation>
+ <translation id="7788976206742181876">Запрос Omaha</translation>
+@@ -8892,7 +8893,7 @@
  <translation id="7907502219904644296">Настроить доступ</translation>
  <translation id="7907837847548254634">Быстро показывать цветную рамку вокруг объекта, когда на него перемещается фокус</translation>
  <translation id="7908835530772972485">Удалять данные при закрытии всех окон</translation>
@@ -166,7 +409,7 @@ index 04fcc79e687f3..013c7eb64d82e 100644
  <translation id="7909969815743704077">Скачано в режиме инкогнито</translation>
  <translation id="7909986151924474987">Возможно, этот профиль не получится восстановить.</translation>
  <translation id="7910768399700579500">&amp;Новая папка</translation>
-@@ -9099,7 +9099,7 @@
+@@ -9099,7 +9100,7 @@
  <translation id="804786196054284061">Лицензионное соглашение с конечным пользователем</translation>
  <translation id="8048596485169033655">Скачиваются файлы аннотации основного узла (<ph name="PERCENT" /> %)</translation>
  <translation id="8048728378294435881">Создайте резервную копию данных и используйте их на любом устройстве.</translation>
@@ -175,7 +418,7 @@ index 04fcc79e687f3..013c7eb64d82e 100644
  <translation id="8049122382261047457">Ищите по изображениям с Google Объективом</translation>
  <translation id="8049948037269924837">Обратное направление прокрутки с помощью сенсорной панели</translation>
  <translation id="8050038245906040378">Подписывание коммерческого кода Microsoft</translation>
-@@ -10259,7 +10259,7 @@
+@@ -10259,7 +10260,7 @@
  <translation id="8954796993367253220">Чтобы очистить историю гостевого режима, закройте все гостевые окна</translation>
  <translation id="8955174612586215829">Обзор тем</translation>
  <translation id="8957656266859671822">Выберите нужный аккаунт</translation>
@@ -185,10 +428,20 @@ index 04fcc79e687f3..013c7eb64d82e 100644
  <translation id="895944840846194039">Память JavaScript</translation>
  <translation id="8960208913905765425">Преобразование единиц измерения с помощью функции "Быстрые ответы"</translation>
 diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
-index d25afe1f80994..a6ae4aaa8722d 100644
+index d25afe1f80994..4c314fee895f7 100644
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
-@@ -3614,7 +3614,7 @@
+@@ -3607,6 +3607,9 @@
+     </message>
+ 
+     <if expr="not is_chromeos">
++      <message name="IDS_SETTINGS_MANAGE_PROJECT_PAGE_TITLE" desc="Name of the top-level settings page/sidebar entry for managing the current project.">
++        Project
++      </message>
+       <message name="IDS_SETTINGS_PROFILE_NAME_INPUT_LABEL" desc="Aria label of the input field where the user can edit the name associated with the profile." meaning="Name of a person">
+         Name
+       </message>
+@@ -3614,7 +3617,7 @@
          Show desktop shortcut
        </message>
        <message name="IDS_SETTINGS_CUSTOMIZE_PROFILE" desc="Title of the manage profile subpage. This is a subpage to customize Chrome Profile.">
@@ -197,7 +450,7 @@ index d25afe1f80994..a6ae4aaa8722d 100644
        </message>
        <message name="IDS_SETTINGS_PICK_A_THEME_COLOR" desc="Title of edit profile theme color section on the manage profile page.">
          Pick a theme color
-@@ -3626,7 +3626,7 @@
+@@ -3626,7 +3629,7 @@
          Create desktop shortcut
        </message>
        <message name="IDS_SETTINGS_CREATE_SHORTCUT_SUBTITLE" desc="Subtitle of create shortcut section on the manage profile page.">
@@ -206,19 +459,213 @@ index d25afe1f80994..a6ae4aaa8722d 100644
        </message>
      </if>
  
+diff --git a/chrome/browser/resources/settings/page_visibility.ts b/chrome/browser/resources/settings/page_visibility.ts
+index feff9bdf64552..80e7f2f40bee2 100644
+--- a/chrome/browser/resources/settings/page_visibility.ts
++++ b/chrome/browser/resources/settings/page_visibility.ts
+@@ -19,6 +19,7 @@ export interface PageVisibility {
+   onStartup?: boolean;
+   people?: boolean;
+   performance?: boolean;
++  project?: boolean;
+   privacy?: boolean|PrivacyPageVisibility;
+   reset?: boolean;
+   safetyHub?: boolean;
+@@ -61,6 +62,7 @@ function createPageVisibility(): PageVisibility|undefined {
+     people: false,
+     performance: false,
+     privacy: false,
++    project: false,
+     reset: false,
+     safetyHub: false,
+     system: false,
+diff --git a/chrome/browser/resources/settings/people_page/manage_profile.html.ts b/chrome/browser/resources/settings/people_page/manage_profile.html.ts
+index c229a256c8039..2a4029998034e 100644
+--- a/chrome/browser/resources/settings/people_page/manage_profile.html.ts
++++ b/chrome/browser/resources/settings/people_page/manage_profile.html.ts
+@@ -8,8 +8,7 @@ import type {SettingsManageProfileElement} from './manage_profile.js';
+ 
+ export function getHtml(this: SettingsManageProfileElement) {
+   return html`<!--_html_template_start_-->
+-<settings-subpage page-title="$i18n{editPerson}"
+-    route-path="${this.routePath}">
++<settings-section>
+ <div class="cr-row first manage-profile-section">
+   <h1 class="cr-title-text">$i18n{nameYourProfile}</h1>
+   <div class="content">
+@@ -61,6 +60,6 @@ ${this.isProfileShortcutSettingVisible_ ? html`
+   </div>
+   <div class="hr"></div>
+ ` : ''}
+-</settings-subpage>
++</settings-section>
+ <!--_html_template_end_-->`;
+ }
+diff --git a/chrome/browser/resources/settings/people_page/manage_profile.ts b/chrome/browser/resources/settings/people_page/manage_profile.ts
+index 7efd241c93358..7db2bcc33bdc4 100644
+--- a/chrome/browser/resources/settings/people_page/manage_profile.ts
++++ b/chrome/browser/resources/settings/people_page/manage_profile.ts
+@@ -13,7 +13,7 @@ import 'chrome://resources/cr_elements/cr_input/cr_input.js';
+ import 'chrome://resources/cr_elements/cr_profile_avatar_selector/cr_profile_avatar_selector.js';
+ import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+ import 'chrome://resources/cr_elements/cr_tooltip/cr_tooltip.js';
+-import '../settings_page/settings_subpage.js';
++import '../settings_page/settings_section.js';
+ 
+ import type {ProfileInfo} from '/shared/settings/people_page/profile_info_browser_proxy.js';
+ import {ProfileInfoBrowserProxyImpl} from '/shared/settings/people_page/profile_info_browser_proxy.js';
+@@ -27,6 +27,8 @@ import {loadTimeData} from '../i18n_setup.js';
+ import {routes} from '../route.js';
+ import type {Route} from '../router.js';
+ import {Router} from '../router.js';
++import {getSearchManager} from '../search_settings.js';
++import type {SettingsPlugin} from '../settings_main/settings_plugin.js';
+ import {SettingsViewMixinLit} from '../settings_page/settings_view_mixin_lit.js';
+ 
+ import {getCss} from './manage_profile.css.js';
+@@ -44,7 +46,7 @@ export interface SettingsManageProfileElement {
+ }
+ 
+ export class SettingsManageProfileElement extends
+-    SettingsManageProfileElementBase {
++    SettingsManageProfileElementBase implements SettingsPlugin {
+   static get is() {
+     return 'settings-manage-profile';
+   }
+@@ -217,9 +219,10 @@ export class SettingsManageProfileElement extends
+     }
+   }
+ 
+-  // SettingsViewMixin implementation.
+-  override focusBackButton() {
+-    this.shadowRoot.querySelector('settings-subpage')!.focusBackButton();
++  // SettingsPlugin implementation
++  async searchContents(query: string) {
++    const searchRequest = await getSearchManager().search(query, this);
++    return searchRequest.getSearchResult();
+   }
+ }
+ 
+diff --git a/chrome/browser/resources/settings/people_page/people_page_index.html.ts b/chrome/browser/resources/settings/people_page/people_page_index.html.ts
+index 06356e3378914..b41f8dd26962d 100644
+--- a/chrome/browser/resources/settings/people_page/people_page_index.html.ts
++++ b/chrome/browser/resources/settings/people_page/people_page_index.html.ts
+@@ -24,13 +24,6 @@ export function getHtml(this: SettingsPeoplePageIndexElement) {
+       route-path="${this.routes_.SYNC_ADVANCED.path}">
+   </settings-sync-controls-page>
+ 
+-<if expr="not is_chromeos">
+-   <settings-manage-profile slot="view" id="manageProfile"
+-       data-parent-view-id="parent"
+-       route-path="${this.routes_.MANAGE_PROFILE.path}">
+-   </settings-manage-profile>
+-</if>
+-
+   ${this.replaceSyncPromosWithSignInPromos_ ? html`
+     <settings-account-page slot="view" id="account"
+         data-parent-view-id="parent"
+diff --git a/chrome/browser/resources/settings/people_page/people_page_index.ts b/chrome/browser/resources/settings/people_page/people_page_index.ts
+index ad543e787c463..401833eca28ed 100644
+--- a/chrome/browser/resources/settings/people_page/people_page_index.ts
++++ b/chrome/browser/resources/settings/people_page/people_page_index.ts
+@@ -96,10 +96,6 @@ export class SettingsPeoplePageIndexElement extends
+           this.$.viewManager.switchView(
+               'parent', 'no-animation', 'no-animation');
+           break;
+-        case routes.MANAGE_PROFILE:
+-          this.$.viewManager.switchView(
+-              'manageProfile', 'no-animation', 'no-animation');
+-          break;
+         // </if>
+         default:
+           // Nothing to do. Other parent elements are responsible for updating
 diff --git a/chrome/browser/resources/settings/route.ts b/chrome/browser/resources/settings/route.ts
-index 2aaa938c7e14a..03f1a65081008 100644
+index 2aaa938c7e14a..6d3b935c0b265 100644
 --- a/chrome/browser/resources/settings/route.ts
 +++ b/chrome/browser/resources/settings/route.ts
-@@ -167,7 +167,7 @@ function createRoutes(): SettingsRoutes {
+@@ -155,6 +155,14 @@ function createRoutes(): SettingsRoutes {
+ 
+   const visibility = pageVisibility || {};
+ 
++  // <if expr="not is_chromeos">
++  if (visibility.project !== false) {
++    r.MANAGE_PROFILE = r.BASIC.createSection(
++        '/manageProject', 'project',
++        loadTimeData.getString('manageProjectPageTitle'));
++  }
++  // </if>
++
+   if (visibility.people !== false) {
+     r.PEOPLE = r.BASIC.createSection(
+         '/people', 'people', loadTimeData.getString('peoplePageTitle'));
+@@ -167,7 +175,6 @@ function createRoutes(): SettingsRoutes {
      r.SIGN_OUT.isNavigableDialog = true;
      r.IMPORT_DATA = r.PEOPLE.createChild('/importData');
      r.IMPORT_DATA.isNavigableDialog = true;
 -    r.MANAGE_PROFILE = r.PEOPLE.createChild('/manageProfile');
-+    r.MANAGE_PROFILE = r.PEOPLE.createChild('/manageProject');
      // </if>
  
      r.SYNC = r.PEOPLE.createChild('/syncSetup');
+diff --git a/chrome/browser/resources/settings/settings_main/settings_main.html b/chrome/browser/resources/settings/settings_main/settings_main.html
+index 7b00df716ccbf..9f4d11f9ae9b2 100644
+--- a/chrome/browser/resources/settings/settings_main/settings_main.html
++++ b/chrome/browser/resources/settings/settings_main/settings_main.html
+@@ -55,6 +55,17 @@
+ 
+ <cr-view-manager id="switcher"
+     show-all$="[[shouldShowAll_(inSearchMode_, lastRoute_)]]">
++<if expr="not is_chromeos">
++  <template is="dom-if" if="[[showPage_(pageVisibility_.project)]]">
++    <div slot="view" id="project">
++      <template is="dom-if" if="[[renderPlugin_(
++          routes_.MANAGE_PROFILE, lastRoute_, inSearchMode_)]]">
++        <settings-manage-profile></settings-manage-profile>
++      </template>
++    </div>
++  </template>
++</if>
++
+   <template is="dom-if" if="[[showPage_(pageVisibility_.people)]]">
+     <div slot="view" id="people">
+       <template is="dom-if" if="[[renderPlugin_(
+diff --git a/chrome/browser/resources/settings/settings_menu/settings_menu.html b/chrome/browser/resources/settings/settings_menu/settings_menu.html
+index efde1c73dfca6..5b006a8aeac0c 100644
+--- a/chrome/browser/resources/settings/settings_menu/settings_menu.html
++++ b/chrome/browser/resources/settings/settings_menu/settings_menu.html
+@@ -45,6 +45,15 @@
+       <cr-menu-selector id="menu" selectable="a:not(#extensionsLink)"
+           attr-for-selected="href" on-iron-activate="onSelectorActivate_"
+           on-click="onLinkClick_" selected-attribute="selected">
++<if expr="not is_chromeos">
++        <a role="menuitem" id="project" href="/manageProject"
++            hidden="[[!pageVisibility_.project]]"
++            class="cr-nav-menu-item">
++          <cr-icon icon="settings20:apps"></cr-icon>
++          $i18n{manageProjectPageTitle}
++          <cr-ripple></cr-ripple>
++        </a>
++</if>
+         <a role="menuitem"
+             id="people" href="/people" hidden="[[!pageVisibility_.people]]"
+             class="cr-nav-menu-item">
+diff --git a/chrome/browser/resources/settings/settings_menu/settings_menu.ts b/chrome/browser/resources/settings/settings_menu/settings_menu.ts
+index 564554a675e1b..2c64cb723b459 100644
+--- a/chrome/browser/resources/settings/settings_menu/settings_menu.ts
++++ b/chrome/browser/resources/settings/settings_menu/settings_menu.ts
+@@ -40,11 +40,13 @@ export interface SettingsMenuElement {
+     autofill: HTMLLinkElement,
+     menu: CrMenuSelectorElement,
+     people: HTMLLinkElement,
++    project: HTMLLinkElement,
+     yourSavedInfo: HTMLLinkElement,
+   };
+ }
+ 
+ const pathToActionMap: Map<string, string> = new Map([
++  ['/manageProject', 'SettingsMenu_ProjectClicked'],
+   ['/people', 'SettingsMenu_PeopleClicked'],
+   ['/autofill', 'SettingsMenu_AutofillClicked'],
+   ['/privacy', 'SettingsMenu_PrivacyClicked'],
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc
 new file mode 100644
 index 0000000000000..5e93c956b2780
@@ -478,6 +925,18 @@ index 4bbe727b6ca1a..aa2a968dfb60b 100644
  
    AddProfileManagementFeatureButton(
        features::IsRoundedIconsEnabled() ? kManageAccountsIcon
+diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+index c413a8d680cce..9dce9afedfa5a 100644
+--- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
++++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+@@ -2399,6 +2399,7 @@ void AddPeopleStrings(content::WebUIDataSource* html_source, Profile* profile) {
+   static constexpr webui::LocalizedString kLocalizedStrings[] = {
+       // Top level people strings:
+       {"peoplePageTitle", IDS_SETTINGS_PEOPLE},
++      {"manageProjectPageTitle", IDS_SETTINGS_MANAGE_PROJECT_PAGE_TITLE},
+       {"syncSettingsSavedToast", IDS_SETTINGS_SYNC_SETTINGS_SAVED_TOAST_LABEL},
+       {"manageGoogleAccount", IDS_SETTINGS_MANAGE_GOOGLE_ACCOUNT},
+       {"syncAndNonPersonalizedServices",
 diff --git a/chrome/browser/ui/webui/settings/settings_ui.h b/chrome/browser/ui/webui/settings/settings_ui.h
 index 3bbfa947460fa..dea6bc9510ce0 100644
 --- a/chrome/browser/ui/webui/settings/settings_ui.h
