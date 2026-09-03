@@ -71,6 +71,8 @@ BINARY_RESOURCES=(
   chrome/app/theme/chromium/product_logo_48.png
   chrome/app/theme/chromium/product_logo_64.png
   chrome/app/theme/chromium/win/chromium.ico
+  chrome/app/theme/chromium/win/app_list.ico
+  chrome/app/theme/chromium/win/isolated.ico
   chrome/app/theme/chromium/mac/app.icns
   chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_16.png
   chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_32.png
