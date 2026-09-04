@@ -1,0 +1,34 @@
+diff --git a/ui/base/l10n/l10n_util.cc b/ui/base/l10n/l10n_util.cc
+index 466e9001064cb..cb9cf532254dc 100644
+--- a/ui/base/l10n/l10n_util.cc
++++ b/ui/base/l10n/l10n_util.cc
+@@ -569,6 +569,29 @@ bool IsUserFacingUILocale(std::string_view locale) {
+     return false;
+   }
+ 
++  // AppSwap: only offer the languages we actually maintain AppSwap-specific
++  // translations for as a manual "Display AppSwap in this language" choice
++  // (keep this in sync with TRACKED_LOCALES in
++  // scripts/update-translations.py). Every other Chromium locale's .pak
++  // files still ship and still work -- e.g. a user whose OS locale is
++  // French still gets a French UI by default -- they're just not offered
++  // here, since our own AppSwap-specific strings would show up untranslated
++  // in English for locales we don't maintain.
++  static constexpr auto kSupportedUILocales =
++      base::MakeFixedFlatSet<std::string_view>({
++          "de",
++          "en-US",
++          "es",
++          "fr",
++          "ja",
++          "pt-BR",
++          "ru",
++          "zh-CN",
++      });
++  if (!kSupportedUILocales.contains(*resolved_locale)) {
++    return false;
++  }
++
+   // Locales that have strings on disk should always be shown to the user.
+   if (resolved_locale == locale) {
+     return true;

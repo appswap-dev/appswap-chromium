@@ -125,6 +125,7 @@ gen 0001-branding.patch \
   components/components_chromium_strings.grd \
   'components/strings/components_chromium_strings_*.xtb' \
   ':(exclude)components/strings/components_chromium_strings_ru.xtb' \
+  ':(exclude)components/strings/components_chromium_strings_es.xtb' \
   extensions/strings/extensions_chromium_strings.grdp \
   'extensions/strings/extensions_strings_*.xtb' \
   chrome/app/theme/chromium/BRANDING \
@@ -546,11 +547,30 @@ gen 0017-responsive-lab.patch \
 # Includes chromium_strings_ru.xtb/generated_resources_ru.xtb's Russian
 # retexturing that used to live in 0016's own patch -- moved here for the
 # same reason (0016 stayed responsible for the .grd/.grdp English source,
-# not the translations).
-gen 0018-i18n-ru-translations.patch \
+# not the translations). Spanish (es) added the same way once its
+# translations were complete -- each new locale just adds its 3 xtb paths
+# here, no other patch needs to change (beyond a components/ glob exclude,
+# see 0001's own comment above, for locales that glob would otherwise
+# capture with untranslated content).
+gen 0018-i18n-translations.patch \
   chrome/app/resources/chromium_strings_ru.xtb \
   chrome/app/resources/generated_resources_ru.xtb \
-  components/strings/components_chromium_strings_ru.xtb
+  components/strings/components_chromium_strings_ru.xtb \
+  chrome/app/resources/chromium_strings_es.xtb \
+  chrome/app/resources/generated_resources_es.xtb \
+  components/strings/components_chromium_strings_es.xtb
+
+# Restricts the manual "Display AppSwap in this language" choice in
+# chrome://settings/languages to the locales we actually maintain
+# AppSwap-specific translations for (TRACKED_LOCALES in
+# scripts/update-translations.py) -- gated in l10n_util::IsUserFacingUILocale,
+# the single non-ChromeOS chokepoint that feeds
+# LanguageSettingsPrivateGetLanguageListFunction's supports_ui flag. All other
+# Chromium locales still ship and still work as an OS-detected default UI
+# language; they're just not offered as a manual pick, since our own new
+# strings would show up as untranslated English there.
+gen 0019-supported-ui-locales.patch \
+  ui/base/l10n/l10n_util.cc
 
 # Whether `f` (a path relative to src/) is one of the images tracked under
 # resources/ instead of as a patch -- sync_binary_resources() above already

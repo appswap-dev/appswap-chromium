@@ -1,3 +1,573 @@
+diff --git a/chrome/app/resources/chromium_strings_es.xtb b/chrome/app/resources/chromium_strings_es.xtb
+index 266f7fb8836b5..d71232a311055 100644
+--- a/chrome/app/resources/chromium_strings_es.xtb
++++ b/chrome/app/resources/chromium_strings_es.xtb
+@@ -801,4 +801,564 @@ Chromium no puede recuperar tu configuración.</translation>
+ <translation id="985602178874221306">Los creadores de Chromium</translation>
+ <translation id="989970834842471429">Selecciona cualquier texto o imagen para buscar con la búsqueda por imágenes</translation>
+ <translation id="992780518932311116">Para usar tu ubicación, da acceso a Chromium en la <ph name="BEGIN_LINK" />configuración del sistema<ph name="END_LINK" /></translation>
++<translation id="2133962922025429761">¿Salir de AppSwap de todos modos?</translation>
++<translation id="8511771132833503858">Información de &amp;AppSwap</translation>
++<translation id="5116729834153949817">El administrador del sistema ha configurado AppSwap para abrir <ph name="TARGET_URL_HOSTNAME">$1<ex>example.com</ex></ph> en <ph name="ALTERNATIVE_BROWSER_NAME">$2<ex>Internet Explorer</ex></ph>.</translation>
++<translation id="7185629754401904077">El administrador del sistema ha configurado AppSwap para abrir <ph name="TARGET_URL_HOSTNAME">$1<ex>example.com</ex></ph> en otro navegador.</translation>
++<translation id="3352791719237728748"><ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - AppSwap Beta</translation>
++<translation id="3017113145171904410"><ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - AppSwap Canary</translation>
++<translation id="1694640561441145928"><ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - AppSwap Dev</translation>
++<translation id="3219321689413687777"><ph name="EXISTING_USER">$1<ex>Elisa</ex></ph> ya inició sesión. Para mantener tu navegación separada, inicia sesión en AppSwap con tu propio perfil como <ph name="USER_EMAIL_ADDRESS">$2<ex>bob.beckett@gmail.com</ex></ph>. También tendrás acceso a tus marcadores y mucho más en todos tus dispositivos.</translation>
++<translation id="1188597708342721868"><ph name="EXISTING_USER">$1<ex>Elisa</ex></ph> ya inició sesión. Para mantener tu navegación separada, inicia sesión en AppSwap con tu propio perfil como <ph name="USER_EMAIL_ADDRESS">$2<ex>bob.beckett@gmail.com</ex></ph>. También tendrás acceso a tus marcadores y mucho más desde <ph name="DEVICE">$3<ex>your phone</ex></ph>.</translation>
++<translation id="6653613030275600433"><ph name="EXISTING_USER">$1<ex>Elisa</ex></ph> ya inició sesión. Para mantener tu navegación separada, inicia sesión en AppSwap con tu propio perfil como <ph name="USER_EMAIL_ADDRESS">$2<ex>bob.beckett@gmail.com</ex></ph>. También tendrás acceso a tus contraseñas y mucho más en todos tus dispositivos.</translation>
++<translation id="4242101689519009979"><ph name="EXISTING_USER">$1<ex>Elisa</ex></ph> ya inició sesión. Para mantener tu navegación separada, inicia sesión en AppSwap con tu propio perfil como <ph name="USER_EMAIL_ADDRESS">$2<ex>bob.beckett@gmail.com</ex></ph>. También tendrás acceso a tus contraseñas y mucho más desde <ph name="DEVICE">$3<ex>your phone</ex></ph>.</translation>
++<translation id="7455930314716104881"><ph name="EXISTING_USER">$1<ex>Elisa</ex></ph> ya inició sesión. Para mantener tu navegación separada, inicia sesión en AppSwap con tu propio perfil como <ph name="USER_EMAIL_ADDRESS">$2<ex>bob.beckett@gmail.com</ex></ph>. También tendrás acceso a tu información guardada y mucho más en todos tus dispositivos.</translation>
++<translation id="6170636747627828375"><ph name="EXISTING_USER">$1<ex>Elisa</ex></ph> ya inició sesión. Para mantener tu navegación separada, inicia sesión en AppSwap con tu propio perfil como <ph name="USER_EMAIL_ADDRESS">$2<ex>bob.beckett@gmail.com</ex></ph>. También tendrás acceso a tu información guardada y mucho más desde <ph name="DEVICE">$3<ex>your phone</ex></ph>.</translation>
++<translation id="4590910883067501516">{COUNT, plural,
++              =0 {Protección avanzada requiere que reinicies AppSwap para aplicar una actualización}
++              =1 {Protección avanzada requiere que reinicies AppSwap para aplicar una actualización. Tu ventana de incógnito no se volverá a abrir.}
++              other {Protección avanzada requiere que reinicies AppSwap para aplicar una actualización. Tus # ventanas de incógnito no se volverán a abrir.}}</translation>
++<translation id="5161566569763060926">Puedes seguir chateando en el modo IA sin cambiar de pestaña. Para empezar, inicia sesión en AppSwap. También tendrás acceso a tus contraseñas y mucho más en todos tus dispositivos.</translation>
++<translation id="6838907374101385282">Personaliza y controla AppSwap</translation>
++<translation id="8514313951734060048">Personaliza y controla AppSwap. Se requiere tu atención; haz clic para obtener más información.</translation>
++<translation id="8640699320930763307">Personaliza y controla AppSwap. Hay una actualización disponible.</translation>
++<translation id="5606695273450873918">Quitar los datos de esta app de AppSwap</translation>
++<translation id="3116484638720072240">Quitar de AppSwap…</translation>
++<translation id="6510408616030561759">Establecer AppSwap como tu navegador predeterminado</translation>
++<translation id="2208630230040247124">Personaliza y controla AppSwap. Establece AppSwap como tu navegador predeterminado.</translation>
++<translation id="1096396394336131635">Tu AppSwap</translation>
++<translation id="3605648559242249946">Apps de AppSwap</translation>
++<translation id="8342431912760635817">Para tener tus direcciones y mucho más en todos tus dispositivos, inicia sesión en AppSwap. Esta dirección se guardará en tu Cuenta de Google después de que inicies sesión.</translation>
++<translation id="182209529470886873">Para tener tus contraseñas y mucho más en todos tus dispositivos, inicia sesión en AppSwap. Esta contraseña se guardará en tu Cuenta de Google después de que inicies sesión.</translation>
++<translation id="8422021126756194517">Haz clic para cerrar el cuadro de diálogo de inicio de sesión de AppSwap</translation>
++<translation id="8466172050905980190">¿Iniciar sesión en AppSwap?</translation>
++<translation id="4324184273196992000">Personalizando AppSwap…</translation>
++<translation id="6647454396611887166">La cuenta de AppSwap requiere autenticación nuevamente</translation>
++<translation id="2333070089167671416">AppSwap bloqueó esta descarga porque el archivo es peligroso</translation>
++<translation id="6489916774824212118">AppSwap bloqueó esta descarga porque el archivo puede dañar tus cuentas personales y de redes sociales</translation>
++<translation id="876069951958593715">AppSwap bloqueó esta descarga porque este tipo de archivo no se descarga con frecuencia y podría ser peligroso</translation>
++<translation id="5442982184471361264">AppSwap bloqueó esta descarga porque el sitio no usa una conexión segura y es posible que se haya manipulado el archivo</translation>
++<translation id="3937362630614064964">AppSwap bloqueó esta descarga porque el archivo es engañoso y podría hacer cambios inesperados en tu dispositivo</translation>
++<translation id="4301120952966694073">AppSwap bloqueó esta descarga porque este archivo no se descarga con frecuencia y podría ser peligroso</translation>
++<translation id="3427454992560609700">AppSwap bloqueó esta descarga porque el archivo comprimido incluye otros archivos que podrían ocultar malware</translation>
++<translation id="4338069432554932081">AppSwap bloqueó esta descarga porque desactivaste Navegación segura y no se puede verificar el archivo</translation>
++<translation id="5534912393406001844">AppSwap recomienda analizar este archivo porque podría ser peligroso.</translation>
++<translation id="6262952154894584260">Para tener tus marcadores y mucho más en todos tus dispositivos, inicia sesión en AppSwap. Este marcador se guardará en tu Cuenta de Google después de que inicies sesión.</translation>
++<translation id="7660654471416927911">Para tener este marcador y mucho más en todos tus dispositivos, inicia sesión en AppSwap</translation>
++<translation id="61294256827600969">AppSwap no responde. ¿Reiniciar ahora?</translation>
++<translation id="8573380552791667236">Asegúrate de haber iniciado sesión en AppSwap en tu <ph name="TARGET_DEVICE_NAME">$1<ex>Pixel XL</ex></ph> y vuelve a intentar enviarlo.</translation>
++<translation id="8436614092147498747">AppSwap - <ph name="PAGE_TITLE">$1<ex>Google</ex></ph></translation>
++<translation id="8702912992795777256">AppSwap no puede leer ni escribir en su directorio de datos:
++
++<ph name="USER_DATA_DIRECTORY">$1<ex>C:\Documents and Settings\devint\Local Settings\Application Data\Google\Chrome</ex></ph></translation>
++<translation id="2144739024682252333">Tus cambios se aplicarán la próxima vez que reinicies AppSwap.</translation>
++<translation id="8888475288546617410">Tus contraseñas, formas de pago y direcciones que guardaste en tu Cuenta de Google se quitarán de este dispositivo. Para volver a usarlas en AppSwap, vuelve a iniciar sesión.</translation>
++<translation id="4067221057094079240">Tus contraseñas y otros datos de AppSwap que guardaste en tu Cuenta de Google se quitarán de este dispositivo. Para volver a usarlos en AppSwap, vuelve a iniciar sesión.</translation>
++<translation id="6889050095178052811">¿Cerrar sesión en AppSwap?</translation>
++<translation id="3210589629221686705">Alcanzaste el límite de AppSwap de <ph name="BOOKMARK_LIMIT">%1$s<ex>100,000</ex></ph> marcadores, por lo que algunos de tus marcadores aún no se guardaron en tu Cuenta de Google.
++
++No se pueden guardar marcadores nuevos en tu cuenta hasta que borres algunos. Si cierras sesión ahora, se borrarán los marcadores no guardados.</translation>
++<translation id="5273800025640136184">Algunos de tus datos de AppSwap aún no se guardaron en tu Cuenta de Google. Espera unos minutos antes de cerrar sesión. Si cierras sesión ahora, estos datos se borrarán.</translation>
++<translation id="7093588349106917548">{count, plural,
++              =1 {Algunos de tus datos de AppSwap aún no se guardaron en tu Cuenta de Google. Espera unos minutos antes de cerrar sesión. Si cierras sesión ahora, estos datos (1 elemento) se borrarán.}
++              other {Algunos de tus datos de AppSwap aún no se guardaron en tu Cuenta de Google. Espera unos minutos antes de cerrar sesión. Si cierras sesión ahora, estos datos ({count} elementos) se borrarán.}}</translation>
++<translation id="4180592912401043274">AppSwap debe verificar que eres tú antes de poder guardar algunos datos en tu Cuenta de Google y usarlos en todos tus dispositivos. Si cierras sesión ahora, estos datos se borrarán.</translation>
++<translation id="3142596388286716400">{count, plural,
++              =1 {AppSwap debe verificar que eres tú antes de poder guardar algunos datos en tu Cuenta de Google y usarlos en todos tus dispositivos. Si cierras sesión ahora, estos datos (1 elemento) se borrarán.}
++              other {AppSwap debe verificar que eres tú antes de poder guardar algunos datos en tu Cuenta de Google y usarlos en todos tus dispositivos. Si cierras sesión ahora, estos datos ({count} elementos) se borrarán.}}</translation>
++<translation id="1688029064508071047">Acceso directo de AppSwap</translation>
++<translation id="6942833442223257367">Se borraron los datos de AppSwap</translation>
++<translation id="4358999135009303331">Se cerrará tu sesión en la mayoría de los sitios cuando cierres todas las ventanas de AppSwap, excepto tu Cuenta de Google si iniciaste sesión en AppSwap. Para que los sitios te recuerden, <ph name="SETTINGS_LINK">$1<ex>go to settings</ex></ph>.</translation>
++<translation id="2418487631721029002">Si una imagen no tiene una descripción útil, AppSwap intentará proporcionarte una. Para crear descripciones, las imágenes se envían a Google. Puedes desactivar esta función en cualquier momento desde la configuración.</translation>
++<translation id="2367266764969642133">Si una imagen no tiene una descripción útil, AppSwap intentará proporcionarte una. Para crear descripciones, las imágenes se envían a Google.</translation>
++<translation id="3169855502076134705">Abrir vínculo en una nueva &amp;pestaña de AppSwap</translation>
++<translation id="6573984137335285103">Abrir vínculo en una ventana de inc&amp;ógnito de AppSwap</translation>
++<translation id="1544881477613404240">No se puede iniciar AppSwap porque ocurrió un error al abrir tu perfil. Intenta reiniciar AppSwap.</translation>
++<translation id="8366144839281593930">Los accesos directos se abren en AppSwap</translation>
++<translation id="5991274869961665996">Se acaba de aplicar una actualización de seguridad especial para AppSwap. Reinicia ahora y restauraremos tus pestañas.</translation>
++<translation id="7670289379984753406">AppSwap se reiniciará en <ph name="REMAINING_TIME">$1<ex>1 minute, 7 seconds</ex></ph></translation>
++<translation id="6276491205805327818">Reinicia AppSwap ahora</translation>
++<translation id="246021580510035592">P&amp;ersonalizar proyecto</translation>
++<translation id="3514186591031878237">Accede fácilmente a las funciones que conoces y en las que confías. Establece AppSwap como tu navegador predeterminado.</translation>
++<translation id="681727396681498397">1. Haz clic en <ph name="BUTTON_LABEL">$1<ex>Open settings</ex></ph> a continuación
++2. Haz clic en <ph name="BUTTON_2">$2<ex>Set default</ex></ph> en la configuración de Windows
++3. Haz clic en <ph name="BUTTON_3">$3<ex>Yes</ex></ph> en la notificación de Windows para anclar AppSwap a la barra de tareas para un acceso rápido</translation>
++<translation id="8087532655576897754">Establecer AppSwap como tu navegador predeterminado</translation>
++<translation id="2575545525174318984">AppSwap ya no es tu navegador predeterminado. ¿Establecer AppSwap como tu navegador predeterminado?</translation>
++<translation id="8624303342138916925">AppSwap no es tu navegador predeterminado</translation>
++<translation id="7927511633238572418">Mantén tus contraseñas, marcadores e historial perfectamente sincronizados en todos tus dispositivos. Accede fácilmente a las funciones que conoces y te encantan actualizando tu navegador predeterminado a AppSwap.</translation>
++<translation id="1075523899932633856">Mantén tus contraseñas, marcadores e historial perfectamente sincronizados en todos tus dispositivos. Accede fácilmente a las funciones que conoces y te encantan actualizando tu navegador predeterminado a AppSwap. AppSwap se anclará a tu barra de tareas para un acceso rápido.</translation>
++<translation id="2862173183632180346">Establece AppSwap como tu navegador predeterminado y anclarlo a la barra de tareas</translation>
++<translation id="2508444765771718893">AppSwap ahora es tu navegador predeterminado</translation>
++<translation id="3557062023942150995">Mantén tus contraseñas, marcadores e historial perfectamente sincronizados en todos tus dispositivos estableciendo AppSwap como tu navegador predeterminado.</translation>
++<translation id="6676837614895859977">Haz clic en <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>Sí<ph name="END_BOLD">&lt;/strong&gt;</ph> en la notificación de Windows para anclar AppSwap a la barra de tareas para un acceso rápido.</translation>
++<translation id="5744169647833512674">Tu buscador se cambió desde fuera de AppSwap. Para protegerte, AppSwap lo restableció a su configuración original. <ph name="LEARN_MORE_LINK">$1<ex>Learn more</ex></ph></translation>
++<translation id="4760417372258934106">Después deberás reiniciar AppSwap.</translation>
++<translation id="2662587186765295369">Para compartir tu pantalla, permite la grabación de pantalla para AppSwap en la Configuración del sistema</translation>
++<translation id="5647881626268732008">Para compartir tu pantalla, permite la grabación de pantalla para AppSwap en la Configuración del sistema.</translation>
++<translation id="222148671741429806">Pestaña de AppSwap</translation>
++<translation id="5530641647892756399">Para compartir el audio del sistema, abre la Configuración del sistema y permite la opción “Solo grabación de audio del sistema” para AppSwap. Después deberás reiniciar AppSwap.</translation>
++<translation id="7036703821800071257">Compartir una pestaña de AppSwap</translation>
++<translation id="2639861162896156643">Para compartir tu ventana, permite la grabación de pantalla para AppSwap en la Configuración del sistema</translation>
++<translation id="1846611588474668428">Para compartir tu ventana, permite la grabación de pantalla para AppSwap en la Configuración del sistema.</translation>
++<translation id="1651511427036161583">Abre <ph name="URL">$1<ex>https://www.example-url.com/</ex></ph> en una nueva pestaña en AppSwap.</translation>
++<translation id="2179099412836185989">Ahora tienes más funciones disponibles en AppSwap</translation>
++<translation id="1358279992172697128">Este archivo podría ser peligroso<ph name="LINE_BREAK">$1</ph>AppSwap puede revisar esta descarga por ti si proporcionas la contraseña. La información sobre el archivo se envía a Navegación segura de Google, pero el contenido del archivo y la contraseña permanecen en tu dispositivo.</translation>
++<translation id="1804086409012065656">Las extensiones, apps y temas de fuentes desconocidas pueden dañar tu dispositivo. AppSwap recomienda instalarlos solo desde <ph name="IDS_EXTENSION_WEB_STORE_TITLE">$1<ex>Chrome Web Store</ex></ph></translation>
++<translation id="5515353358221082051">Descubre por qué AppSwap bloquea algunas descargas</translation>
++<translation id="5501087835932163510">Agregando a AppSwap…</translation>
++<translation id="2278943708530543151">Descubre por qué AppSwap bloquea algunos archivos</translation>
++<translation id="2768619216342512725">Descubre por qué AppSwap bloquea algunos archivos. Se abre en una pestaña nueva</translation>
++<translation id="5233940307034222578">Para proteger tu trabajo en AppSwap, tu organización podrá ver o administrar cierta información cuando hayas iniciado sesión en AppSwap.</translation>
++<translation id="8806040864408207018">Tu trabajo protegido en AppSwap</translation>
++<translation id="6856222618461593352">Estás iniciando sesión con una cuenta administrada y le das a su administrador control sobre tu perfil de AppSwap. Tus datos de AppSwap, como apps, marcadores, historial, contraseñas y otras configuraciones, quedarán vinculados de forma permanente a <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph>. Podrás borrar estos datos desde el Panel de Cuentas de Google, pero no podrás asociarlos con otra cuenta. <ph name="LEARN_MORE">$2<ex>Learn more</ex></ph></translation>
++<translation id="3067209519218906928">Estás iniciando sesión con una cuenta administrada y le das a su administrador control sobre tu perfil de AppSwap. Tus datos de AppSwap, como apps, marcadores, historial, contraseñas y otras configuraciones, quedarán vinculados de forma permanente a <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph>. Podrás borrar estos datos desde el Panel de Cuentas de Google, pero no podrás asociarlos con otra cuenta. Opcionalmente, puedes crear un perfil nuevo para mantener tus datos de AppSwap actuales por separado. <ph name="LEARN_MORE">$2<ex>Learn more</ex></ph></translation>
++<translation id="7286865583326542265">¿Vincular tus datos de AppSwap con esta cuenta?</translation>
++<translation id="774541879637670407">No se pudo abrir AppSwap. Vuelve a intentarlo.</translation>
++<translation id="5768997200081453775">Abriendo AppSwap…</translation>
++<translation id="5210939527783564835">Reiniciar AppSwap</translation>
++<translation id="5952339155220941662">Tu organización, <ph name="MANAGER">$1<ex>manager.com</ex></ph>, requiere que inicies sesión en AppSwap</translation>
++<translation id="2546280383935414187">Tu organización requiere que inicies sesión en AppSwap</translation>
++<translation id="6109775349271325963">¿Iniciar sesión en AppSwap?</translation>
++<translation id="6032477040054980642">Tu organización puede ver y administrar los datos de navegación, como tus marcadores, historial y contraseñas. No puede ver los datos de navegación de otros perfiles de AppSwap</translation>
++<translation id="4537095418072250012">AppSwap detectó que estos elementos contienen malware:</translation>
++<translation id="8330206071534325377">Advertencia: AppSwap no puede impedir que las extensiones registren tu historial de navegación. Para desactivar esta extensión en el modo de incógnito, desmarca esta opción.</translation>
++<translation id="5195963769655738140">Permitir que la extensión muestre solicitudes de acceso en la barra de herramientas de AppSwap</translation>
++<translation id="1115440649953514108">Las extensiones son complementos que te permiten personalizar AppSwap. Desde mantenerte organizado hasta simplificar tareas diarias, las extensiones te ayudan a hacer de AppSwap algo tuyo.</translation>
++<translation id="4430768679593813671">Para que AppSwap sea más seguro, desactivamos algunas extensiones que no aparecen en <ph name="IDS_EXTENSION_WEB_STORE_TITLE">$1<ex>Chrome Web Store</ex></ph> y que podrían haberse agregado sin tu conocimiento.</translation>
++<translation id="6619809767000370705">AppSwap recomienda que la quites. <ph name="BEGIN_LINK">&lt;a href="$1" aria-description="$2" target="_blank"&gt;</ph>Obtén más información sobre las extensiones compatibles<ph name="END_LINK">&lt;/a&gt;</ph></translation>
++<translation id="2990982037772786291">{NUM_EXTENSIONS, plural,
++            =1 {AppSwap recomienda que la quites. <ph name="BEGIN_LINK">&lt;a href="$1" aria-description="$2" target="_blank"&gt;</ph>Obtén más información sobre las extensiones compatibles<ph name="END_LINK">&lt;/a&gt;</ph>}
++            other {AppSwap recomienda que las quites. <ph name="BEGIN_LINK">&lt;a href="$1" aria-description="$2" target="_blank"&gt;</ph>Obtén más información sobre las extensiones compatibles<ph name="END_LINK">&lt;/a&gt;</ph>}
++          }</translation>
++<translation id="4168333467102209226">Quitar <ph name="EXTENSION_NAME">$1<ex>Google Translate</ex></ph> de AppSwap</translation>
++<translation id="6651386463290771599">Esta extensión no publicó sus prácticas de privacidad, como la forma en que recopila y usa los datos. AppSwap recomienda que la quites.</translation>
++<translation id="3690836333946088377">AppSwap no puede verificar el origen de esta extensión, y podría no ser segura. Quítala de AppSwap para que ya no pueda ver ni cambiar tus datos en los sitios que visitas, incluida tu información personal.</translation>
++<translation id="7000145145675579583">Desactivada • AppSwap no puede verificar el origen de esta extensión</translation>
++<translation id="2100490802850310647">Activada • AppSwap no puede verificar el origen de esta extensión</translation>
++<translation id="2310033255879066002">AppSwap recomienda que revises esta extensión</translation>
++<translation id="8036265670024894232">{NUM_EXTENSIONS, plural,
++     =1 {AppSwap recomienda que la quites}
++     other {AppSwap recomienda que las quites}}</translation>
++<translation id="8743066705418628160">''' También controla qué página se muestra cuando inicias AppSwap o buscas desde la barra de direcciones. '''</translation>
++<translation id="827933962922261949">''' También controla qué página se muestra cuando inicias AppSwap. '''</translation>
++<translation id="6278504829711890576">En AppSwap</translation>
++<translation id="7645359707155529063">Para que AppSwap sea más seguro, desactivamos la siguiente extensión que no aparece en <ph name="IDS_EXTENSION_WEB_STORE_TITLE">$1<ex>Chrome Web Store</ex></ph> y que podría haberse agregado sin tu conocimiento.</translation>
++<translation id="3993958980397269395">Quitar de AppSwap</translation>
++<translation id="8619149332246282175">AppSwap detectó que "<ph name="EXTENSION_NAME">$1<ex>Gmail Checker</ex></ph>" contiene malware</translation>
++<translation id="5636392011478550059">Para usar esta extensión como <ph name="USER_EMAIL_ADDRESS">$1<ex>elisa.g.beckett@gmail.com</ex></ph>, inicia sesión en AppSwap.</translation>
++<translation id="2409845614661482588">La extensión "<ph name="EXTENSION_NAME">$1<ex>Screencast</ex></ph>" quiere que inicies sesión en AppSwap</translation>
++<translation id="5696252579196886237">Una extensión quiere que inicies sesión en AppSwap</translation>
++<translation id="5255891909153039690"><ph name="EXTENSION_NAME">$1<ex>Gmail Checker</ex></ph> se agregó a AppSwap</translation>
++<translation id="4559853697997327567">Administra tus extensiones haciendo clic en Extensiones en el menú principal de AppSwap.</translation>
++<translation id="447510227689532819">Para tener esta extensión y mucho más en todas tus computadoras, inicia sesión en AppSwap</translation>
++<translation id="9041702980361466595">Tu padre o madre desactivó "Permisos para sitios, apps y extensiones" en AppSwap</translation>
++<translation id="8053003992684379223">También borrar datos de AppSwap (<ph name="URL">$1<ex>www.google.com</ex></ph>)</translation>
++<translation id="4657473418078103934">Pregunta lo que quieras, donde estés, con Gemini en AppSwap</translation>
++<translation id="3441395234959601585">Integrado en AppSwap para ayudarte a crear, guardar y autocompletar contraseñas seguras. Agrega el acceso directo para tener acceso fácil.</translation>
++<translation id="504276296544953945">Haz que AppSwap sea tuyo</translation>
++<translation id="6919680962085570728">Te damos la bienvenida a AppSwap</translation>
++<translation id="2006400110781581038">Abre vínculos en AppSwap desde cualquier app. Además, para un acceso fácil, se anclará a tu barra de tareas.</translation>
++<translation id="6218876248972684750">Usa AppSwap de forma predeterminada y anclarlo</translation>
++<translation id="8534885853588129115">Logotipo de AppSwap dentro de una pantalla de computadora.</translation>
++<translation id="6250914762992623365">Usa AppSwap cada vez que hagas clic en vínculos en mensajes, documentos y otras apps</translation>
++<translation id="6609570786936196092">Preparemos tu AppSwap</translation>
++<translation id="4775278480170697232">Abre vínculos en AppSwap desde cualquier app y mantenlo accesible en tu barra de tareas</translation>
++<translation id="2700541778592565270">Establecer AppSwap como predeterminado y anclarlo a la barra de tareas</translation>
++<translation id="6016475123735167057">Inicia sesión en AppSwap</translation>
++<translation id="8253093005980925548">Iniciar AppSwap</translation>
++<translation id="7275304530007697660">Hacer de AppSwap el navegador predeterminado</translation>
++<translation id="2399926911083090823">AppSwap Helper</translation>
++<translation id="959328171906079152">Historial de AppSwap</translation>
++<translation id="401137259432099726">Tu organización borra los datos de AppSwap cuando no se usa durante <ph name="TIMEOUT_DURATION">$1<ex>30 minutes</ex></ph>. Esto puede incluir el historial, el autocompletado y las descargas.</translation>
++<translation id="8535449280407970420">Tu organización cierra AppSwap cuando no se usa durante <ph name="TIMEOUT_DURATION">$1<ex>30 minutes</ex></ph>.</translation>
++<translation id="547484824007126547">Tu organización cierra AppSwap cuando no se usa durante <ph name="TIMEOUT_DURATION">$1<ex>30 minutes</ex></ph>. Se borraron los datos de navegación. Esto puede incluir el historial, el autocompletado y las descargas.</translation>
++<translation id="7660801564576341734">AppSwap se cerró automáticamente</translation>
++<translation id="9176941211702059332">Seguir usando AppSwap</translation>
++<translation id="1130991454161867856">{COUNT, plural,
++          =1 {Tu organización borra automáticamente los datos de navegación cuando AppSwap no se usa durante 1 minuto. Esto puede incluir el historial, el autocompletado y las descargas. Tus pestañas seguirán abiertas.}
++          other {Tu organización borra automáticamente los datos de navegación cuando AppSwap no se usa durante # minutos. Esto puede incluir el historial, el autocompletado y las descargas. Tus pestañas seguirán abiertas.}}</translation>
++<translation id="7472430523201774949">AppSwap borrará pronto los datos de navegación</translation>
++<translation id="3228770058768181057">{COUNT, plural,
++          =1 {Tu organización cierra automáticamente AppSwap cuando no se usa durante 1 minuto. Se borran los datos de navegación. Esto puede incluir el historial, el autocompletado y las descargas.}
++          other {Tu organización cierra automáticamente AppSwap cuando no se usa durante # minutos. Se borran los datos de navegación. Esto puede incluir el historial, el autocompletado y las descargas.}}</translation>
++<translation id="8454878546101487013">AppSwap se cerrará y borrará datos pronto</translation>
++<translation id="6778290661977910643">{COUNT, plural,
++          =1 {Tu organización cierra automáticamente AppSwap cuando no se usa durante 1 minuto.}
++          other {Tu organización cierra automáticamente AppSwap cuando no se usa durante # minutos.}}</translation>
++<translation id="5299397232830763603">AppSwap se cerrará pronto</translation>
++<translation id="7327130227623088401">Regla de entrada para que AppSwap permita el tráfico de mDNS.</translation>
++<translation id="5468739130190730874">AppSwap (mDNS de entrada)</translation>
++<translation id="4788743970067813861">Espera mientras AppSwap instala las últimas actualizaciones del sistema.</translation>
++<translation id="8223945191706044150">AppSwap ya está instalado para todos los usuarios de esta computadora.</translation>
++<translation id="4298624037107127161">No se pudo completar la instalación debido a un error no especificado. Si AppSwap se está ejecutando, ciérralo y vuelve a intentarlo.</translation>
++<translation id="2724186081210238242">Esta computadora ya tiene una versión más reciente de AppSwap. Si el software no funciona, desinstala AppSwap y vuelve a intentarlo.</translation>
++<translation id="6025887649950016979">El archivo del instalador está dañado o no es válido. Vuelve a descargar AppSwap.</translation>
++<translation id="6617185601452858386">Se produjo un error del sistema operativo durante la instalación. Vuelve a descargar AppSwap.</translation>
++<translation id="2631191648155711115">AppSwap requiere Windows 10 o una versión posterior.</translation>
++<translation id="1622857325902660580">Ya hay otra operación de AppSwap en curso. Vuelve a intentarlo más tarde.</translation>
++<translation id="3457894996141452213">El instalador no pudo descomprimir el archivo. Vuelve a descargar AppSwap.</translation>
++<translation id="5032459538337233053">Servicio interno del actualizador de AppSwap</translation>
++<translation id="1343205396499712807">Escanea el código QR con tu teléfono para descargar AppSwap y acceder a tu Cuenta de Google.</translation>
++<translation id="8586589094354749704">Lleva tus herramientas de IA de Google favoritas a donde vayas con AppSwap en iOS.</translation>
++<translation id="7171095227310061685">Usa las mejores herramientas de IA de Google con la app de AppSwap en tu teléfono</translation>
++<translation id="7843519312007372344">Obtén el poder de la IA cuando uses la app de AppSwap en tu <ph name="DEVICE_TYPE">$1<ex>iPhone</ex></ph></translation>
++<translation id="2897220258645984650">Usa la app de AppSwap para llevar las mejores herramientas de IA a donde vayas</translation>
++<translation id="5829046632044003628">Usa sin problemas tus apps favoritas, como Google Drive y YouTube, a donde vayas con AppSwap.</translation>
++<translation id="1847128466977103933">Obtén lo mejor de Google con la app de AppSwap en tu teléfono</translation>
++<translation id="6904579604843544737">Obtén lo mejor de Google con la app de AppSwap en tu <ph name="DEVICE_TYPE">$1<ex>iPhone</ex></ph></translation>
++<translation id="180298047733415931">Accede a todos tus favoritos de Google con AppSwap en tu <ph name="DEVICE_TYPE">$1<ex>iPhone</ex></ph></translation>
++<translation id="1343036701644580614">Mantente más seguro a donde vayas con Navegación segura mejorada en AppSwap para iOS</translation>
++<translation id="6653498186196788436">Extiende la Navegación segura mejorada con AppSwap en tu teléfono</translation>
++<translation id="7664570880144009290">Compra, traduce e identifica lo que ves con la cámara en la app de AppSwap para iOS</translation>
++<translation id="8828772027026529009">Prueba Google Lens con AppSwap en tu teléfono</translation>
++<translation id="1538243844450927137">Para usar tus contraseñas guardadas, sigue el código QR, descarga AppSwap para iOS e inicia sesión en tu Cuenta de Google</translation>
++<translation id="7143072333457208271">Inicia sesión más rápido en sitios usando las contraseñas guardadas para AppSwap en iOS</translation>
++<translation id="7476920773565620143">Usa tus contraseñas con AppSwap en tu teléfono</translation>
++<translation id="651701887179549006">La próxima vez que abras AppSwap en tu <ph name="DEVICE_TYPE">$1<ex>iPhone</ex></ph>, verás un mensaje para usar el Administrador de contraseñas de Google.</translation>
++<translation id="8256290615632038934">Descarga AppSwap en tu teléfono para hacer un seguimiento de precios y recibir alertas cuando baje el precio en cualquier sitio</translation>
++<translation id="8344549543116756547">Recibe alertas de seguimiento de precios con AppSwap en tu teléfono</translation>
++<translation id="5067433977941860181">La próxima vez que abras AppSwap en tu <ph name="DEVICE_TYPE">$1<ex>iPhone</ex></ph>, verás un mensaje para activar las alertas de seguimiento de precios.</translation>
++<translation id="5240676325457193487">Obtén la app de AppSwap</translation>
++<translation id="7377290097967800587">Código QR para descargar el navegador AppSwap en dispositivos móviles</translation>
++<translation id="90510762802502711">Verás un mensaje para probar <ph name="FEATURE_NAME">$1<ex>Google Lens</ex></ph> la próxima vez que abras AppSwap en iOS.</translation>
++<translation id="4072542796091437448">Obtén las mejores funciones de seguridad de Google a donde vayas con AppSwap.</translation>
++<translation id="1742678547199719753">Obtén las mejores funciones de seguridad de Google a donde vayas con la app de AppSwap en tu teléfono</translation>
++<translation id="6097439228137409192">Lleva la seguridad de Google a donde vayas con la app de AppSwap en tu <ph name="DEVICE_TYPE">$1<ex>iPhone</ex></ph></translation>
++<translation id="6448418860292828027">Usa la app de AppSwap para llevar la seguridad de Google a donde vayas</translation>
++<translation id="3269795058475688121">Descubre productos con tu cámara, haz un seguimiento de bajadas de precios y mucho más a donde vayas con AppSwap en iOS.</translation>
++<translation id="5018647245283813517">Recibe alertas de bajadas de precios en artículos que te interesan con la app de AppSwap en tu teléfono</translation>
++<translation id="2832090649833718071">Aprovecha más tus compras en línea cuando uses la app de AppSwap en tu <ph name="DEVICE_TYPE">$1<ex>iPhone</ex></ph></translation>
++<translation id="3124927319721195462">Usa la app de AppSwap para llevar las mejores herramientas de compras a donde vayas</translation>
++<translation id="2525898235957900236">Descarga AppSwap en tu teléfono para abrir o crear grupos de pestañas a donde vayas.</translation>
++<translation id="4147905630020471510">La próxima vez que abras AppSwap en tu <ph name="DEVICE_TYPE">$1<ex>iPhone</ex></ph>, verás un mensaje para usar grupos de pestañas.</translation>
++<translation id="136627763107142705">Retoma justo donde lo dejaste con AppSwap en iOS.</translation>
++<translation id="3477195738236622079">Lleva tus contraseñas, pestañas y mucho más a donde vayas con la app de AppSwap en tu teléfono</translation>
++<translation id="5790397809379769634">Lleva tus contraseñas, pestañas y mucho más a donde vayas con la app de AppSwap en tu <ph name="DEVICE_TYPE">$1<ex>iPhone</ex></ph></translation>
++<translation id="1349995477206016224">Usa la app de AppSwap para seguir navegando a donde vayas</translation>
++<translation id="496863586422080851">Personaliza AppSwap para darle un nuevo aspecto</translation>
++<translation id="6845682604572426168">Haz clic en el botón Personalizar AppSwap en la página de pestaña nueva para darle a AppSwap un nuevo aspecto</translation>
++<translation id="103539363733484616">Por seguridad, AppSwap desactiva la optimización de JavaScript la primera vez que visitas un sitio.
++
++Si esta página no funciona como se espera, prueba permitir la optimización.</translation>
++<translation id="7443731548113883302">Obtén más información sobre cómo buscar con la Búsqueda por imágenes en AppSwap</translation>
++<translation id="6004241414427922607">Es posible que AppSwap no funcione correctamente porque ya no es compatible con esta distribución de Linux</translation>
++<translation id="8249994365194856721">Los datos de navegación de esta persona se borrarán de este dispositivo. Para recuperar los datos, inicia sesión en AppSwap como <ph name="USER_EMAIL">$2<ex>foo@example.com</ex></ph>.</translation>
++<translation id="4592187167423287586">Para obtener futuras actualizaciones de AppSwap, necesitarás macOS 13 o una versión posterior. Esta computadora usa macOS 12.</translation>
++<translation id="1735012865238879223">Para continuar, inicia sesión en AppSwap como <ph name="EMAIL">$1<ex>user@example.com</ex></ph>. Esto garantiza que tengas las políticas de tu organización.</translation>
++<translation id="7905708039458375917">Tu organización administra AppSwap</translation>
++<translation id="4818527063293461995"><ph name="MANAGER">$1<ex>The Company</ex></ph> administra AppSwap</translation>
++<translation id="399757797786356580">Varias organizaciones administran AppSwap</translation>
++<translation id="2695109107551157165">&amp;Administrar proyectos</translation>
++<translation id="8610497345922137717">AppSwap está usando tu cámara y micrófono.</translation>
++<translation id="1787421167270659556">AppSwap está usando tu micrófono.</translation>
++<translation id="2686212076030953484">AppSwap está usando tu cámara.</translation>
++<translation id="8502528828602533218">Mientras esta pestaña estaba inactiva, se liberó memoria para mantener AppSwap rápido. Puedes elegir excluir siempre este sitio de la inactividad.</translation>
++<translation id="7937562332441567608">Haz que AppSwap sea más rápido</translation>
++<translation id="5329764574381302549">AppSwap necesita permiso de cámara para crear un mapa 3D de tu entorno</translation>
++<translation id="2205452490748438623">AppSwap necesita permiso de cámara para este sitio</translation>
++<translation id="3073737903098269694">AppSwap necesita permiso para rastrear tus manos</translation>
++<translation id="8847267498678313541">AppSwap necesita permiso de red local para este sitio</translation>
++<translation id="6518686211139751610">AppSwap necesita permiso de ubicación para este sitio</translation>
++<translation id="8149175937783372721">AppSwap necesita permisos de cámara y micrófono para este sitio</translation>
++<translation id="4918973188247887889">AppSwap necesita permiso de micrófono para este sitio</translation>
++<translation id="8090420026429084522">AppSwap necesita permiso para mapear tu entorno y rastrear tus manos</translation>
++<translation id="872060926795677441">AppSwap necesita permiso de acceso al almacenamiento para descargar archivos</translation>
++<translation id="2357145632760646749">Faltan las claves de la API de Google. Algunas funciones de AppSwap se desactivarán.</translation>
++<translation id="5384072585100534485">AppSwap necesita acceso al almacenamiento para descargar archivos</translation>
++<translation id="618900582071939673">Personaliza AppSwap para darle un nuevo aspecto a tu navegador</translation>
++<translation id="1066004910967560082">Restablecer AppSwap predeterminado</translation>
++<translation id="297539019854468643">Obtén la app de AppSwap para guardar contraseñas a donde vayas</translation>
++<translation id="2641271842228360975">Obtén AppSwap en tu teléfono</translation>
++<translation id="8038013987834393272">Haz que AppSwap sea tuyo</translation>
++<translation id="2923304778765368952">&amp;Abrir en AppSwap</translation>
++<translation id="3489484202549970191">Otros proyectos</translation>
++<translation id="1692613842720963970">AppSwap está tratando de <ph name="AUTHENTICATION_PURPOSE">$1<ex>show passwords</ex></ph></translation>
++<translation id="9099327292496392032">AppSwap está tratando de mostrar contraseñas. Escribe tu contraseña de Windows para permitirlo.</translation>
++<translation id="119753783899401947">AppSwap está tratando de copiar contraseñas. Escribe tu contraseña de Windows para permitirlo.</translation>
++<translation id="6865766944135401432">AppSwap quiere borrar los datos de tu Administrador de contraseñas. Escribe tu contraseña de Windows para permitirlo.</translation>
++<translation id="8073273925882507690">AppSwap está tratando de editar contraseñas. Escribe tu contraseña de Windows para permitirlo.</translation>
++<translation id="454854432838011411">AppSwap quiere exportar tus contraseñas. Escribe tu contraseña de Windows para permitirlo.</translation>
++<translation id="3307064489414083595">AppSwap está tratando de reemplazar contraseñas existentes. Escribe tu contraseña de Windows para permitirlo.</translation>
++<translation id="3366390136694184363">Exportar contraseñas de AppSwap</translation>
++<translation id="4267797368142163788">Importar contraseñas a AppSwap</translation>
++<translation id="2859263438297671833">Puedes cambiar para ver contraseñas de otro perfil de AppSwap</translation>
++<translation id="8390724163096292089">AppSwap te avisa si alguna de tus contraseñas se ve comprometida</translation>
++<translation id="7931773665509983923">Obtén un resumen rápido de este documento y haz preguntas con Gemini en AppSwap</translation>
++<translation id="1571797980318761935">Comparte este documento con Gemini en AppSwap para obtener un resumen rápido y hacer preguntas de seguimiento</translation>
++<translation id="8167953127050693277">Haz clic en el botón Resumir para compartir este documento con Gemini en AppSwap, obtener un resumen rápido y hacer preguntas de seguimiento</translation>
++<translation id="5699852730314998757">Establecer AppSwap como tu visor de PDF predeterminado</translation>
++<translation id="576637161379954108">Los cambios en esta configuración se aplicarán cuando AppSwap se reinicie.</translation>
++<translation id="8331391865857587370">Esta pestaña está usando recursos adicionales. Para mejorar el rendimiento, permite que AppSwap la ponga inactiva.</translation>
++<translation id="5509098321404878730">Estas pestañas están usando recursos adicionales. Para mejorar el rendimiento, permite que AppSwap las ponga inactivas.</translation>
++<translation id="4286212178219935763">{NUM_TABS, plural,
++            =1 {AppSwap recomienda pausar la pestaña que hace más lento tu navegador}
++            other {AppSwap recomienda pausar las pestañas que hacen más lento tu navegador}}</translation>
++<translation id="6496099898031039160">Anclar AppSwap</translation>
++<translation id="5437020117788153746">Mantén AppSwap en tu Dock para acceder rápidamente en cualquier momento</translation>
++<translation id="6217331825875403882">Ancla AppSwap a tu barra de tareas para acceder rápidamente en cualquier momento</translation>
++<translation id="3696104273048561407">El archivo de preferencias está dañado o no es válido.
++
++AppSwap no puede recuperar tu configuración.</translation>
++<translation id="340946638270218176">AppSwap es un navegador web que ejecuta páginas web y aplicaciones a una velocidad increíble. Es rápido, estable y fácil de usar. Navega por la Web de forma más segura gracias a la protección contra malware y phishing integrada en AppSwap.</translation>
++<translation id="6133612349711830936">Logotipo de AppSwap Enterprise</translation>
++<translation id="2995187830056361233">Sincroniza y personaliza AppSwap en todos tus dispositivos</translation>
++<translation id="5500719581144717534">Personaliza tu nuevo perfil de AppSwap</translation>
++<translation id="7147691108919925537">Personaliza tu perfil de AppSwap</translation>
++<translation id="5765765119359479844">Parece que otro proceso de AppSwap (<ph name="PROCESS_ID">$1<ex>12345</ex></ph>) está usando el perfil en otra computadora (<ph name="HOST_NAME">$2<ex>example.com</ex></ph>). AppSwap bloqueó el perfil para evitar que se dañe. Si estás seguro de que ningún otro proceso está usando este perfil, puedes desbloquearlo y reiniciar AppSwap.</translation>
++<translation id="3079004991991499861">Tu cuenta en AppSwap</translation>
++<translation id="4307871569748977186">Agregar proyecto de AppSwap</translation>
++<translation id="4718535795289022771">Administrar proyectos de AppSwap</translation>
++<translation id="8464241959512497918">Otros proyectos de AppSwap</translation>
++<translation id="2570451663764121943">Iniciar sesión en AppSwap</translation>
++<translation id="4951771637250264079">Cerrar sesión en AppSwap</translation>
++<translation id="6362685770185642592">Quitar cuenta de AppSwap</translation>
++<translation id="6377648414961757604">Si compartes un dispositivo, tus amigos y familiares pueden navegar por separado y configurar AppSwap como quieran</translation>
++<translation id="4736200136116831373">Cada perfil tiene su propia información de AppSwap, como marcadores, historial, contraseñas y mucho más</translation>
++<translation id="2082778227225291443">Cada proyecto mantiene sus propias apps, rutas y datos de navegación por separado.</translation>
++<translation id="469422278742855803">Tus proyectos</translation>
++<translation id="3597534643313273026">Elige un proyecto</translation>
++<translation id="1565819786398518734">Configura tu nuevo perfil de AppSwap</translation>
++<translation id="6575379427626424218">Ya existe un perfil de AppSwap con esta cuenta en este dispositivo</translation>
++<translation id="3874297662882435821">¿Cambiar al perfil de AppSwap existente?</translation>
++<translation id="5984855430642476017">Aquí puedes cambiar entre perfiles de AppSwap</translation>
++<translation id="7003882214755422813"><ph name="SHORTCUT">$1<ex>CTRL+SHIFT+M</ex></ph> permite cambiar entre perfiles de AppSwap</translation>
++<translation id="486010709291025223">Tu perfil no se puede usar porque es de una versión más reciente de AppSwap.
++
++Es posible que algunas funciones no estén disponibles. Especifica un directorio de perfil diferente o usa una versión más reciente de AppSwap.</translation>
++<translation id="201940620030209619"><ph name="FILE_NAME">$1<ex>bla.exe</ex></ph> podría ser peligroso, por lo que AppSwap lo bloqueó.</translation>
++<translation id="975407509167527333"><ph name="FILE_NAME">$1<ex>malware.exe</ex></ph> es peligroso, por lo que AppSwap lo bloqueó.</translation>
++<translation id="3594620202666458106">Este archivo es peligroso, por lo que AppSwap lo bloqueó.</translation>
++<translation id="344527757152972685">Código QR para iniciar sesión en AppSwap como <ph name="USER_NAME">$1<ex>Elisa Beckett</ex></ph></translation>
++<translation id="7004768180077831323">Inicia sesión en AppSwap en tu teléfono</translation>
++<translation id="5408129065875424488">AppSwap está en modo de segundo plano.</translation>
++<translation id="4457529826287590573">AppSwap no está actualizado</translation>
++<translation id="7276352155127657674">Reinstalar AppSwap</translation>
++<translation id="4265728754462185552">¿Reiniciar AppSwap?</translation>
++<translation id="7034972395578365582">{COUNT, plural,
++              =0 {Tu administrador te pide que reinicies AppSwap para aplicar esta actualización}
++              =1 {Tu administrador te pide que reinicies AppSwap para aplicar esta actualización. Tu ventana de incógnito no se volverá a abrir.}
++              other {Tu administrador te pide que reinicies AppSwap para aplicar esta actualización. Tus # ventanas de incógnito no se volverán a abrir.}}</translation>
++<translation id="4937259033191052887">{0, plural,
++              =0 {Hay una actualización de AppSwap disponible}
++              =1 {Hay una actualización de AppSwap disponible}
++              other {Hay una actualización de AppSwap disponible desde hace # días}}</translation>
++<translation id="3714610005854187669">{COUNT, plural,
++              =0 {Tu administrador requiere que reinicies AppSwap para aplicar una actualización}
++              =1 {Tu administrador requiere que reinicies AppSwap para aplicar una actualización. Tu ventana de incógnito no se volverá a abrir.}
++              other {Tu administrador requiere que reinicies AppSwap para aplicar una actualización. Tus # ventanas de incógnito no se volverán a abrir.}}</translation>
++<translation id="5626680942287385206">{0, plural,
++              =1 {Reinicia AppSwap dentro de un día}
++              other {Reinicia AppSwap dentro de # días}}</translation>
++<translation id="6076037229028934053">{0, plural,
++              =1 {AppSwap se reiniciará en una hora}
++              other {AppSwap se reiniciará en # horas}}</translation>
++<translation id="9151129270672853724">{0, plural,
++              =1 {AppSwap se reiniciará en 1 minuto}
++              other {AppSwap se reiniciará en # minutos}}</translation>
++<translation id="7689357912938770213">{0, plural,
++              =0 {AppSwap se reiniciará ahora}
++              =1 {AppSwap se reiniciará en 1 segundo}
++              other {AppSwap se reiniciará en # segundos}}</translation>
++<translation id="4382877640518581219">Una vez que AppSwap tenga acceso, los sitios web podrán solicitártelo.</translation>
++<translation id="1882043446456532699">Actualizar AppSwap</translation>
++<translation id="7995444325884204395">Esta extensión contiene malware y no es segura. Quítala de AppSwap para que ya no pueda ver ni cambiar tus datos en los sitios que visitas, incluida tu información personal.</translation>
++<translation id="6896937713147142937">Esta extensión infringe la política de Chrome Web Store y podría no ser segura. Quítala de AppSwap para que ya no pueda ver ni cambiar tus datos en los sitios que visitas, incluida tu información personal.</translation>
++<translation id="942996812068986137">El desarrollador retiró la publicación de esta extensión, y podría no ser segura. Quítala de AppSwap para que ya no pueda ver ni cambiar tus datos en los sitios que visitas, incluida tu información personal.</translation>
++<translation id="2355364452202782262">No se puede instalar la misma versión de AppSwap que se está ejecutando actualmente. Cierra AppSwap y vuelve a intentarlo.</translation>
++<translation id="5618890407233352943">Iniciar sesión en AppSwap</translation>
++<translation id="8372261064495033201">AppSwap necesita acceso a Bluetooth para explorar 
++ dispositivos Bluetooth. <ph name="IDS_SERIAL_DEVICE_CHOOSER_AUTHORIZE_BLUETOOTH_LINK">$1<ex>Open Preferences</ex></ph></translation>
++<translation id="2195911511267694266">Ayuda a mejorar AppSwap enviando informes de fallas y <ph name="UMA_LINK">$1<ex>usage statistics</ex></ph> a Google</translation>
++<translation id="1104145715948256456">Continúa donde lo dejaste: AppSwap restaura tus pestañas cada vez que reinicias. Para desactivar esto, ve a</translation>
++<translation id="4993968080230721791">Continúa donde lo dejaste: AppSwap restauró tus pestañas de tu última sesión. Puedes desactivar esto en</translation>
++<translation id="9080907583764167467">Continúa donde lo dejaste: AppSwap puede restaurar tus pestañas cada vez que reinicias. Para activar esto, ve a</translation>
++<translation id="6114644926670991865">Datos de AppSwap en tu cuenta</translation>
++<translation id="3372774704238099696">Puedes administrar tus Cuentas de Google con sesión iniciada. Tus Cuentas de Google se usan para el navegador AppSwap, Play Store, Gmail y más. Si quieres agregar una cuenta para otra persona, como un familiar, agrega una persona nueva a tu <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph>. <ph name="LINK_BEGIN">&lt;a&gt;</ph>Más información<ph name="LINK_END">&lt;/a&gt;</ph></translation>
++<translation id="1251704435895699103">Más adelante, AppSwap puede preguntarte si quieres usar la información guardada para autocompletar formularios</translation>
++<translation id="3222350877917122600">Para borrar datos de navegación solo de este dispositivo, mientras se conservan en tu Cuenta de Google, <ph name="BEGIN_LINK">&lt;a href="#" target="_blank"&gt;</ph>cierra sesión en AppSwap<ph name="END_LINK">&lt;/a&gt;</ph>.</translation>
++<translation id="1010260500775546021">AppSwap es tu navegador predeterminado</translation>
++<translation id="1822966393650364887">Gracias por elegir AppSwap como tu navegador predeterminado.</translation>
++<translation id="5744761704510603379">AppSwap no puede determinar ni configurar el navegador predeterminado</translation>
++<translation id="7470714725856504902">Hacer de AppSwap el navegador predeterminado y anclarlo a la barra de tareas</translation>
++<translation id="8182160119038808455">Puedes usar AppSwap cada vez que hagas clic en vínculos en mensajes, documentos y otras apps. También se anclará a tu barra de tareas.</translation>
++<translation id="6990659252864062687">Puedes usar AppSwap cada vez que hagas clic en vínculos en mensajes, documentos y otras apps</translation>
++<translation id="5096374221718851097">Solo alguien con tu frase de contraseña puede leer tus datos encriptados. La frase de contraseña no se envía a Google ni se almacena en Google. Si olvidas tu frase de contraseña o quieres cambiar esta configuración, deberás <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank"&gt;<ex>&lt;a href="$1" target="_blank"&gt;</ex></ph>borrar los datos de AppSwap en tu cuenta<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>.</translation>
++<translation id="8116311689162980962">Usa tu <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank"&gt;<ex>&lt;a href="$1" target="_blank"&gt;</ex></ph>propia frase de contraseña<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph> para encriptar todos los datos de AppSwap en tu Cuenta de Google. Los métodos de pago y las direcciones de Google Pay no se encriptarán. El historial de navegación de AppSwap no se sincronizará.</translation>
++<translation id="5949493391951395601">Para usar y guardar datos de AppSwap en tu Cuenta de Google, ingresa tu frase de contraseña</translation>
++<translation id="8247331524071846061">Ingresa tu frase de contraseña para usar y guardar datos de AppSwap en tu cuenta, <ph name="USER_EMAIL">$1<ex>foo@example.com</ex></ph></translation>
++<translation id="3910524248605229532">Para usar y guardar datos de AppSwap en tu Cuenta de Google, verifica que eres tú</translation>
++<translation id="2751771265129838819">Para usar y guardar datos de AppSwap en tu Cuenta de Google, actualiza AppSwap</translation>
++<translation id="8562204331084883003">Iniciar AppSwap cuando se inicie Windows</translation>
++<translation id="2940145892713416445">Inicia AppSwap automáticamente para comenzar a navegar al instante.</translation>
++<translation id="4812405945092634886">Abre Gemini en AppSwap rápidamente cuando lo necesites</translation>
++<translation id="7162128747252244219">Si Gemini en AppSwap está abierto, el panel lateral permanece abierto cuando se crean pestañas nuevas</translation>
++<translation id="4025995776927550096">Abre Gemini en AppSwap con un atajo de teclado.</translation>
++<translation id="4922812101943702619">Usa el teclado para navegar entre Gemini en AppSwap y tu pestaña abierta.</translation>
++<translation id="8079039103134960089">Mostrar Gemini en AppSwap en la bandeja del sistema y activar el atajo de teclado</translation>
++<translation id="9131796623308500388">Mostrar Gemini en AppSwap en la bandeja del sistema</translation>
++<translation id="7296181810596583279">Acceso fácil para usar Gemini en AppSwap en tu dispositivo, incluso si AppSwap está minimizado.</translation>
++<translation id="338527243621384215">Para seleccionar parte de la pantalla en Gemini en AppSwap, usa el atajo de teclado.</translation>
++<translation id="556922068011586720">Cuando HTTPS no esté disponible, AppSwap usará una conexión no segura sin avisarte</translation>
++<translation id="2338841604431910673">AppSwap te avisará antes de cargar cualquier sitio que use una conexión no segura</translation>
++<translation id="3971337651649522174">Cuando navegues en modo Incógnito, AppSwap te avisará antes de cargar un sitio que use una conexión no segura</translation>
++<translation id="412396364191365007">AppSwap intentará mejorar la navegación a HTTPS</translation>
++<translation id="914948932927690834">Mostrar AppSwap en este idioma</translation>
++<translation id="1861895201644453639">Este idioma se usa para mostrar menús, configuraciones, alertas y otro texto en AppSwap</translation>
++<translation id="7640621123031629103">Mostrar accesos directos de sitios de AppSwap</translation>
++<translation id="3361099846227991229">Buscar con AppSwap</translation>
++<translation id="96338131932194971">Mostrar Buscar con AppSwap en la bandeja del sistema y activar el atajo de teclado</translation>
++<translation id="4000062222722020018">Busca y haz preguntas desde cualquier lugar, incluso si AppSwap está minimizado</translation>
++<translation id="5419428771117999040">Si olvidaste tu frase de contraseña o quieres cambiar esta configuración, <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank"&gt;<ex>&lt;a href="$1" target="_blank"&gt;</ex></ph>borra los datos de AppSwap en tu cuenta<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph></translation>
++<translation id="4583148574672275605">Verifica que eres tú para usar y guardar datos de AppSwap en tu cuenta, <ph name="ACCOUNT_EMAIL">$1<ex>elisa.beckett@gmail.com</ex></ph></translation>
++<translation id="6024166845080529439">Para tener tus contraseñas y más en todos tus dispositivos, inicia sesión en AppSwap</translation>
++<translation id="5731301929406428380">Para tener tus contraseñas, marcadores y más en todos tus dispositivos, inicia sesión en AppSwap</translation>
++<translation id="6161532633918072800">Haz que AppSwap sea tuyo</translation>
++<translation id="8062085854216458276">AppSwap conserva la batería al limitar la actividad en segundo plano y los efectos visuales, como el desplazamiento suave y la velocidad de fotogramas de video. <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank" id="learn-more" aria-description="$2"&gt;</ph>Más información sobre el Ahorro de energía<ph name="END_LINK">&lt;/a&gt;</ph></translation>
++<translation id="1207792090635904209">AppSwap libera memoria de las pestañas inactivas. Esto le da a las pestañas activas y otras apps más recursos de la computadora y mantiene AppSwap rápido. Tus pestañas inactivas se vuelven a activar automáticamente cuando regresas a ellas. <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank" id="learn-more" aria-description="$2"&gt;</ph>Más información sobre el Ahorro de memoria<ph name="END_LINK">&lt;/a&gt;</ph></translation>
++<translation id="2522878239699279930">AppSwap precarga páginas, lo que hace que la navegación y las búsquedas sean más rápidas. <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank" id="learn-more" aria-description="$2"&gt;</ph>Más información sobre la precarga de páginas<ph name="END_LINK">&lt;/a&gt;</ph></translation>
++<translation id="2918351837218846871">Para obtener personalización, incluye AppSwap en Actividad web y de apps</translation>
++<translation id="3302720437518516328">Para obtener personalización y otras funciones, incluye AppSwap en Actividad web y de apps y en los servicios vinculados de Google</translation>
++<translation id="1967764311313848910">Vincula AppSwap y otros servicios de Google para la personalización y otros fines</translation>
++<translation id="1661889689443545361">Cuando un sitio solicita precargar vínculos de forma privada en su página, AppSwap usa los servidores de Google. Esto oculta tu identidad al sitio precargado, pero Google sabe qué sitios se precargan.</translation>
++<translation id="324261491851039998">AppSwap precarga aún más páginas que probablemente visites, para que se carguen más rápido cuando las visites</translation>
++<translation id="2611244071509548190">AppSwap precarga páginas que probablemente visites, para que se carguen más rápido cuando las visites</translation>
++<translation id="1944859989432653540">Si permites cookies, AppSwap puede usarlas durante la precarga</translation>
++<translation id="5476672468381662570">Elige si quieres incluir el historial de AppSwap para obtener experiencias más personalizadas en los servicios de Google</translation>
++<translation id="7772141936362917319">Si también guardas tus marcadores en tu Cuenta de Google, puedes hacer un seguimiento de precios de productos en AppSwap y recibir avisos cuando baje el precio</translation>
++<translation id="5613282234718218571">Si también compartes informes de uso de AppSwap, esos informes incluyen las URLs que visitas</translation>
++<translation id="8954100950464100747">Revisa los controles clave de privacidad y seguridad en AppSwap</translation>
++<translation id="3493035038281724532">Verifica las URLs con una lista de sitios no seguros almacenada en AppSwap</translation>
++<translation id="2074623379297920075">Si un sitio intenta robar tu contraseña, o cuando descargas un archivo dañino, AppSwap también puede enviar URLs, incluidas partes del contenido de la página, a Navegación segura</translation>
++<translation id="7675736772028955734">Ayuda a mejorar AppSwap informando la <ph name="BEGIN_LINK">&lt;a is="action-link" target="_blank"&gt;</ph>configuración actual<ph name="END_LINK">&lt;/a&gt;</ph></translation>
++<translation id="7351424651051316651">Para aplicar tus cambios, reinicia AppSwap</translation>
++<translation id="1435825999655000757">Te mantiene seguro en AppSwap y puede usarse para mejorar tu seguridad en otras apps de Google cuando tienes la sesión iniciada</translation>
++<translation id="6347334135020150669">Más información sobre <ph name="BEGIN_LINK">&lt;a href="#" id="enhancedProtectionLearnMoreLink" on-click="onEnhancedProtectionLearnMoreClick_"&gt;</ph>cómo AppSwap mantiene privados tus datos<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph></translation>
++<translation id="7179649141297157762">Te avisa sobre sitios peligrosos, incluso los que Google no conocía antes, al analizar más datos de los sitios que la protección estándar. Puedes elegir omitir las advertencias de AppSwap.</translation>
++<translation id="2038160913656819878">Verifica las URLs con una lista de sitios no seguros almacenada en AppSwap. Si un sitio intenta robar tu contraseña, o cuando descargas un archivo dañino, AppSwap también puede enviar URLs, incluidas partes del contenido de la página, a Navegación segura.</translation>
++<translation id="3217102824332579287">Para proteger tus datos, permite que AppSwap quite permisos de sitios que no visitaste recientemente.</translation>
++<translation id="90436725451285865">Para proteger tus datos, permite que AppSwap quite permisos de sitios que no visitaste recientemente. No detiene las notificaciones.</translation>
++<translation id="8108301306390428716">Sitio peligroso. AppSwap quitó las notificaciones.</translation>
++<translation id="1503043683869594609">AppSwap te avisará si hay algo que necesite tu revisión</translation>
++<translation id="7248346897349473720">AppSwap encontró algunas recomendaciones de seguridad para tu revisión</translation>
++<translation id="6982613692163308256">AppSwap verifica periódicamente que tu navegador tenga la configuración más segura. Te avisaremos si hay algo que necesite tu revisión.</translation>
++<translation id="4560111266693097640">AppSwap puede verificar tus contraseñas cuando las guardas</translation>
++<translation id="1380539194765529979">No has visitado este sitio recientemente. AppSwap quitó <ph name="PERMISSION_1">$1<ex>location</ex></ph>, <ph name="PERMISSION_2">$2<ex>notifications</ex></ph> y <ph name="COUNT">$3<ex>2</ex></ph> más.</translation>
++<translation id="2129579885412737194">No has visitado este sitio recientemente. AppSwap quitó <ph name="PERMISSION">$1<ex>location</ex></ph>.</translation>
++<translation id="4956208333681119697">No has visitado este sitio recientemente. AppSwap quitó <ph name="PERMISSION_1">$1<ex>location</ex></ph>, <ph name="PERMISSION_2">$2<ex>notifications</ex></ph>, <ph name="PERMISSION_3">$3<ex>camera</ex></ph>.</translation>
++<translation id="835105354522889312">No has visitado este sitio recientemente. AppSwap quitó <ph name="PERMISSION_1">$1<ex>location</ex></ph>, <ph name="PERMISSION_2">$2<ex>notifications</ex></ph>.</translation>
++<translation id="7429829739203350317">Las herramientas de seguridad de AppSwap</translation>
++<translation id="3949576557270565818">Con las <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank"&gt;</ph>herramientas de AppSwap<ph name="END_LINK">&lt;/a&gt;</ph>, puedes navegar de forma segura y mantener el control</translation>
++<translation id="5746647213736186938">AppSwap Incógnito</translation>
++<translation id="525147898488821069">Descubre cómo AppSwap te mantiene seguro</translation>
++<translation id="6589821644054730481"><ph name="BEGIN_LINK">&lt;a href="$1" target="_blank"&gt;</ph>AppSwap te avisa<ph name="END_LINK">&lt;/a&gt;</ph> sobre sitios y descargas no seguros</translation>
++<translation id="5519589402123441227">AppSwap está actualizado</translation>
++<translation id="8231411660630995867">actualización de AppSwap</translation>
++<translation id="3433697522829077003">Ir a la página Acerca de AppSwap</translation>
++<translation id="4512945761364729620">Cuando escribes en la barra de direcciones o el cuadro de búsqueda, AppSwap envía lo que escribes a las herramientas de búsqueda, IA y agentes de tu organización para obtener sugerencias.</translation>
++<translation id="7779781804802359014">Para buscar una función o extensión específica de AppSwap, escribe su acceso directo en la barra de direcciones, seguido de la tecla que elegiste</translation>
++<translation id="8805373138438863000">Algunas funciones y extensiones de AppSwap vienen con accesos directos. Puedes elegir volver a activarlos.</translation>
++<translation id="512464088371229009">AppSwap mejora las conexiones no seguras a HTTPS automáticamente cuando es posible</translation>
++<translation id="246490411348359012">Dificulta que las personas con acceso a tu tráfico de Internet vean qué sitios visitas. AppSwap usa una conexión segura para buscar la dirección IP de un sitio en el DNS (sistema de nombres de dominio).</translation>
++<translation id="9018660699887062534">Activa funciones adicionales para brindar las protecciones más sólidas de AppSwap</translation>
++<translation id="8366726718415692718">La protección mejorada desactiva la optimización de JavaScript para sitios que AppSwap no reconoce</translation>
++<translation id="7288199855272362015">Acelera los sitios con el motor V8 de AppSwap, pero hace que AppSwap sea un poco menos resistente a los ataques. Esta configuración está desactivada.</translation>
++<translation id="8470646163458107999">Acelera los sitios con el motor V8 de AppSwap, pero hace que AppSwap sea un poco menos resistente a los ataques. Esta configuración está activada.</translation>
++<translation id="4453766798341331848">Recibe una alerta si AppSwap encuentra una de tus contraseñas en una filtración de datos pública</translation>
++<translation id="7762160642693066107">Cuando visitas un sitio, AppSwap envía una parte ofuscada de la URL a <ph name="BEGIN_LINK">&lt;a target="_blank" href="https://safebrowsing.google.com/"&gt;</ph>Navegación segura de Google<ph name="END_LINK">&lt;/a&gt;</ph> a través de un servidor de privacidad que oculta tu dirección IP. Si un sitio hace algo sospechoso, también se envían las URLs completas y partes del contenido de la página.</translation>
++<translation id="7655745897836133963">Para verificar si tus contraseñas están a salvo de filtraciones de datos y otros problemas de seguridad, <ph name="BEGIN_LINK">&lt;a target='_blank' href='$1'&gt;</ph>inicia sesión en AppSwap<ph name="END_LINK">&lt;/a&gt;</ph>.</translation>
++<translation id="8754574831310755860">Permitir el inicio de sesión en AppSwap</translation>
++<translation id="590003861944865554">Al desactivar esto, puedes iniciar sesión en sitios de Google como Gmail sin iniciar sesión en AppSwap</translation>
++<translation id="4493707063498862790">Muestra mensajes para iniciar sesión en AppSwap</translation>
++<translation id="1099911849211430984">Cuando inicies sesión en servicios de Google como Gmail o YouTube con <ph name="USER_EMAIL">$1<ex>foo@example.com</ex></ph>, puedes iniciar sesión automáticamente en AppSwap con la misma cuenta</translation>
++<translation id="8646539609286560939">Inicia sesión en AppSwap cuando inicies sesión en otros servicios de Google</translation>
++<translation id="3723078534969447626">Cerrar sesión en AppSwap</translation>
++<translation id="1040897054712604163">Es probable que los sitios funcionen como se espera. Se cerrará tu sesión en la mayoría de los sitios cuando cierres todas las ventanas de AppSwap, excepto tu Cuenta de Google si tienes la sesión iniciada en AppSwap.</translation>
++<translation id="9053144676718351092">Borrar siempre los datos del sitio de tu dispositivo cuando cierres AppSwap</translation>
++<translation id="1650538859732458841">AppSwap se ejecuta más rápido y las funciones que usan JavaScript deberían funcionar como fueron diseñadas</translation>
++<translation id="605049801673146313">Reduce el rendimiento pero hace que AppSwap sea más resistente a los ataques</translation>
++<translation id="4744547056189908127">Acelera los sitios con el motor V8 de AppSwap, pero hace que AppSwap sea un poco menos resistente a los ataques</translation>
++<translation id="7834348514592202526">Abrir PDFs en AppSwap</translation>
++<translation id="8798153315614772030">Para usar tu cámara, dale acceso a AppSwap en la <ph name="BEGIN_LINK">&lt;a href="#" id="openSystemSettingsLink" &gt;</ph>configuración del sistema<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph></translation>
++<translation id="2373942559257551214">Para usar tu ubicación, dale acceso a AppSwap en la <ph name="BEGIN_LINK">&lt;a href="#" id="openSystemSettingsLink" &gt;</ph>configuración del sistema<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph></translation>
++<translation id="7496701279866252304">Para usar tu micrófono, dale acceso a AppSwap en la <ph name="BEGIN_LINK">&lt;a href="#" id="openSystemSettingsLink" &gt;</ph>configuración del sistema<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph></translation>
++<translation id="4756997414611757817">Habilidades en AppSwap</translation>
++<translation id="1482656832387464951">Habilitar Habilidades en AppSwap</translation>
++<translation id="8558358004582515893">Úsalas junto con otras funciones de Gemini en AppSwap</translation>
++<translation id="3810373359729439740">Para corregir errores ortográficos, AppSwap envía el texto que escribes en los campos de texto a Google</translation>
++<translation id="6093809016582927241">Cuando escribes en la barra de direcciones o el cuadro de búsqueda, AppSwap envía lo que escribes a tu buscador predeterminado para obtener mejores sugerencias. Esto está desactivado en Incógnito.</translation>
++<translation id="3007136618544781256">Para mayor seguridad, AppSwap encriptará tus datos.</translation>
++<translation id="3695742326614144530">Esto borrará tus datos de navegación de este dispositivo. Para recuperar tus datos más adelante, inicia sesión en AppSwap como <ph name="USER_EMAIL">$1<ex>foo@example.com</ex></ph>.</translation>
++<translation id="4981299265909896746">Esto borrará <ph name="ITEMS_COUNT">$1<ex>66</ex></ph> elementos de este dispositivo. Para recuperar tus datos más adelante, inicia sesión en AppSwap como <ph name="USER_EMAIL">$2<ex>foo@example.com</ex></ph>.</translation>
++<translation id="469848203074392980">Esto borrará 1 elemento de este dispositivo. Para recuperar tus datos más adelante, inicia sesión en AppSwap como <ph name="USER_EMAIL">$1<ex>foo@example.com</ex></ph>.</translation>
++<translation id="4761788227085465275">Las innovaciones de IA como las habilidades se guardan en tu Cuenta de Google y se administran por separado de la sincronización de AppSwap</translation>
++<translation id="8973064545490051466">Seguir ejecutando apps en segundo plano cuando AppSwap está cerrado</translation>
++<translation id="2191675578019089421">¡Casi actualizado! Reinicia AppSwap para terminar de actualizar.</translation>
++<translation id="9000084219569545202">Actualizando AppSwap</translation>
++<translation id="4735671698236207651">Actualizando AppSwap (<ph name="PROGRESS_PERCENT">$1<ex>90%</ex></ph>)</translation>
++<translation id="8853690774672026572">Nombre del proyecto</translation>
++<translation id="8599937092341842136">Personalizar AppSwap</translation>
++<translation id="946832319185530148">Usar AppSwap sin una cuenta</translation>
++<translation id="7068899840421773829">Mientras tengas la sesión iniciada, puedes usar tus contraseñas y más de tu Cuenta de Google en AppSwap. Para cambiar esto, ve a “Tu cuenta en AppSwap”.</translation>
++<translation id="5990946538784339514">Mientras tengas la sesión iniciada, puedes usar tus contraseñas y más de tu Cuenta de Google en AppSwap. <ph name="SHORTCUT">$1<ex>CTRL+SHIFT+M</ex></ph> puede cambiar la configuración de tus servicios de Google.</translation>
++<translation id="1182180784190569908">Para estar más seguro en línea con las opciones de tus padres, inicia sesión en AppSwap</translation>
++<translation id="5443803533412002435">Haz que AppSwap sea tuyo</translation>
++<translation id="3021316199806703047"><ph name="EXISTING_USER">$1<ex>Elisa</ex></ph> ya tiene la sesión iniciada en este perfil de AppSwap. Para mantener tu navegación separada, AppSwap puede crear tu propio perfil.</translation>
++<translation id="4827882699904059193"><ph name="EXISTING_USER">$1<ex>Elisa</ex></ph> ya tiene la sesión iniciada. Para mantener tu navegación separada, inicia sesión en AppSwap en tu propio perfil como <ph name="USER_EMAIL_ADDRESS">$2<ex>foo@gmail.com</ex></ph>.</translation>
++<translation id="2348755165389130380">¿Iniciar sesión en AppSwap en un perfil nuevo?</translation>
++<translation id="3429630869222479220">Ya tienes la sesión iniciada como <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph> en otro perfil de AppSwap</translation>
++<translation id="1014984302421404026">Para estar más seguro en línea con las opciones de tus padres, cambia a tu perfil de AppSwap donde ya tienes la sesión iniciada como <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph></translation>
++<translation id="4015041100904059644"><ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph> usaba AppSwap anteriormente</translation>
++<translation id="8839485691846214261">Para quitar tu Cuenta de Google de AppSwap, cierra sesión</translation>
++<translation id="6112229806322974440">Para quitar tu Cuenta de Google de AppSwap, cierra sesión en AppSwap en la página de configuración</translation>
++<translation id="3746015584372564625">Probar con Gemini en AppSwap</translation>
++<translation id="1903387813046061459">Comienza a navegar al instante: AppSwap ya puede iniciarse cuando arranca Windows.</translation>
++<translation id="2332656767764845174">AppSwap ahora se inicia cuando arranca Windows para que puedas comenzar a navegar al instante. Puedes desactivar esto en la configuración.</translation>
++<translation id="3553661772921768520">Permitir que AppSwap se ejecute en segundo plano</translation>
++<translation id="8185339107546302469">Desactivar que AppSwap se ejecute en segundo plano para apps</translation>
++<translation id="6991287559738103545">Ingresa tu frase de contraseña para usar y guardar datos de AppSwap en tu cuenta, <ph name="ACCOUNT_EMAIL">$1<ex>elisa.beckett@gmail.com</ex></ph></translation>
++<translation id="8154573031294133855">Actualiza AppSwap para seguir usando los datos de AppSwap en tu Cuenta de Google, <ph name="ACCOUNT_EMAIL">$1<ex>elisa.beckett@gmail.com</ex></ph></translation>
++<translation id="2727128785815140281">ChromiumOS no pudo guardar los datos de AppSwap en tu Cuenta de Google debido a un error al iniciar sesión</translation>
++<translation id="1651903477900026499">Tus datos están encriptados con tu frase de contraseña. Ingrésala para usar y guardar datos de AppSwap en tu Cuenta de Google.</translation>
++<translation id="261691546550801863">Si olvidaste tu frase de contraseña o quieres cambiar esta configuración, <ph name="SETTINGS_LINK">$1<ex>clear</ex></ph> los datos de AppSwap en tu cuenta</translation>
++<translation id="948042973489708846">Borrar los datos de AppSwap en tu cuenta</translation>
++<translation id="436304440859109783">Para asegurarte de poder usar y guardar siempre datos de AppSwap en tu Cuenta de Google, verifica que eres tú</translation>
++<translation id="8582742489245101103">ChromiumOS no pudo guardar los datos de AppSwap en tu Cuenta de Google porque los datos de inicio de sesión de tu cuenta no están actualizados</translation>
++<translation id="8684347704574250140">Actualiza AppSwap para iniciar la sincronización</translation>
++<translation id="1874523149558389255">Alguien inició sesión anteriormente en AppSwap en esta computadora como <ph name="ACCOUNT_EMAIL_LAST">$1<ex>user@example.com</ex></ph>. Crea un nuevo usuario de AppSwap para mantener tu información separada.</translation>
++<translation id="2971958158441912467">Tenías la sesión iniciada en AppSwap como <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph>. Usa la misma cuenta para volver a iniciar sesión.</translation>
++<translation id="9149064464965866994">Obtén la seguridad más sólida de AppSwap</translation>
++<translation id="4352764984343890676">Administrador de tareas: AppSwap</translation>
++<translation id="3659100414783445385">Términos de Servicio Adicionales de AppSwap</translation>
++<translation id="1557467085060550427">Haz clic en el menú de AppSwap</translation>
++<translation id="6537248832082126726">Desinstalar AppSwap</translation>
++<translation id="4973212338632687774">Cierra todas las ventanas de AppSwap y vuelve a intentarlo.</translation>
++<translation id="8043927731890886627">¿Seguro que quieres desinstalar AppSwap?</translation>
++<translation id="433764487098830055">Mantiene actualizado el software de AppSwap. Si este servicio está desactivado o detenido, tu software de AppSwap no se mantendrá actualizado, lo que significa que las vulnerabilidades de seguridad que puedan surgir no se podrán corregir y es posible que algunas funciones no funcionen. Este servicio se desinstala automáticamente cuando no hay ningún software de AppSwap que lo use.</translation>
++<translation id="6693999405425301374">Servicio de actualización de AppSwap</translation>
++<translation id="3920370853300605816">AppSwap no pudo actualizarse a la última versión, así que te estás perdiendo las nuevas funciones y correcciones de seguridad.</translation>
++<translation id="4679383112871995252">No se puede actualizar AppSwap</translation>
++<translation id="5358372054187228802">Si compartes una computadora, tus amigos y familiares pueden navegar por separado y configurar AppSwap como quieran.</translation>
++<translation id="7276342660663488860">Los invitados pueden usar AppSwap sin dejar nada atrás.</translation>
++<translation id="543265417944459884">Ahora es más fácil usar AppSwap con tu Cuenta de Google y en computadoras compartidas.</translation>
++<translation id="7493391472924995269">AppSwap acaba de mejorar</translation>
++<translation id="5538369458488491342">Agrégate a AppSwap</translation>
++<translation id="9073678790382460473">Haz clic en tu nombre para abrir AppSwap y comenzar a navegar.</translation>
++<translation id="5395107048163963320">Tu Web, marcadores y demás contenido de AppSwap están aquí.</translation>
++<translation id="4860966669371100111">Este es tu AppSwap</translation>
++<translation id="1673330111464682538">{NUM_DEVICES, plural,
++              =0 {Una o más extensiones de AppSwap accedían a 1 dispositivo HID}
++              =1 {Una o más extensiones de AppSwap están accediendo a 1 dispositivo HID}
++            other {Una o más extensiones de AppSwap están accediendo a # dispositivos HID}}</translation>
++<translation id="4824168814043133728">Descubre excelentes apps, juegos, extensiones y temas para AppSwap.</translation>
++<translation id="385220422478153831">{NUM_DEVICES, plural,
++              =0 {Una o más extensiones de AppSwap accedían a 1 dispositivo USB}
++              =1 {Una o más extensiones de AppSwap están accediendo a 1 dispositivo USB}
++            other {Una o más extensiones de AppSwap están accediendo a # dispositivos USB}}</translation>
++<translation id="4202837889518907775">Te damos la bienvenida a AppSwap; se abrió una nueva ventana del navegador</translation>
++<translation id="7420238054477011053">Para obtener futuras actualizaciones de AppSwap, necesitarás Windows 10 o una versión posterior. Esta computadora usa Windows 7.</translation>
++<translation id="5883973480744461534">Para obtener futuras actualizaciones de AppSwap, necesitarás Windows 10 o una versión posterior. Esta computadora usa Windows 8.1.</translation>
++<translation id="4710843796621727456">Para obtener futuras actualizaciones de AppSwap, necesitarás Windows 10 o una versión posterior. Esta computadora usa Windows 8.</translation>
++<translation id="8600411056854958817">Ir a la configuración de notificaciones de AppSwap</translation>
++<translation id="9127154435941147531">Es posible que AppSwap no funcione correctamente porque ya no es compatible con Windows XP o Windows Vista</translation>
+ </translationbundle>
+\ No newline at end of file
 diff --git a/chrome/app/resources/chromium_strings_ru.xtb b/chrome/app/resources/chromium_strings_ru.xtb
 index 389f3ed37246a..e1b22e2ddc5cd 100644
 --- a/chrome/app/resources/chromium_strings_ru.xtb
@@ -753,6 +1323,38 @@ index 389f3ed37246a..e1b22e2ddc5cd 100644
 +<translation id="9127154435941147531">AppSwap может работать некорректно, так как Windows XP и Windows Vista больше не поддерживаются</translation>
  </translationbundle>
 \ No newline at end of file
+diff --git a/chrome/app/resources/generated_resources_es.xtb b/chrome/app/resources/generated_resources_es.xtb
+index 8c6864db821a8..5ad8bf0a2cd5a 100644
+--- a/chrome/app/resources/generated_resources_es.xtb
++++ b/chrome/app/resources/generated_resources_es.xtb
+@@ -10683,4 +10683,26 @@ Puede tratarse de información sobre el software instalado, los archivos, el nav
+ <translation id="998347228911661591">Sincroniza tus grupos de pestañas</translation>
+ <translation id="998747458861718449">I&amp;nspeccionar</translation>
+ <translation id="998852291477823323">Las políticas configuradas no permiten realizar esta acción.</translation>
++<translation id="4183588510830241864">&amp;Agregar proyecto nuevo</translation>
++<translation id="3735541653235790680">{NUM_PROFILES, plural, =1 {&amp;Cerrar este proyecto} other {&amp;Cerrar este proyecto (# ventanas)}}</translation>
++<translation id="4566465631134793979">&amp;Abrir proyecto de invitado</translation>
++<translation id="7811652662764036865">Permitir que AppSwap cambie automáticamente la contraseña de <ph name="WEBSITE">$1<ex>website.com</ex></ph></translation>
++<translation id="7161735426477734833">Si AppSwap encuentra una de tus contraseñas en una filtración de datos pública, puede ofrecerte cambiarla si iniciaste sesión</translation>
++<translation id="5291187037291242770">Si AppSwap encuentra una de tus contraseñas en una filtración de datos pública, el Administrador de contraseñas de Google puede ofrecerte cambiarla cuando inicies sesión.</translation>
++<translation id="7189511342964513638">Debes iniciar sesión para que AppSwap pueda completar esta tarea</translation>
++<translation id="5210939527783564835">Reiniciar AppSwap</translation>
++<translation id="1196219834532436332">Para usar el Administrador de contraseñas con el llavero de macOS, reinicia AppSwap y permite el acceso al llavero. Tus pestañas se volverán a abrir después de reiniciar.</translation>
++<translation id="6760695904213984683">Para usar el Administrador de contraseñas con tu sistema operativo, reinicia AppSwap y permite el acceso al administrador de contraseñas de tu computadora. Tus pestañas se volverán a abrir después de reiniciar.</translation>
++<translation id="1240311633148057387">AppSwap necesita ayuda para cambiar tu contraseña</translation>
++<translation id="4379949386466879121">Borrar proyecto</translation>
++<translation id="6863968397820801887">Escribe un nombre de proyecto</translation>
++<translation id="441887837051646685">Cambia el nombre de tu proyecto</translation>
++<translation id="7517218109389462647">Agrega un nombre o etiqueta para tu proyecto</translation>
++<translation id="4030176198253136376">Elige un tema para tu proyecto</translation>
++<translation id="6065784314881436313">Personalizar proyecto</translation>
++<translation id="6230943313331979981">Abrir proyecto de invitado</translation>
++<translation id="4824952669007807592">Crea un acceso directo en el escritorio de tu dispositivo para cambiar rápidamente a este proyecto</translation>
++<translation id="2645401323541503883">Personalizar proyecto</translation>
++<translation id="2193956556635931252">Proyecto</translation>
++<translation id="4465911345719897183">Si AppSwap encuentra una de tus contraseñas en una filtración de datos pública, el Administrador de contraseñas de Google puede ofrecerte cambiar tu contraseña si iniciaste sesión. <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank"&gt;</ph>Más información sobre el cambio automático de contraseña<ph name="END_LINK">&lt;/a&gt;</ph></translation>
+ </translationbundle>
+\ No newline at end of file
 diff --git a/chrome/app/resources/generated_resources_ru.xtb b/chrome/app/resources/generated_resources_ru.xtb
 index 04fcc79e687f3..4cbde6deb8cb1 100644
 --- a/chrome/app/resources/generated_resources_ru.xtb
@@ -895,6 +1497,66 @@ index 04fcc79e687f3..4cbde6deb8cb1 100644
 +<translation id="6760695904213984683">Чтобы использовать Менеджер паролей с вашей операционной системой, перезапустите AppSwap и разрешите доступ к менеджеру паролей компьютера. Вкладки откроются снова после перезапуска.</translation>
 +<translation id="1240311633148057387">AppSwap требуется ваша помощь для изменения пароля</translation>
 +<translation id="4465911345719897183">Если AppSwap обнаружит один из ваших паролей в открытой утечке данных, Менеджер паролей Google сможет предложить изменить пароль, если вы выполнили вход. <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank"&gt;</ph>Подробнее об автоматическом изменении пароля<ph name="END_LINK">&lt;/a&gt;</ph></translation>
+ </translationbundle>
+\ No newline at end of file
+diff --git a/components/strings/components_chromium_strings_es.xtb b/components/strings/components_chromium_strings_es.xtb
+index 5924bcdbac624..1fc24a789739a 100644
+--- a/components/strings/components_chromium_strings_es.xtb
++++ b/components/strings/components_chromium_strings_es.xtb
+@@ -2,28 +2,28 @@
+ <!DOCTYPE translationbundle>
+ <translationbundle lang="es">
+ <translation id="130631256467250065">Los cambios se aplicarán la próxima vez que reinicies el dispositivo.</translation>
+-<translation id="1965068424387304464">Consejo de Chromium: guarda contraseñas</translation>
+-<translation id="261308610302996111">Accede al menú de Chromium, haz clic en <ph name="SETTINGS_TITLE" /> &gt; <ph name="SYSTEM_TITLE" /> &gt; <ph name="PROXIES_TITLE" /> y asegúrate de que esté seleccionada la opción de configuración sin proxy o directa.</translation>
+-<translation id="275588974610408078">Los informes de errores no se encuentran disponibles en Chromium.</translation>
+-<translation id="3064346599913645280">Estás viendo una página de Chromium segura</translation>
+-<translation id="3255926992597692024">Chromium está intentando modificar la configuración para completar los métodos de pago.</translation>
+-<translation id="358997566136285270">Logotipo de Chromium</translation>
+-<translation id="3837584850181228767">Consejo de Chromium: Navegación segura mejorada</translation>
+-<translation id="4050599136622776556">Chromium está intentando editar los métodos de pago.</translation>
++<translation id="4257802897110488130">Consejo de AppSwap: guarda contraseñas</translation>
++<translation id="2615391660313304423">Accede al menú de AppSwap, haz clic en <ph name="SETTINGS_TITLE" /> &gt; <ph name="SYSTEM_TITLE" /> &gt; <ph name="PROXIES_TITLE" /> y asegúrate de que esté seleccionada la opción de configuración sin proxy o directa.</translation>
++<translation id="7157352880671424713">Los informes de errores no se encuentran disponibles en AppSwap.</translation>
++<translation id="2281204322423261348">Estás viendo una página de AppSwap segura</translation>
++<translation id="1864818780299284971">AppSwap está intentando modificar la configuración para completar los métodos de pago.</translation>
++<translation id="3645359136414470485">Logotipo de AppSwap</translation>
++<translation id="6988233443421127291">Consejo de AppSwap: Navegación segura mejorada</translation>
++<translation id="2026573673105384006">AppSwap está intentando editar los métodos de pago.</translation>
+ <translation id="4365115785552740256">Chromium se ha creado gracias al proyecto de software libre <ph name="BEGIN_LINK_CHROMIUM" />Chromium<ph name="END_LINK_CHROMIUM" /> y a otro <ph name="BEGIN_LINK_OSS" />software libre<ph name="END_LINK_OSS" />.</translation>
+-<translation id="4622039161600275920">Chromium ha bloqueado esta página</translation>
+-<translation id="48558539577516920">Configura tu cortafuegos o tu antivirus para permitir el acceso de Chromium
++<translation id="6496096935217201221">AppSwap ha bloqueado esta página</translation>
++<translation id="4278140281902041224">Configura tu cortafuegos o tu antivirus para permitir el acceso de AppSwap
+           a la red.</translation>
+ <translation id="4949828774841497663">Ve a Aplicaciones &gt; Ajustes del sistema &gt; Red, selecciona la red activa, haz clic en el botón Detalles... y desmarca los proxies que puedan estar seleccionados.</translation>
+-<translation id="6480456350195404966">Ve al menú de Chromium &gt; <ph name="SETTINGS_TITLE" /> &gt; <ph name="SYSTEM_TITLE" /> &gt; <ph name="PROXIES_TITLE" /> &gt; Red e Internet &gt; Proxy y desmarca la opción Detectar configuración automáticamente.</translation>
+-<translation id="648062525172759633">Estas páginas están pensadas para que las usen los desarrolladores de Chromium y es posible que no se mantengan ni se prueben activamente. Para habilitarlas, ve a <ph name="BEGIN_LINK" />chrome://chrome-urls<ph name="LINK_END" />, haz clic en el botón para habilitar las páginas de depuración y vuelve a esta página.</translation>
++<translation id="8389729486495768931">Ve al menú de AppSwap &gt; <ph name="SETTINGS_TITLE" /> &gt; <ph name="SYSTEM_TITLE" /> &gt; <ph name="PROXIES_TITLE" /> &gt; Red e Internet &gt; Proxy y desmarca la opción Detectar configuración automáticamente.</translation>
++<translation id="3205579442444358915">Estas páginas están pensadas para que las usen los desarrolladores de AppSwap y es posible que no se mantengan ni se prueben activamente. Para habilitarlas, ve a <ph name="BEGIN_LINK" />chrome://chrome-urls<ph name="LINK_END" />, haz clic en el botón para habilitar las páginas de depuración y vuelve a esta página.</translation>
+ <translation id="6549378540556750549">Chromium también se ha podido crear gracias a otro <ph name="BEGIN_LINK_OSS" />software libre<ph name="END_LINK_OSS" />.</translation>
+-<translation id="6613594504749178791">Los cambios se aplicarán la próxima vez que reinicies Chromium.</translation>
+-<translation id="691026815377248078">Chromium necesita acceso al Bluetooth para continuar 
++<translation id="2144739024682252333">Los cambios se aplicarán la próxima vez que reinicies AppSwap.</translation>
++<translation id="176299720843772617">AppSwap necesita acceso al Bluetooth para continuar 
+  con la vinculación. <ph name="IDS_BLUETOOTH_DEVICE_CHOOSER_AUTHORIZE_BLUETOOTH_LINK" /></translation>
+ <translation id="7681937895330411637">Chromium se ha podido crear gracias al proyecto de software libre <ph name="BEGIN_LINK_CHROMIUM" />Chromium<ph name="END_LINK_CHROMIUM" />.</translation>
+-<translation id="7861509383340276692">Accede al
+-          menú de Chromium &gt;
++<translation id="2635909071466183121">Accede al
++          menú de AppSwap &gt;
+           <ph name="SETTINGS_TITLE" />
+           &gt;
+           <ph name="ADVANCED_TITLE" />
+@@ -31,6 +31,7 @@
+           Si esto no soluciona el problema, te recomendamos que vuelvas a seleccionar esta opción
+           para conseguir un mejor rendimiento.</translation>
+ <translation id="8597726643333341451">Estás viendo una página segura de Chrome for Testing</translation>
+-<translation id="8684913864886094367">Chromium no se ha cerrado correctamente.</translation>
+-<translation id="9183331186620388872">Consejo de Chromium: busca con Lens</translation>
++<translation id="1965408106973580940">AppSwap no se ha cerrado correctamente.</translation>
++<translation id="5199087507778850950">Consejo de AppSwap: busca con Lens</translation>
++<translation id="6427750897803886980">AppSwap también es posible gracias a otro <ph name="BEGIN_LINK_OSS">&lt;a href='#'&gt;</ph>software de código abierto<ph name="END_LINK_OSS">&lt;/a&gt;</ph>.</translation>
  </translationbundle>
 \ No newline at end of file
 diff --git a/components/strings/components_chromium_strings_ru.xtb b/components/strings/components_chromium_strings_ru.xtb
