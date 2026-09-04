@@ -1,0 +1,1252 @@
+diff --git a/front_end/models/emulation/BUILD.gn b/front_end/models/emulation/BUILD.gn
+index 0e4bd445..0da56703 100644
+--- a/front_end/models/emulation/BUILD.gn
++++ b/front_end/models/emulation/BUILD.gn
+@@ -12,6 +12,7 @@ devtools_module("emulation") {
+   sources = [
+     "DeviceModeModel.ts",
+     "EmulatedDevices.ts",
++    "MultiDeviceSelectionModel.ts",
+   ]
+ 
+   ts_deps = [
+diff --git a/front_end/models/emulation/MultiDeviceSelectionModel.ts b/front_end/models/emulation/MultiDeviceSelectionModel.ts
+new file mode 100644
+index 00000000..b0684444
+--- /dev/null
++++ b/front_end/models/emulation/MultiDeviceSelectionModel.ts
+@@ -0,0 +1,343 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import * as Common from '../../core/common/common.js';
++import * as Root from '../../core/root/root.js';
++import * as SDK from '../../core/sdk/sdk.js';
++import type * as Protocol from '../../generated/protocol.js';
++
++import type {EmulatedDevice} from './EmulatedDevices.js';
++
++// One selected device's live background viewport: an independent, hidden
++// CDP target (see #createBackgroundTarget) navigated to the same URL as
++// the primary inspected page, with its own device-metrics override
++// applied directly (bypassing DeviceModeModel, which is a singleton bound
++// to the primary page target only -- see its own modelAdded()).
++interface BackgroundViewport {
++  device: EmulatedDevice;
++  target: SDK.Target.Target;
++}
++
++// Drives "multi-device" mode: when 2+ devices are selected in
++// DeviceModeToolbar's Dimensions control, this owns one independent,
++// hidden background target per selected device (beyond the ordinary
++// single-viewport DeviceModeModel path, which remains untouched and is
++// used as-is whenever 0 or 1 devices are selected -- see
++// DeviceModeToolbar.ts and DeviceModeView.ts). MultiDeviceView (a
++// UI.Widget.Widget) renders one DeviceViewportWidget per
++// BackgroundViewport, but owns none of this lifecycle itself -- it just
++// reacts to Events.SELECTION_CHANGED.
++export class MultiDeviceSelectionModel extends Common.ObjectWrapper.ObjectWrapper<EventTypes> implements
++    SDK.TargetManager.Observer {
++  readonly #targetManager: SDK.TargetManager.TargetManager;
++  #selection: EmulatedDevice[] = [];
++  readonly #viewports = new Map<EmulatedDevice, BackgroundViewport>();
++  // Devices currently being created/attached/navigated -- guards against a
++  // second setSelection() call racing an in-flight #ensureViewportFor()
++  // for the same device (e.g. rapid checkbox double-clicks).
++  readonly #pending = new Map<EmulatedDevice, Promise<BackgroundViewport|null>>();
++
++  private constructor(targetManager: SDK.TargetManager.TargetManager) {
++    super();
++    this.#targetManager = targetManager;
++    // Unscoped: TargetManager only auto-scopes the first non-FRAME/TAB
++    // target it creates, which will always be the primary page target,
++    // never one of our background targets -- a scoped observer would
++    // simply never see them removed (e.g. on a renderer crash).
++    this.#targetManager.observeTargets(this, {scoped: false});
++    this.#targetManager.addModelListener(
++        SDK.ResourceTreeModel.ResourceTreeModel, SDK.ResourceTreeModel.Events.PrimaryPageChanged,
++        this.#onPrimaryPageChanged, this);
++    window.addEventListener('beforeunload', () => {
++      // Best-effort, fire-and-forget: beforeunload can't reliably await
++      // async work. hidden:true targets are also torn down automatically
++      // when this session disconnects (see #createBackgroundTarget's own
++      // comment), so this is a courtesy, not the only cleanup path.
++      this.clear();
++    });
++  }
++
++  static instance(opts?: {forceNew: boolean}): MultiDeviceSelectionModel {
++    if (!Root.DevToolsContext.globalInstance().has(MultiDeviceSelectionModel) || opts?.forceNew) {
++      Root.DevToolsContext.globalInstance().set(
++          MultiDeviceSelectionModel,
++          // eslint-disable-next-line @devtools/no-instance-of-migrated-singletons
++          new MultiDeviceSelectionModel(SDK.TargetManager.TargetManager.instance()));
++    }
++    return Root.DevToolsContext.globalInstance().get(MultiDeviceSelectionModel);
++  }
++
++  selection(): EmulatedDevice[] {
++    return this.#selection;
++  }
++
++  isActive(): boolean {
++    return this.#selection.length >= 2;
++  }
++
++  viewportFor(device: EmulatedDevice): SDK.Target.Target|null {
++    return this.#viewports.get(device)?.target ?? null;
++  }
++
++  // `devices` is the full new selection (not a delta). Newly-added
++  // devices (only once the *overall* count is >= 2 -- a single selected
++  // device stays on the ordinary DeviceModeModel path) get a background
++  // viewport created; devices that no longer have a live viewport get
++  // theirs torn down. Dropping from >=2 back to <=1 tears down
++  // everything, handing control back to DeviceModeModel entirely.
++  //
++  // "Added"/"removed" are computed from #viewports (which devices
++  // actually have a live background target right now), not from a diff
++  // against the previous selection array: a device can be selected while
++  // the count is still <2 (no viewport created for it yet, see below),
++  // so when a second device brings the count to >=2 that first device
++  // still needs its viewport created even though it isn't "new" to the
++  // selection array.
++  async setSelection(devices: EmulatedDevice[]): Promise<void> {
++    this.#selection = devices;
++
++    if (devices.length < 2) {
++      // Only tear down viewports -- do NOT delegate to clear(), which
++      // also resets #selection to [] and would stomp the value just
++      // assigned above (e.g. selecting a single device would otherwise
++      // immediately snap back to an empty selection).
++      this.#disposeAllViewports();
++      this.dispatchEventToListeners(Events.SELECTION_CHANGED);
++      return;
++    }
++
++    const removed = [...this.#viewports.keys()].filter(device => !devices.includes(device));
++    const added = devices.filter(device => !this.#viewports.has(device));
++
++    for (const device of removed) {
++      this.#disposeViewport(device);
++    }
++
++    this.dispatchEventToListeners(Events.SELECTION_CHANGED);
++
++    // Fire off creation for newly-added devices; each resolves
++    // independently and re-notifies once its viewport is actually live,
++    // so tiles can appear one at a time rather than all-or-nothing.
++    for (const device of added) {
++      void this.#ensureViewportFor(device).then(() => {
++        if (this.#selection.includes(device)) {
++          this.dispatchEventToListeners(Events.SELECTION_CHANGED);
++        }
++      });
++    }
++  }
++
++  async clear(): Promise<void> {
++    this.#disposeAllViewports();
++    this.#selection = [];
++  }
++
++  #disposeAllViewports(): void {
++    const devices = [...this.#viewports.keys()];
++    for (const device of devices) {
++      this.#disposeViewport(device);
++    }
++  }
++
++  async #ensureViewportFor(device: EmulatedDevice): Promise<BackgroundViewport|null> {
++    const existingPending = this.#pending.get(device);
++    if (existingPending) {
++      return existingPending;
++    }
++    if (this.#viewports.has(device)) {
++      return this.#viewports.get(device) ?? null;
++    }
++
++    const promise = this.#createViewport(device);
++    this.#pending.set(device, promise);
++    const viewport = await promise;
++    this.#pending.delete(device);
++    if (viewport && this.#selection.includes(device)) {
++      this.#viewports.set(device, viewport);
++      return viewport;
++    }
++    // Selection changed while we were creating this (device got
++    // deselected again before its target finished attaching) -- don't
++    // leak the target we just created.
++    if (viewport) {
++      void viewport.target.targetAgent().invoke_closeTarget({targetId: viewport.target.id() as Protocol.Target.TargetID});
++    }
++    return null;
++  }
++
++  async #createViewport(device: EmulatedDevice): Promise<BackgroundViewport|null> {
++    const primaryTarget = this.#targetManager.primaryPageTarget();
++    const rootTarget = this.#targetManager.rootTarget();
++    if (!rootTarget) {
++      return null;
++    }
++    const url = primaryTarget?.inspectedURL() || 'about:blank';
++
++    const target = await this.#createBackgroundTarget(rootTarget, url);
++    if (!target) {
++      return null;
++    }
++
++    await this.#applyDevice(target, device);
++
++    return {device, target};
++  }
++
++  // Creates a hidden (not present in the real tab strip -- see the
++  // `hidden` CDP parameter's own doc comment in generated/protocol.ts:
++  // "observable via protocol, but not present in the tab UI strip... The
++  // life-time of the tab is limited to the life-time of the session")
++  // background target, then attaches to it so it becomes a normal,
++  // independently-controllable SDK.Target.Target -- see
++  // ui/helpers/OpenInNewTab.ts for the existing, shipping precedent this
++  // is modeled on.
++  async #createBackgroundTarget(rootTarget: SDK.Target.Target, url: string): Promise<SDK.Target.Target|null> {
++    // Deliberately omit `newWindow` entirely rather than passing `false`:
++    // it's a std::optional<bool> on the browser side
++    // (content/browser/devtools/protocol/target_handler.cc's
++    // TargetHandler::CreateTarget), and the hidden-target validation
++    // there checks `if (new_window)` -- i.e. whether the optional was
++    // supplied at all, not its value -- so an explicit `false` is
++    // rejected with "Hidden target cannot be created in a new window"
++    // just like `true` would be. Confirmed via ui/helpers/OpenInNewTab.ts,
++    // the existing precedent for creating a target from the frontend,
++    // which also never sets this field.
++    const createResponse = await rootTarget.targetAgent().invoke_createTarget({
++      url,
++      background: true,
++      hidden: true,
++    });
++    if (createResponse.getError() || !createResponse.targetId) {
++      console.error('[MultiDeviceSelectionModel] createTarget failed:', createResponse.getError());
++      return null;
++    }
++    const {targetId} = createResponse;
++
++    // Target.attachedToTarget is handled asynchronously by
++    // ChildTargetManager, which creates the actual SDK.Target.Target via
++    // TargetManager.createTarget() -- wait for it to show up rather than
++    // constructing one ourselves.
++    const targetPromise = new Promise<SDK.Target.Target>(resolve => {
++      const observer: SDK.TargetManager.Observer = {
++        targetAdded: (target: SDK.Target.Target) => {
++          if (target.id() === targetId) {
++            this.#targetManager.unobserveTargets(observer);
++            resolve(target);
++          }
++        },
++        targetRemoved: () => {},
++      };
++      this.#targetManager.observeTargets(observer, {scoped: false});
++    });
++
++    const attachResponse = await rootTarget.targetAgent().invoke_attachToTarget({targetId, flatten: true});
++    if (attachResponse.getError()) {
++      console.error('[MultiDeviceSelectionModel] attachToTarget failed:', attachResponse.getError());
++      void rootTarget.targetAgent().invoke_closeTarget({targetId});
++      return null;
++    }
++
++    return targetPromise;
++  }
++
++  async #applyDevice(target: SDK.Target.Target, device: EmulatedDevice): Promise<void> {
++    const emulationModel = target.model(SDK.EmulationModel.EmulationModel);
++    if (!emulationModel) {
++      return;
++    }
++    const mode = device.modes[0];
++    const orientation = device.orientationByName(mode.orientation);
++
++    // Deliberately a much simpler subset of DeviceModeModel.applyDeviceMetrics():
++    // no scale/positionX/positionY/dontSetVisibleSize dance, because
++    // there's no InspectedPagePlaceholder to align pixels with here -- the
++    // background target just renders at a fixed size, and
++    // DeviceViewportWidget's screencast captures at whatever that fixed
++    // size is (see that file's own comment on why zoom is "free" here).
++    await emulationModel.emulateDevice({
++      width: Math.floor(orientation.width),
++      height: Math.floor(orientation.height),
++      deviceScaleFactor: device.deviceScaleFactor,
++      mobile: device.mobile(),
++      screenWidth: Math.floor(orientation.width),
++      screenHeight: Math.floor(orientation.height),
++      positionX: 0,
++      positionY: 0,
++      dontSetVisibleSize: true,
++    });
++    await emulationModel.emulateTouch(device.touch(), device.mobile());
++
++    // Per-target UA override -- deliberately NOT
++    // MultitargetNetworkManager.setUserAgentOverride(), which pushes one
++    // single UA string to every attached target simultaneously and would
++    // make each device's UA clobber every other one's.
++    if (device.userAgent) {
++      await target.emulationAgent().invoke_setUserAgentOverride({
++        userAgent: device.userAgent,
++        userAgentMetadata: device.userAgentMetadata ?? undefined,
++      });
++    }
++  }
++
++  #disposeViewport(device: EmulatedDevice): void {
++    const viewport = this.#viewports.get(device);
++    this.#viewports.delete(device);
++    if (!viewport) {
++      return;
++    }
++    void viewport.target.targetAgent().invoke_closeTarget(
++        {targetId: viewport.target.id() as Protocol.Target.TargetID});
++  }
++
++  // TargetManager.Observer:
++  targetAdded(_target: SDK.Target.Target): void {
++  }
++
++  targetRemoved(target: SDK.Target.Target): void {
++    // Defensive cleanup for e.g. a background target's renderer crashing
++    // -- prune our own map so later teardown doesn't try to double-close
++    // an already-gone target.
++    for (const [device, viewport] of this.#viewports) {
++      if (viewport.target === target) {
++        this.#viewports.delete(device);
++        if (this.#selection.includes(device)) {
++          this.dispatchEventToListeners(Events.SELECTION_CHANGED);
++        }
++        break;
++      }
++    }
++  }
++
++  #onPrimaryPageChanged(
++      event: Common.EventTarget.EventTargetEvent<
++          SDK.ResourceTreeModel.EventTypes[SDK.ResourceTreeModel.Events.PrimaryPageChanged]>): void {
++    const frame = event.data.frame;
++    const navigatedTarget = frame.resourceTreeModel().target();
++    if (navigatedTarget !== this.#targetManager.primaryPageTarget()) {
++      // Not the primary page navigating -- e.g. one of our own background
++      // targets just finished its own navigation, which also fires this
++      // event on its own ResourceTreeModel. Ignoring it here is what
++      // prevents re-navigating every background target in a loop.
++      return;
++    }
++    const url = navigatedTarget.inspectedURL();
++    if (!url) {
++      return;
++    }
++    for (const viewport of this.#viewports.values()) {
++      const resourceTreeModel = viewport.target.model(SDK.ResourceTreeModel.ResourceTreeModel);
++      if (resourceTreeModel && resourceTreeModel.target().inspectedURL() !== url) {
++        void resourceTreeModel.navigate(url);
++      }
++    }
++  }
++}
++
++export const enum Events {
++  SELECTION_CHANGED = 'SelectionChanged',
++}
++
++export interface EventTypes {
++  [Events.SELECTION_CHANGED]: void;
++}
+diff --git a/front_end/models/emulation/emulation.ts b/front_end/models/emulation/emulation.ts
+index 55399b85..fc118576 100644
+--- a/front_end/models/emulation/emulation.ts
++++ b/front_end/models/emulation/emulation.ts
+@@ -4,8 +4,10 @@
+ 
+ import * as DeviceModeModel from './DeviceModeModel.js';
+ import * as EmulatedDevices from './EmulatedDevices.js';
++import * as MultiDeviceSelectionModel from './MultiDeviceSelectionModel.js';
+ 
+ export {
+   DeviceModeModel,
+   EmulatedDevices,
++  MultiDeviceSelectionModel,
+ };
+diff --git a/front_end/panels/emulation/BUILD.gn b/front_end/panels/emulation/BUILD.gn
+index 834a926c..98047b96 100644
+--- a/front_end/panels/emulation/BUILD.gn
++++ b/front_end/panels/emulation/BUILD.gn
+@@ -13,6 +13,7 @@ generate_css("css_files") {
+     "deviceModeView.css",
+     "inspectedPagePlaceholder.css",
+     "mediaQueryInspector.css",
++    "multiDeviceView.css",
+   ]
+ }
+ 
+@@ -21,8 +22,10 @@ devtools_ui_module("emulation") {
+     "AdvancedApp.ts",
+     "DeviceModeToolbar.ts",
+     "DeviceModeView.ts",
++    "DeviceViewportWidget.ts",
+     "InspectedPagePlaceholder.ts",
+     "MediaQueryInspector.ts",
++    "MultiDeviceView.ts",
+   ]
+ 
+   deps = [
+@@ -39,6 +42,7 @@ devtools_ui_module("emulation") {
+     "../../models/geometry:bundle",
+     "../../models/workspace:bundle",
+     "../../panels/mobile_throttling:bundle",
++    "../../panels/screencast:bundle",
+     "../../ui/components/buttons:bundle",
+     "../../ui/legacy:bundle",
+     "../../ui/legacy/theme_support:bundle",
+diff --git a/front_end/panels/emulation/DeviceModeToolbar.ts b/front_end/panels/emulation/DeviceModeToolbar.ts
+index a5e334db..1daab5b2 100644
+--- a/front_end/panels/emulation/DeviceModeToolbar.ts
++++ b/front_end/panels/emulation/DeviceModeToolbar.ts
+@@ -64,6 +64,17 @@ class AutoWidthSelectDirective extends Directive.Directive {
+ const autoWidthSelect = Directive.directive(AutoWidthSelectDirective);
+ 
+ const UIStrings = {
++  /**
++   * @description Title of the multi-device button in the device mode toolbar, shown when no
++   * additional devices are selected for simultaneous emulation.
++   */
++  multiDevice: 'Multi-device',
++  /**
++   * @description Title of the multi-device button in the device mode toolbar, shown when one or
++   * more additional devices are selected for simultaneous emulation.
++   * @example {2} PH1
++   */
++  multiDeviceCount: 'Multi-device ({PH1})',
+   /**
+    * @description Title of the device dimensions selection item in the device mode toolbar.
+    * @example {Responsive} PH1
+@@ -268,6 +279,14 @@ export interface ViewInput {
+   onModeMenuClick: (event: Event) => void;
+   onSpanClick: () => void;
+   onMoreOptionsClick: (event: Event) => void;
++  // AppSwap: multi-device emulation -- see MultiDeviceSelectionModel and
++  // panels/emulation/MultiDeviceView.ts. Deliberately a separate button
++  // rather than extending the Dimensions <select> above into a multi-
++  // select, so the existing single-device flow (that <select>'s own
++  // onDeviceChange handler) stays completely untouched.
++  multiDeviceButtonTitle: string;
++  multiDeviceActive: boolean;
++  onMultiDeviceButtonClick: (event: Event) => void;
+   autoAdjustScaleSetting: Common.Settings.Setting<boolean>;
+   showDeviceScaleFactorSetting: Common.Settings.Setting<boolean>;
+   showUserAgentTypeSetting: Common.Settings.Setting<boolean>;
+@@ -335,6 +354,18 @@ export const DEFAULT_VIEW: View = (input, _output, target) => {
+           </option>
+         </select>`})}
+ 
++      <devtools-button class="toolbar-button"
++        .data=${{
++            variant: Buttons.Button.Variant.TOOLBAR,
++            iconName: 'devices',
++            toggled: input.multiDeviceActive,
++            toggleType: Buttons.Button.ToggleType.PRIMARY,
++            title: input.multiDeviceButtonTitle,
++            accessibleLabel: input.multiDeviceButtonTitle,
++         } as Buttons.Button.ButtonData}
++        jslog=${VisualLogging.action('multi-device').track({click: true})}
++        @click=${input.onMultiDeviceButtonClick}></devtools-button>
++
+       ${createSizeInput(i18nString(UIStrings.width), 'width', input.widthValue, !input.isResponsive, '', input.onWidthChange)}
+ 
+       <div class="device-mode-x">×</div>
+@@ -437,6 +468,7 @@ export const DEFAULT_VIEW: View = (input, _output, target) => {
+ 
+ export class DeviceModeToolbar extends UI.Widget.Widget {
+   #model?: EmulationModel.DeviceModeModel.DeviceModeModel;
++  readonly #multiDeviceModel: EmulationModel.MultiDeviceSelectionModel.MultiDeviceSelectionModel;
+   private readonly showMediaInspectorSetting: Common.Settings.Setting<boolean>;
+   private readonly showRulersSetting: Common.Settings.Setting<boolean>;
+   private readonly showDeviceScaleFactorSetting: Common.Settings.Setting<boolean>;
+@@ -477,6 +509,36 @@ export class DeviceModeToolbar extends UI.Widget.Widget {
+ 
+     this.persistenceSetting = Common.Settings.Settings.instance().createSetting(
+         'emulation.device-mode-value', {device: '', orientation: '', mode: ''});
++
++    this.#multiDeviceModel = EmulationModel.MultiDeviceSelectionModel.MultiDeviceSelectionModel.instance();
++    this.#multiDeviceModel.addEventListener(
++        EmulationModel.MultiDeviceSelectionModel.Events.SELECTION_CHANGED, this.requestUpdate, this);
++  }
++
++  #onMultiDeviceButtonClick(event: Event): void {
++    const button = event.target as HTMLElement;
++    const contextMenu = new UI.ContextMenu.ContextMenu(event, {
++      x: button.getBoundingClientRect().left,
++      y: button.getBoundingClientRect().top + button.offsetHeight,
++    });
++    const section = contextMenu.defaultSection();
++    const selection = this.#multiDeviceModel.selection();
++    for (const device of this.allDevices()) {
++      const checked = selection.includes(device);
++      section.appendCheckboxItem(device.title, () => {
++        const next = checked ? selection.filter(d => d !== device) : [...selection, device];
++        void this.#multiDeviceModel.setSelection(next);
++      }, {checked, jslogContext: 'multi-device-item'});
++    }
++    void contextMenu.show();
++  }
++
++  #multiDeviceButtonTitle(): string {
++    const count = this.#multiDeviceModel.selection().length;
++    if (count === 0) {
++      return i18nString(UIStrings.multiDevice);
++    }
++    return i18nString(UIStrings.multiDeviceCount, {PH1: count});
+   }
+ 
+   get model(): EmulationModel.DeviceModeModel.DeviceModeModel|undefined {
+@@ -639,6 +701,9 @@ export class DeviceModeToolbar extends UI.Widget.Widget {
+         this.appendOptionsMenuItems(contextMenu);
+         void contextMenu.show();
+       },
++      multiDeviceButtonTitle: this.#multiDeviceButtonTitle(),
++      multiDeviceActive: this.#multiDeviceModel.isActive(),
++      onMultiDeviceButtonClick: this.#onMultiDeviceButtonClick.bind(this),
+       autoAdjustScaleSetting: this.autoAdjustScaleSetting,
+       showDeviceScaleFactorSetting: this.showDeviceScaleFactorSetting,
+       showUserAgentTypeSetting: this.showUserAgentTypeSetting,
+diff --git a/front_end/panels/emulation/DeviceModeView.ts b/front_end/panels/emulation/DeviceModeView.ts
+index e2ce42c9..410fa97e 100644
+--- a/front_end/panels/emulation/DeviceModeView.ts
++++ b/front_end/panels/emulation/DeviceModeView.ts
+@@ -18,6 +18,7 @@ import {DeviceModeToolbar} from './DeviceModeToolbar.js';
+ import deviceModeViewStyles from './deviceModeView.css.js';
+ import {InspectedPagePlaceholder} from './InspectedPagePlaceholder.js';
+ import {MediaQueryInspector} from './MediaQueryInspector.js';
++import {MultiDeviceView} from './MultiDeviceView.js';
+ 
+ const {classMap, ref, styleMap} = Directives;
+ const {widget} = UI.Widget;
+@@ -267,6 +268,22 @@ export class DeviceModeView extends UI.Widget.VBox {
+   readonly #toggleDeviceModeAction: UI.ActionRegistration.Action;
+   readonly #showDeviceModeSetting: Common.Settings.Setting<boolean>;
+   #view: DeviceModeViewView;
++  // AppSwap: multi-device emulation. A sibling overlay rather than
++  // something woven into DEFAULT_DEVICE_MODE_VIEW's own render template
++  // -- that template's resize/measurement logic is intricate and
++  // InspectedPagePlaceholder-specific; showing/hiding a separate widget
++  // on top of it, untouched, is far lower risk than threading a second
++  // rendering mode through it. See MultiDeviceSelectionModel for what
++  // actually drives whether this is shown.
++  //
++  // Constructed lazily (see #ensureMultiDeviceView()), not here in the
++  // constructor: DeviceModeView itself is built unconditionally by
++  // AdvancedApp.presentUI() on every DevTools boot, whether or not
++  // Device Mode is ever toggled on -- eagerly building this here would
++  // run brand-new event-listener/DOM-creation code on that shared boot
++  // path for every session, regardless of whether this feature is used.
++  #multiDeviceModel: EmulationModel.MultiDeviceSelectionModel.MultiDeviceSelectionModel|null = null;
++  #multiDeviceView: MultiDeviceView|null = null;
+ 
+   constructor(element?: HTMLElement, view: DeviceModeViewView = DEFAULT_DEVICE_MODE_VIEW) {
+     super(element, {useShadowDom: true});
+@@ -296,6 +313,34 @@ export class DeviceModeView extends UI.Widget.VBox {
+     UI.ZoomManager.ZoomManager.instance().addEventListener(UI.ZoomManager.Events.ZOOM_CHANGED, this.zoomChanged, this);
+   }
+ 
++  // Builds MultiDeviceSelectionModel/MultiDeviceView on first use rather
++  // than in the constructor -- see the #multiDeviceView field comment.
++  // Idempotent: safe to call on every performUpdate() while Device Mode
++  // is enabled.
++  #ensureMultiDeviceView(): void {
++    if (this.#multiDeviceView) {
++      return;
++    }
++    this.#multiDeviceModel = EmulationModel.MultiDeviceSelectionModel.MultiDeviceSelectionModel.instance();
++    this.#multiDeviceView = new MultiDeviceView();
++    this.#multiDeviceView.element.classList.add('multi-device-view-overlay');
++    this.#multiDeviceView.show(this.contentElement);
++    this.#multiDeviceView.hideWidget();
++    this.#multiDeviceModel.addEventListener(
++        EmulationModel.MultiDeviceSelectionModel.Events.SELECTION_CHANGED, this.#updateMultiDeviceVisibility, this);
++  }
++
++  #updateMultiDeviceVisibility(): void {
++    if (!this.#multiDeviceModel || !this.#multiDeviceView) {
++      return;
++    }
++    if (this.#multiDeviceModel.isActive()) {
++      this.#multiDeviceView.showWidget();
++    } else {
++      this.#multiDeviceView.hideWidget();
++    }
++  }
++
+   #showDeviceModeChanged(): void {
+     if (!this.#showDeviceModeSetting.get()) {
+       this.model.emulate(EmulationModel.DeviceModeModel.Type.None, null, null);
+@@ -306,6 +351,9 @@ export class DeviceModeView extends UI.Widget.VBox {
+ 
+   override performUpdate(): void {
+     this.#toggleDeviceModeAction.setToggled(this.#showDeviceModeSetting.get());
++    if (this.#showDeviceModeSetting.get()) {
++      this.#ensureMultiDeviceView();
++    }
+     const input: DeviceModeViewInput = {
+       model: this.model,
+       showDeviceMode: this.#showDeviceModeSetting.get(),
+@@ -547,6 +595,7 @@ export class DeviceModeView extends UI.Widget.VBox {
+     super.willHide();
+     this.model.emulate(EmulationModel.DeviceModeModel.Type.None, null, null);
+     this.model.exitHingeMode();
++    void this.#multiDeviceModel?.clear();
+   }
+ }
+ 
+diff --git a/front_end/panels/emulation/DeviceViewportWidget.ts b/front_end/panels/emulation/DeviceViewportWidget.ts
+new file mode 100644
+index 00000000..7e3d55e9
+--- /dev/null
++++ b/front_end/panels/emulation/DeviceViewportWidget.ts
+@@ -0,0 +1,86 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import * as SDK from '../../core/sdk/sdk.js';
++import * as EmulationModel from '../../models/emulation/emulation.js';
++import * as UI from '../../ui/legacy/legacy.js';
++import * as Screencast from '../screencast/screencast.js';
++
++type EmulatedDevice = EmulationModel.EmulatedDevices.EmulatedDevice;
++
++// One tile in MultiDeviceView: a labeled frame around a live screencast of
++// one selected device's own background target (see
++// MultiDeviceSelectionModel, which owns that target's lifecycle -- this
++// widget just displays whatever it's given).
++//
++// Wraps Screencast.ScreencastView.ScreencastView wholesale rather than
++// reimplementing frame decoding/painting or input dispatch: it already
++// decodes CDP `Page.screencastFrame` JPEGs into a plain <canvas>, and its
++// canvas event handlers already forward mouse/keyboard input to that
++// specific target's own InputModel (`screenCaptureModel.target().model(
++// InputModel)`), so each tile is independently interactive with zero new
++// input code needed here -- see ScreencastView.ts's own constructor.
++//
++// This tile's own screencast container is given a FIXED, untransformed
++// CSS size matching the device's own declared width/height. That
++// matters: zoom is applied by MultiDeviceView as a `transform:
++// scale(...)` on an ancestor wrapper, which never changes this
++// element's own offsetWidth/offsetHeight -- and
++// ScreencastView.viewportDimensions() (which drives what resolution it
++// actually requests via Page.startScreencast) reads exactly those,
++// untransformed. So the requested screencast resolution stays pinned to
++// the device's real size regardless of zoom, the same "capture at a
++// fixed resolution, scale for display" property the native Views
++// implementation had to fight hard for -- here it falls out for free
++// from ordinary CSS semantics.
++export class DeviceViewportWidget extends UI.Widget.VBox {
++  readonly device: EmulatedDevice;
++  readonly #screencastView: Screencast.ScreencastView.ScreencastView|null;
++
++  constructor(device: EmulatedDevice, target: SDK.Target.Target) {
++    super();
++    this.device = device;
++    this.contentElement.classList.add('device-viewport-widget');
++
++    const orientation = device.orientationByName(device.modes[0].orientation);
++    const width = Math.floor(orientation.width);
++    const height = Math.floor(orientation.height);
++
++    const label = document.createElement('div');
++    label.className = 'device-viewport-widget-label';
++    label.textContent = `${device.title}  ${width} × ${height}`;
++    this.contentElement.appendChild(label);
++
++    const screencastContainer = document.createElement('div');
++    screencastContainer.className = 'device-viewport-widget-screencast';
++    screencastContainer.style.width = `${width}px`;
++    screencastContainer.style.height = `${height}px`;
++    this.contentElement.appendChild(screencastContainer);
++
++    const screenCaptureModel = target.model(SDK.ScreenCaptureModel.ScreenCaptureModel);
++    if (screenCaptureModel) {
++      this.#screencastView = new Screencast.ScreencastView.ScreencastView(
++          screenCaptureModel, undefined, undefined, {hideNavigationBar: true});
++      this.#screencastView.show(screencastContainer);
++      this.#screencastView.initialize();
++    } else {
++      // Shouldn't happen -- ScreenCaptureModel is auto-instantiated for
++      // any target with Capability.SCREEN_CAPTURE, which background
++      // targets always have (see MultiDeviceSelectionModel). Fail
++      // visibly rather than silently showing a blank tile.
++      this.#screencastView = null;
++      screencastContainer.textContent = 'Failed to start screencast for this device.';
++    }
++  }
++
++  override wasShown(): void {
++    super.wasShown();
++    this.#screencastView?.showWidget();
++  }
++
++  override willHide(): void {
++    this.#screencastView?.hideWidget();
++    super.willHide();
++  }
++}
+diff --git a/front_end/panels/emulation/MultiDeviceView.ts b/front_end/panels/emulation/MultiDeviceView.ts
+new file mode 100644
+index 00000000..73019e04
+--- /dev/null
++++ b/front_end/panels/emulation/MultiDeviceView.ts
+@@ -0,0 +1,328 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import * as EmulationModel from '../../models/emulation/emulation.js';
++import * as UI from '../../ui/legacy/legacy.js';
++
++import {DeviceViewportWidget} from './DeviceViewportWidget.js';
++import multiDeviceViewStyles from './multiDeviceView.css.js';
++
++type EmulatedDevice = EmulationModel.EmulatedDevices.EmulatedDevice;
++
++const TILE_GUTTER = 24;
++const MIN_ZOOM = 0.1;
++const MAX_ZOOM = 2;
++const MINIMAP_WIDTH = 180;
++const MINIMAP_HEIGHT = 130;
++const MINIMAP_MARGIN = 16;
++
++interface TileEntry {
++  device: EmulatedDevice;
++  widget: DeviceViewportWidget;
++  // Position within the (unscaled) canvas content, independent of
++  // pan/zoom -- set once on first add via simple left-to-right auto-flow,
++  // then draggable (dragging individual tiles is not implemented in this
++  // first pass; positions are fixed post-layout, see the class comment).
++  x: number;
++  y: number;
++  width: number;
++  height: number;
++}
++
++// The pan/zoom canvas shown by DeviceModeView in place of the ordinary
++// single-viewport content area whenever 2+ devices are selected (see
++// MultiDeviceSelectionModel). Deliberately implemented with plain CSS
++// transforms rather than porting the native Views implementation's
++// compositor-layer-masking approach: DeviceViewportWidget's tiles are
++// ordinary DOM elements, so a single `transform: translate(...) scale(...)`
++// on one wrapper div is sufficient -- no per-platform native-layer work
++// needed, which was the whole point of moving this feature here.
++//
++// Pan/zoom/tile-layout state lives entirely on this view (plain instance
++// fields), not on MultiDeviceSelectionModel -- that model owns *which*
++// devices are selected and their live targets; this view owns *how*
++// they're currently framed on screen. Camera position does not persist
++// across a panel switch in this first pass.
++export class MultiDeviceView extends UI.Widget.VBox {
++  readonly #model: EmulationModel.MultiDeviceSelectionModel.MultiDeviceSelectionModel;
++  readonly #canvas: HTMLElement;
++  readonly #canvasContent: HTMLElement;
++  readonly #minimap: HTMLElement;
++  readonly #minimapContent: HTMLElement;
++  readonly #minimapIndicator: HTMLElement;
++  readonly #tiles = new Map<EmulatedDevice, TileEntry>();
++
++  #panX = 0;
++  #panY = 0;
++  #zoom = 1;
++  #dragging = false;
++  #dragStartX = 0;
++  #dragStartY = 0;
++  #dragStartPanX = 0;
++  #dragStartPanY = 0;
++  #minimapDragging = false;
++
++  constructor() {
++    super();
++    this.#model = EmulationModel.MultiDeviceSelectionModel.MultiDeviceSelectionModel.instance();
++    this.registerRequiredCSS(multiDeviceViewStyles);
++
++    this.contentElement.classList.add('multi-device-view');
++
++    this.#canvas = document.createElement('div');
++    this.#canvas.className = 'multi-device-canvas';
++    this.contentElement.appendChild(this.#canvas);
++
++    this.#canvasContent = document.createElement('div');
++    this.#canvasContent.className = 'multi-device-canvas-content';
++    this.#canvas.appendChild(this.#canvasContent);
++
++    this.#minimap = document.createElement('div');
++    this.#minimap.className = 'multi-device-minimap';
++    this.#minimap.style.width = `${MINIMAP_WIDTH}px`;
++    this.#minimap.style.height = `${MINIMAP_HEIGHT}px`;
++    this.#minimap.style.right = `${MINIMAP_MARGIN}px`;
++    this.#minimap.style.bottom = `${MINIMAP_MARGIN}px`;
++    this.contentElement.appendChild(this.#minimap);
++
++    this.#minimapContent = document.createElement('div');
++    this.#minimapContent.className = 'multi-device-minimap-content';
++    this.#minimap.appendChild(this.#minimapContent);
++
++    this.#minimapIndicator = document.createElement('div');
++    this.#minimapIndicator.className = 'multi-device-minimap-indicator';
++    this.#minimap.appendChild(this.#minimapIndicator);
++
++    this.#canvas.addEventListener('pointerdown', this.#onCanvasPointerDown.bind(this));
++    this.#canvas.addEventListener('pointermove', this.#onCanvasPointerMove.bind(this));
++    this.#canvas.addEventListener('pointerup', this.#onCanvasPointerUp.bind(this));
++    this.#canvas.addEventListener('pointerleave', this.#onCanvasPointerUp.bind(this));
++    this.#canvas.addEventListener('wheel', this.#onCanvasWheel.bind(this), {passive: false});
++
++    this.#minimap.addEventListener('pointerdown', this.#onMinimapPointerDown.bind(this));
++    this.#minimap.addEventListener('pointermove', this.#onMinimapPointerMove.bind(this));
++    this.#minimap.addEventListener('pointerup', this.#onMinimapPointerUp.bind(this));
++    this.#minimap.addEventListener('pointerleave', this.#onMinimapPointerUp.bind(this));
++
++    this.#model.addEventListener(
++        EmulationModel.MultiDeviceSelectionModel.Events.SELECTION_CHANGED, this.#onSelectionChanged, this);
++  }
++
++  override wasShown(): void {
++    super.wasShown();
++    this.#onSelectionChanged();
++  }
++
++  override willHide(): void {
++    super.willHide();
++  }
++
++  #onSelectionChanged(): void {
++    const devices = this.#model.selection();
++    const deviceSet = new Set(devices);
++
++    for (const [device, tile] of [...this.#tiles]) {
++      if (!deviceSet.has(device) || !this.#model.viewportFor(device)) {
++        tile.widget.detach();
++        this.#tiles.delete(device);
++      }
++    }
++
++    let nextX = 0;
++    for (const device of devices) {
++      if (this.#tiles.has(device)) {
++        continue;
++      }
++      const target = this.#model.viewportFor(device);
++      if (!target) {
++        // Still being created -- #onSelectionChanged() fires again once
++        // MultiDeviceSelectionModel finishes attaching it.
++        continue;
++      }
++      const widget = new DeviceViewportWidget(device, target);
++      widget.show(this.#canvasContent);
++      const orientation = device.orientationByName(device.modes[0].orientation);
++      const entry: TileEntry = {
++        device,
++        widget,
++        x: nextX,
++        y: 0,
++        width: Math.floor(orientation.width),
++        height: Math.floor(orientation.height),
++      };
++      this.#tiles.set(device, entry);
++      nextX += entry.width + TILE_GUTTER;
++      this.#positionTile(entry);
++    }
++
++    this.#updateMinimap();
++  }
++
++  #positionTile(entry: TileEntry): void {
++    entry.widget.element.style.position = 'absolute';
++    entry.widget.element.style.left = `${entry.x}px`;
++    entry.widget.element.style.top = `${entry.y}px`;
++  }
++
++  #applyTransform(): void {
++    this.#canvasContent.style.transform = `translate(${this.#panX}px, ${this.#panY}px) scale(${this.#zoom})`;
++    this.#updateMinimap();
++  }
++
++  #contentBoundingBox(): {left: number, top: number, width: number, height: number} {
++    if (this.#tiles.size === 0) {
++      return {left: 0, top: 0, width: 1, height: 1};
++    }
++    let left = Infinity;
++    let top = Infinity;
++    let right = -Infinity;
++    let bottom = -Infinity;
++    for (const tile of this.#tiles.values()) {
++      left = Math.min(left, tile.x);
++      top = Math.min(top, tile.y);
++      right = Math.max(right, tile.x + tile.width);
++      bottom = Math.max(bottom, tile.y + tile.height);
++    }
++    return {left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top)};
++  }
++
++  // Maps a point in canvas-content-local (unscaled) space into the
++  // minimap's own local pixel space, using a "fit and center" scale
++  // computed from the current tile bounding box -- recomputed on every
++  // call rather than cached, since it's cheap and this only runs on
++  // user-interaction-driven updates, not every frame.
++  #minimapTransform(): {scale: number, offsetX: number, offsetY: number} {
++    const bbox = this.#contentBoundingBox();
++    const scale = Math.min(MINIMAP_WIDTH / bbox.width, MINIMAP_HEIGHT / bbox.height);
++    const scaledWidth = bbox.width * scale;
++    const scaledHeight = bbox.height * scale;
++    const offsetX = (MINIMAP_WIDTH - scaledWidth) / 2 - bbox.left * scale;
++    const offsetY = (MINIMAP_HEIGHT - scaledHeight) / 2 - bbox.top * scale;
++    return {scale, offsetX, offsetY};
++  }
++
++  #updateMinimap(): void {
++    const {scale, offsetX, offsetY} = this.#minimapTransform();
++
++    this.#minimapContent.innerHTML = '';
++    for (const tile of this.#tiles.values()) {
++      const rect = document.createElement('div');
++      rect.className = 'multi-device-minimap-tile';
++      rect.style.left = `${tile.x * scale + offsetX}px`;
++      rect.style.top = `${tile.y * scale + offsetY}px`;
++      rect.style.width = `${tile.width * scale}px`;
++      rect.style.height = `${tile.height * scale}px`;
++      this.#minimapContent.appendChild(rect);
++    }
++
++    const canvasRect = this.#canvas.getBoundingClientRect();
++    const visibleLeft = -this.#panX / this.#zoom;
++    const visibleTop = -this.#panY / this.#zoom;
++    const visibleWidth = canvasRect.width / this.#zoom;
++    const visibleHeight = canvasRect.height / this.#zoom;
++
++    this.#minimapIndicator.style.left = `${visibleLeft * scale + offsetX}px`;
++    this.#minimapIndicator.style.top = `${visibleTop * scale + offsetY}px`;
++    this.#minimapIndicator.style.width = `${visibleWidth * scale}px`;
++    this.#minimapIndicator.style.height = `${visibleHeight * scale}px`;
++  }
++
++  #onCanvasPointerDown(event: PointerEvent): void {
++    if (event.target !== this.#canvas && event.target !== this.#canvasContent) {
++      // Started on a tile (or something inside one, e.g. its screencast
++      // canvas) -- let that content handle the event normally instead of
++      // panning.
++      return;
++    }
++    this.#dragging = true;
++    this.#dragStartX = event.clientX;
++    this.#dragStartY = event.clientY;
++    this.#dragStartPanX = this.#panX;
++    this.#dragStartPanY = this.#panY;
++    this.#canvas.setPointerCapture(event.pointerId);
++  }
++
++  #onCanvasPointerMove(event: PointerEvent): void {
++    if (!this.#dragging) {
++      return;
++    }
++    this.#panX = this.#dragStartPanX + (event.clientX - this.#dragStartX);
++    this.#panY = this.#dragStartPanY + (event.clientY - this.#dragStartY);
++    this.#applyTransform();
++  }
++
++  #onCanvasPointerUp(event: PointerEvent): void {
++    this.#dragging = false;
++    if (this.#canvas.hasPointerCapture(event.pointerId)) {
++      this.#canvas.releasePointerCapture(event.pointerId);
++    }
++  }
++
++  #onCanvasWheel(event: WheelEvent): void {
++    if (!event.ctrlKey && !event.metaKey) {
++      // Plain wheel: pan. (Trackpad pinch-to-zoom arrives as a
++      // ctrlKey-flagged wheel event in Chromium, handled by the branch
++      // below, same convention as most pannable/zoomable web canvases.)
++      event.preventDefault();
++      this.#panX -= event.deltaX;
++      this.#panY -= event.deltaY;
++      this.#applyTransform();
++      return;
++    }
++
++    event.preventDefault();
++    const canvasRect = this.#canvas.getBoundingClientRect();
++    const anchorX = event.clientX - canvasRect.left;
++    const anchorY = event.clientY - canvasRect.top;
++    const zoomStep = -event.deltaY * 0.01;
++    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, this.#zoom + zoomStep * this.#zoom));
++    if (newZoom === this.#zoom) {
++      return;
++    }
++    // Keep the content point currently under the cursor fixed on screen.
++    const contentX = (anchorX - this.#panX) / this.#zoom;
++    const contentY = (anchorY - this.#panY) / this.#zoom;
++    this.#zoom = newZoom;
++    this.#panX = anchorX - contentX * this.#zoom;
++    this.#panY = anchorY - contentY * this.#zoom;
++    this.#applyTransform();
++  }
++
++  #onMinimapPointerDown(event: PointerEvent): void {
++    this.#minimapDragging = true;
++    this.#minimap.setPointerCapture(event.pointerId);
++    this.#jumpToMinimapPoint(event);
++  }
++
++  #onMinimapPointerMove(event: PointerEvent): void {
++    if (!this.#minimapDragging) {
++      return;
++    }
++    this.#jumpToMinimapPoint(event);
++  }
++
++  #onMinimapPointerUp(event: PointerEvent): void {
++    this.#minimapDragging = false;
++    if (this.#minimap.hasPointerCapture(event.pointerId)) {
++      this.#minimap.releasePointerCapture(event.pointerId);
++    }
++  }
++
++  #jumpToMinimapPoint(event: PointerEvent): void {
++    const minimapRect = this.#minimap.getBoundingClientRect();
++    const localX = event.clientX - minimapRect.left;
++    const localY = event.clientY - minimapRect.top;
++    const {scale, offsetX, offsetY} = this.#minimapTransform();
++    if (scale <= 0) {
++      return;
++    }
++    const contentX = (localX - offsetX) / scale;
++    const contentY = (localY - offsetY) / scale;
++
++    const canvasRect = this.#canvas.getBoundingClientRect();
++    this.#panX = canvasRect.width / 2 - contentX * this.#zoom;
++    this.#panY = canvasRect.height / 2 - contentY * this.#zoom;
++    this.#applyTransform();
++  }
++}
+diff --git a/front_end/panels/emulation/deviceModeView.css b/front_end/panels/emulation/deviceModeView.css
+index 79a5187f..555721d8 100644
+--- a/front_end/panels/emulation/deviceModeView.css
++++ b/front_end/panels/emulation/deviceModeView.css
+@@ -9,6 +9,13 @@
+   align-items: stretch;
+   flex: auto;
+   background-color: var(--app-color-toolbar-background);
++  position: relative;
++}
++
++.multi-device-view-overlay {
++  position: absolute;
++  inset: 0;
++  z-index: 5;
+ }
+ 
+ .device-mode-toolbar {
+diff --git a/front_end/panels/emulation/emulation.ts b/front_end/panels/emulation/emulation.ts
+index d1b592d7..c796e954 100644
+--- a/front_end/panels/emulation/emulation.ts
++++ b/front_end/panels/emulation/emulation.ts
+@@ -7,17 +7,23 @@ import './InspectedPagePlaceholder.js';
+ import './MediaQueryInspector.js';
+ import './DeviceModeToolbar.js';
+ import './DeviceModeView.js';
++import './DeviceViewportWidget.js';
++import './MultiDeviceView.js';
+ 
+ import * as AdvancedApp from './AdvancedApp.js';
+ import * as DeviceModeToolbar from './DeviceModeToolbar.js';
+ import * as DeviceModeView from './DeviceModeView.js';
++import * as DeviceViewportWidget from './DeviceViewportWidget.js';
+ import * as InspectedPagePlaceholder from './InspectedPagePlaceholder.js';
+ import * as MediaQueryInspector from './MediaQueryInspector.js';
++import * as MultiDeviceView from './MultiDeviceView.js';
+ 
+ export {
+   AdvancedApp,
+   DeviceModeToolbar,
+   DeviceModeView,
++  DeviceViewportWidget,
+   InspectedPagePlaceholder,
+   MediaQueryInspector,
++  MultiDeviceView,
+ };
+diff --git a/front_end/panels/emulation/multiDeviceView.css b/front_end/panels/emulation/multiDeviceView.css
+new file mode 100644
+index 00000000..25e1d2e2
+--- /dev/null
++++ b/front_end/panels/emulation/multiDeviceView.css
+@@ -0,0 +1,76 @@
++/*
++ * Copyright 2026 The AppSwap Authors
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++@scope to (devtools-widget > *) {
++  :scope {
++    overflow: hidden;
++    position: relative;
++    background-color: var(--sys-color-cdt-base-container);
++  }
++
++  .multi-device-canvas {
++    position: absolute;
++    inset: 0;
++    overflow: hidden;
++    cursor: grab;
++    touch-action: none;
++  }
++
++  .multi-device-canvas:active {
++    cursor: grabbing;
++  }
++
++  .multi-device-canvas-content {
++    position: absolute;
++    top: 0;
++    left: 0;
++    transform-origin: 0 0;
++  }
++
++  .device-viewport-widget {
++    position: absolute;
++  }
++
++  .device-viewport-widget-label {
++    font: var(--sys-typescale-body4-medium);
++    color: var(--sys-color-on-surface-subtle);
++    padding-bottom: 6px;
++    white-space: nowrap;
++    user-select: none;
++  }
++
++  .device-viewport-widget-screencast {
++    border: 1px solid var(--sys-color-divider);
++    overflow: hidden;
++  }
++
++  .multi-device-minimap {
++    position: absolute;
++    background-color: color-mix(in sRGB, var(--sys-color-cdt-base-container) 90%, transparent);
++    border: 1px solid var(--sys-color-divider);
++    border-radius: 6px;
++    overflow: hidden;
++    cursor: pointer;
++    box-shadow: var(--sys-elevation-level3);
++  }
++
++  .multi-device-minimap-content {
++    position: absolute;
++    inset: 0;
++  }
++
++  .multi-device-minimap-tile {
++    position: absolute;
++    border: 1px solid var(--sys-color-outline);
++    background-color: var(--sys-color-surface2);
++  }
++
++  .multi-device-minimap-indicator {
++    position: absolute;
++    border: 2px solid var(--sys-color-primary);
++    pointer-events: none;
++  }
++}
+diff --git a/front_end/panels/screencast/BUILD.gn b/front_end/panels/screencast/BUILD.gn
+index cbe2ea3f..ecb522a3 100644
+--- a/front_end/panels/screencast/BUILD.gn
++++ b/front_end/panels/screencast/BUILD.gn
+@@ -45,6 +45,7 @@ devtools_entrypoint("bundle") {
+   visibility = [
+     ":*",
+     "../../entrypoints/*",
++    "../emulation/*",
+   ]
+ 
+   visibility += devtools_panels_visibility
+diff --git a/front_end/panels/screencast/ScreencastView.ts b/front_end/panels/screencast/ScreencastView.ts
+index eb5917a1..949f7d68 100644
+--- a/front_end/panels/screencast/ScreencastView.ts
++++ b/front_end/panels/screencast/ScreencastView.ts
+@@ -73,6 +73,14 @@ export interface CanvasRenderingInput {
+ }
+ 
+ export interface ViewInput extends CanvasRenderingInput {
++  // AppSwap: true hides the back/forward/reload/URL navigation bar
++  // entirely (Remote-devices screencast chrome that doesn't belong on a
++  // Responsive Lab / multi-device emulation tile -- see
++  // panels/emulation/DeviceViewportWidget.ts, the only other caller that
++  // passes this). Defaults to false so the existing Remote-devices
++  // ScreencastApp call site (`new ScreencastView(screenCaptureModel)`,
++  // no options) is unaffected.
++  hideNavigationBar: boolean;
+   navigationUrl: string;
+   canGoBack: boolean;
+   canGoForward: boolean;
+@@ -116,6 +124,7 @@ export const DEFAULT_VIEW = (input: ViewInput, output: ViewOutput, target: HTMLE
+   // clang-format off
+   render(html`
+     <style>${screencastViewStyles}</style>
++    ${input.hideNavigationBar ? nothing : html`
+     <div class="screencast-navigation">
+       <devtools-button class="navigation"
+         .data=${{
+@@ -181,6 +190,7 @@ export const DEFAULT_VIEW = (input: ViewInput, output: ViewOutput, target: HTMLE
+         @click=${() => input.onToggleTouch(true)}></devtools-button>
+       <div class="progress" style=${styleMap({width: `${(input.progressPercent ?? 0) * 100}%`})}></div>
+     </div>
++    `}
+     <div
+       class=${classMap({
+         'screencast-viewport': true,
+@@ -417,11 +427,13 @@ export class ScreencastView extends UI.Widget.Widget implements SDK.OverlayModel
+   #viewportHeight = '';
+   #progressPercent = 0;
+   #elementTitleData: ElementTitleData = {visible: false};
++  #hideNavigationBar = false;
+ 
+   constructor(screenCaptureModel: SDK.ScreenCaptureModel.ScreenCaptureModel, element?: HTMLElement,
+-              view: View = DEFAULT_VIEW) {
++              view: View = DEFAULT_VIEW, options?: {hideNavigationBar?: boolean}) {
+     super(element);
+     this.#view = view;
++    this.#hideNavigationBar = options?.hideNavigationBar ?? false;
+     this.#viewOutput = {};
+     this.screenCaptureModel = screenCaptureModel;
+     this.domModel = screenCaptureModel.target().model(SDK.DOMModel.DOMModel);
+@@ -463,6 +475,7 @@ export class ScreencastView extends UI.Widget.Widget implements SDK.OverlayModel
+ 
+   override performUpdate(): void {
+     const input: ViewInput = {
++      hideNavigationBar: this.#hideNavigationBar,
+       navigationUrl: this.#navigationUrlText,
+       canGoBack: this.#canGoBack,
+       canGoForward: this.#canGoForward,
+@@ -822,7 +835,7 @@ export class ScreencastView extends UI.Widget.Widget implements SDK.OverlayModel
+     const gutterSize = 30;
+     const bordersSize = BORDERS_SIZE;
+     const width = this.element.offsetWidth - bordersSize - gutterSize;
+-    const height = this.element.offsetHeight - bordersSize - gutterSize - NAVBAR_HEIGHT;
++    const height = this.element.offsetHeight - bordersSize - gutterSize - (this.#hideNavigationBar ? 0 : NAVBAR_HEIGHT);
+     return {width, height};
+   }
+ 
+diff --git a/front_end/ui/visual_logging/KnownContextValues.ts b/front_end/ui/visual_logging/KnownContextValues.ts
+index 729955ef..83d01e8a 100644
+--- a/front_end/ui/visual_logging/KnownContextValues.ts
++++ b/front_end/ui/visual_logging/KnownContextValues.ts
+@@ -2863,6 +2863,8 @@ export const knownContextValues = new Set([
+   'move-to-top',
+   'mr',
+   'ms',
++  'multi-device',
++  'multi-device-item',
+   'my',
+   'my-inner-item-1',
+   'my-inner-item-2',

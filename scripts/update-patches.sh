@@ -39,6 +39,17 @@ gen() {
 # apply-patches.sh's matching *devtools-frontend* special case).
 DEVTOOLS_DIR="$ROOT/src/third_party/devtools-frontend/src"
 
+# Mirrors the outer repo's own `git add -N -A` above (line 13), scoped to
+# the nested checkout instead: without this, a brand new file added under
+# third_party/devtools-frontend/src is untracked from that checkout's own
+# git index's point of view, so `git diff HEAD` in gen_devtools() below
+# (and the "uncovered changes" check further down, which also only sees
+# tracked changes) is silently blind to it -- it would never make it into
+# any patch, with no warning either.
+if [[ -d "$DEVTOOLS_DIR/.git" ]]; then
+  git -C "$DEVTOOLS_DIR" add -N -A 2>/dev/null || true
+fi
+
 gen_devtools() {
   local name="$1"
   local out="$ROOT/patches/$name"
@@ -230,6 +241,29 @@ gen_devtools 0010-devtools-disable-paste-guard.patch \
   front_end/panels/console/ConsoleView.ts \
   front_end/panels/console/ConsolePinPane.ts \
   front_end/panels/console/ConsolePrompt.ts
+
+# Multi-device emulation: a "Multi-device" toolbar button next to Device
+# Mode's existing single-device Dimensions dropdown (left untouched) lets
+# you select several devices at once, each driven by its own independent,
+# hidden background target (MultiDeviceSelectionModel) and rendered live
+# via CDP screencast (reusing panels/screencast/ScreencastView.ts, hence
+# the two files touched there) into a pan/zoom canvas with a minimap
+# (MultiDeviceView.ts). See the plan doc for the full architecture.
+gen_devtools 0018-devtools-frontend-multi-device-emulation.patch \
+  front_end/models/emulation/MultiDeviceSelectionModel.ts \
+  front_end/models/emulation/emulation.ts \
+  front_end/models/emulation/BUILD.gn \
+  front_end/panels/emulation/DeviceModeToolbar.ts \
+  front_end/panels/emulation/DeviceModeView.ts \
+  front_end/panels/emulation/deviceModeView.css \
+  front_end/panels/emulation/DeviceViewportWidget.ts \
+  front_end/panels/emulation/MultiDeviceView.ts \
+  front_end/panels/emulation/multiDeviceView.css \
+  front_end/panels/emulation/emulation.ts \
+  front_end/panels/emulation/BUILD.gn \
+  front_end/panels/screencast/ScreencastView.ts \
+  front_end/panels/screencast/BUILD.gn \
+  front_end/ui/visual_logging/KnownContextValues.ts
 
 # Changes to app_swap_artifact_provider.{cc,h}, page_info_bubble_view.cc, and
 # the views/app_swap and page_info BUILD.gn files that this feature also
