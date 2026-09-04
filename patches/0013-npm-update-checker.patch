@@ -949,10 +949,18 @@ index 735b1d5f798b4..5612898f4b54c 100644
    base::WeakPtrFactory<ReloadButton> weak_ptr_factory_{this};
  };
 diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
-index 58334f6105692..f8ed91fa26b59 100644
+index 58334f6105692..ae74648794861 100644
 --- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
 +++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
-@@ -436,7 +436,7 @@ void ToolbarView::Init() {
+@@ -66,6 +66,7 @@
+ #include "chrome/browser/ui/toolbar/chrome_labs/chrome_labs_utils.h"
+ #include "chrome/browser/ui/ui_features.h"
+ #include "chrome/browser/ui/view_ids.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.h"
+ #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view.h"
+ #include "chrome/browser/ui/views/contextual_tasks/contextual_tasks_button.h"
+ #include "chrome/browser/ui/views/contextual_tasks/contextual_tasks_close_tab_button.h"
+@@ -436,7 +437,7 @@ void ToolbarView::Init() {
      reload_ = AddChildView(std::make_unique<ReloadButton>(
          browser_->GetProfile(),
          chrome::BrowserCommandController::From(browser_),
@@ -961,7 +969,17 @@ index 58334f6105692..f8ed91fa26b59 100644
    }
  
    if (!features::IsWebUIHomeButtonEnabled()) {
-@@ -579,9 +579,19 @@ void ToolbarView::Init() {
+@@ -444,6 +445,9 @@ void ToolbarView::Init() {
+         browser_, base::BindRepeating(callback, browser_, IDC_HOME)));
+   }
+ 
++  app_swap_responsive_lab_button_ =
++      AddChildView(std::make_unique<AppSwapResponsiveLabButton>(browser_));
++
+   if (!features::IsWebUISplitTabsButtonEnabled()) {
+     split_tabs_ =
+         AddChildView(std::make_unique<SplitTabsToolbarButton>(browser_));
+@@ -579,9 +583,19 @@ void ToolbarView::Init() {
  
    if (!features::IsWebUIAvatarButtonEnabled()) {
      avatar_ = AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
@@ -984,3 +1002,24 @@ index 58334f6105692..f8ed91fa26b59 100644
    }
  
    // Only manage the overflow button when there are at least some views
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.h b/chrome/browser/ui/views/toolbar/toolbar_view.h
+index daed2c76ac524..f45fb15409e7a 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.h
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
+@@ -46,6 +46,7 @@
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
+ class ActorTaskListBubble;
++class AppSwapResponsiveLabButton;
+ class AvatarToolbarButton;
+ class AvatarToolbarButtonInterface;
+ class BatterySaverButton;
+@@ -381,6 +382,8 @@ class ToolbarView : public views::AccessiblePaneView,
+   raw_ptr<WebUIToolbarWebView> toolbar_webview_ = nullptr;
+   std::unique_ptr<WebUIToolbarWebView> detached_toolbar_webview_;
+   raw_ptr<HomeButton> home_ = nullptr;
++  raw_ptr<AppSwapResponsiveLabButton> app_swap_responsive_lab_button_ =
++      nullptr;
+   raw_ptr<SplitTabsToolbarButton> split_tabs_ = nullptr;
+   raw_ptr<CustomTabBarView> custom_tab_bar_ = nullptr;
+   raw_ptr<LocationBarView> location_bar_view_ = nullptr;

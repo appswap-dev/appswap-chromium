@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 50920511caf57..e0e25f8e8a542 100644
+index 50920511caf57..1d60d43aaa310 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
 @@ -792,6 +792,9 @@ static_library("ui") {
@@ -12,7 +12,7 @@ index 50920511caf57..e0e25f8e8a542 100644
      "//chrome/browser/ui/views/eye_dropper",
      "//chrome/browser/ui/views/file_system_access",
      "//chrome/browser/ui/views/file_system_access:impl",
-@@ -2151,6 +2154,15 @@ static_library("ui") {
+@@ -2151,6 +2154,22 @@ static_library("ui") {
  
    if (is_win || is_mac || is_linux || is_chromeos) {
      sources += [
@@ -25,18 +25,27 @@ index 50920511caf57..e0e25f8e8a542 100644
 +      # be a circular dependency.
 +      "views/app_swap/app_swap_project_selector_button.cc",
 +      "views/app_swap/app_swap_project_selector_button.h",
++
++      # AppSwapResponsiveLabButton lives here for the same reason as
++      # AppSwapProjectSelectorButton just above: it calls
++      # BrowserView::GetContentsContainerViewFor() below, which only exists
++      # inside this target.
++      "views/app_swap/app_swap_responsive_lab_button.cc",
++      "views/app_swap/app_swap_responsive_lab_button.h",
        "views/profiles/incognito_menu_view.cc",
        "views/profiles/incognito_menu_view.h",
        "views/profiles/profile_menu_coordinator.cc",
 diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..62abcd555125a
+index 0000000000000..25640a13d1881
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/BUILD.gn
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,63 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
++
++import("//build/config/ui.gni")
 +
 +source_set("app_swap") {
 +  sources = [
@@ -46,6 +55,14 @@ index 0000000000000..62abcd555125a
 +    "app_swap_profile_tab_strip_button.h",
 +    "app_swap_reload_button_controller.cc",
 +    "app_swap_reload_button_controller.h",
++    "app_swap_responsive_lab_canvas_view.cc",
++    "app_swap_responsive_lab_canvas_view.h",
++    "app_swap_responsive_lab_grid_holder.cc",
++    "app_swap_responsive_lab_grid_holder.h",
++    "app_swap_responsive_lab_minimap_view.cc",
++    "app_swap_responsive_lab_minimap_view.h",
++    "app_swap_responsive_lab_overlay_view.cc",
++    "app_swap_responsive_lab_overlay_view.h",
 +    "app_swap_route_group_tab_strip_button.cc",
 +    "app_swap_route_group_tab_strip_button.h",
 +    "app_swap_version_picker_dialog.cc",
@@ -65,16 +82,27 @@ index 0000000000000..62abcd555125a
 +    "//chrome/app:generated_resources",
 +    "//components/constrained_window",
 +    "//components/tabs:impl",
++    "//components/zoom",
 +    "//content/public/browser",
 +    "//ui/accessibility:ax_base",
 +    "//ui/base",
 +    "//ui/color",
++    "//ui/compositor",
++    "//ui/events",
 +    "//ui/gfx",
 +    "//ui/menus",
 +    "//ui/views",
 +    "//ui/views/controls/webview",
 +    "//url",
 +  ]
++
++  if (use_aura) {
++    sources += [
++      "app_swap_responsive_lab_wheel_interceptor_aura.cc",
++      "app_swap_responsive_lab_wheel_interceptor_aura.h",
++    ]
++    deps += [ "//ui/aura" ]
++  }
 +}
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc
 new file mode 100644

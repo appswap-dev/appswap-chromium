@@ -12,10 +12,10 @@ index 2a3958f78ddb6..4e6f3b49ffa24 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..f81968989afaa
+index 0000000000000..ff5a0d28e24eb
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,91 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -42,6 +42,8 @@ index 0000000000000..f81968989afaa
 +    "app_swap_profiles_service.h",
 +    "app_swap_profiles_service_factory.cc",
 +    "app_swap_profiles_service_factory.h",
++    "app_swap_responsive_lab_tab_helper.cc",
++    "app_swap_responsive_lab_tab_helper.h",
 +    "app_swap_route_group_pin_tab_helper.cc",
 +    "app_swap_route_group_pin_tab_helper.h",
 +    "app_swap_route_group_service.cc",

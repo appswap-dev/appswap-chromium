@@ -288,6 +288,7 @@ gen 0013-npm-update-checker.patch \
   chrome/browser/ui/views/toolbar/reload_button.cc \
   chrome/browser/ui/views/toolbar/reload_button.h \
   chrome/browser/ui/views/toolbar/toolbar_view.cc \
+  chrome/browser/ui/views/toolbar/toolbar_view.h \
   chrome/browser/ui/views/toolbar/BUILD.gn \
   chrome/browser/prefs/browser_prefs.cc \
   chrome/browser/prefs/BUILD.gn
@@ -471,6 +472,51 @@ gen 0016-project-selector-and-terminology.patch \
   chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc \
   chrome/browser/ui/webui/settings/settings_ui.h \
   chrome/common/webui_url_constants.h
+
+# Responsive Lab: a toolbar toggle (in the main toolbar row, next to Home --
+# see toolbar_view.cc -- rather than the location bar, so it reads as a
+# browser-chrome mode switch rather than a per-page action) that replaces a
+# tab's own content view with a grid of several real viewports of that same
+# page, one per device preset (see AppSwapResponsiveLabTabHelper, which owns
+# the grid's WebContents and keeps them navigation-synced with the real tab;
+# the tab's own WebContents is never touched, which is what keeps the
+# address bar working normally throughout). AppSwapResponsiveLabOverlayView
+# renders the grid; it's hosted as one more sibling next to ContentsWebView
+# inside ContentsContainerView, the same way several other Chromium features
+# already overlay that view (ActorOverlayWebView, indigo_overlay_view_,
+# etc.) -- see contents_container_view.{cc,h} for the new bounds case,
+# following that exact existing pattern rather than a new mechanism.
+# AppSwapResponsiveLabButton extends ToolbarButton (like its toolbar-row
+# neighbors HomeButton/SplitTabsToolbarButton) rather than a plain
+# ImageButton, for the same hover/ink-drop/theme handling those get for
+# free; it needs BrowserView::GetContentsContainerViewFor() to reach the
+# right container for the active tab, which is why it's listed directly in
+# chrome/browser/ui/BUILD.gn's own sources rather than in views/app_swap's
+# separate target -- same reasoning as AppSwapProjectSelectorButton, see
+# that file's own comment. Changes to already-covered files this also
+# touches (chrome/browser/app_swap/BUILD.gn,
+# chrome/browser/ui/views/app_swap/BUILD.gn, chrome/browser/ui/BUILD.gn,
+# chrome/browser/ui/views/toolbar/toolbar_view.{cc,h},
+# chrome/browser/ui/tab_helpers.cc) are picked up automatically by
+# 0005/0009/0012/0013 above.
+gen 0017-responsive-lab.patch \
+  chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.cc \
+  chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.h \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.h \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.h \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.h \
+  chrome/browser/ui/views/frame/contents_container_view.cc \
+  chrome/browser/ui/views/frame/contents_container_view.h \
+  ui/views/controls/native/native_view_host.cc
 
 # Whether `f` (a path relative to src/) is one of the images tracked under
 # resources/ instead of as a patch -- sync_binary_resources() above already

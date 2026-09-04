@@ -1,0 +1,1924 @@
+diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.cc b/chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.cc
+new file mode 100644
+index 0000000000000..69a518dd7f200
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.cc
+@@ -0,0 +1,16 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.h"
++
++#include "content/public/browser/web_contents.h"
++
++AppSwapResponsiveLabTabHelper::AppSwapResponsiveLabTabHelper(
++    content::WebContents* web_contents)
++    : content::WebContentsUserData<AppSwapResponsiveLabTabHelper>(
++          *web_contents) {}
++
++AppSwapResponsiveLabTabHelper::~AppSwapResponsiveLabTabHelper() = default;
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapResponsiveLabTabHelper);
+diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.h b/chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.h
+new file mode 100644
+index 0000000000000..ed287a4ee8773
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.h
+@@ -0,0 +1,47 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_TAB_HELPER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_TAB_HELPER_H_
++
++#include "content/public/browser/web_contents_user_data.h"
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++// Tracks, per tab, whether AppSwap Responsive Lab is toggled on -- nothing
++// more. The grid it toggles (a per-content-slot AppSwapResponsiveLabOverlayView,
++// hosted in ContentsContainerView) is not tied to any one tab and doesn't
++// persist across a tab switch on its own, so this is what lets
++// AppSwapResponsiveLabButton tell, on every active-tab change, whether the
++// *new* active tab wants the grid shown or not.
++//
++// Does not own any WebContents: the grid's own WebViews create and own
++// theirs directly (see AppSwapResponsiveLabOverlayView::SetViewports()) --
++// this class exists purely as the per-tab bit of memory that survives a
++// switch away and back.
++class AppSwapResponsiveLabTabHelper
++    : public content::WebContentsUserData<AppSwapResponsiveLabTabHelper> {
++ public:
++  ~AppSwapResponsiveLabTabHelper() override;
++
++  AppSwapResponsiveLabTabHelper(const AppSwapResponsiveLabTabHelper&) =
++      delete;
++  AppSwapResponsiveLabTabHelper& operator=(
++      const AppSwapResponsiveLabTabHelper&) = delete;
++
++  bool active() const { return active_; }
++  void SetActive(bool active) { active_ = active; }
++
++ private:
++  friend class content::WebContentsUserData<AppSwapResponsiveLabTabHelper>;
++  explicit AppSwapResponsiveLabTabHelper(content::WebContents* web_contents);
++
++  bool active_ = false;
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_TAB_HELPER_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc
+new file mode 100644
+index 0000000000000..0ee2b2354e43c
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc
+@@ -0,0 +1,199 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.h"
++
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/frame/contents_container_view.h"
++#include "chrome/browser/ui/views/frame/contents_web_view.h"
++#include "components/vector_icons/vector_icons.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
++#include "ui/views/background.h"
++#include "url/gurl.h"
++
++namespace {
++
++constexpr float kActiveBadgeCornerRadius = 4.0f;
++
++// Small and hardcoded for v1 -- each preset is a full extra renderer
++// process while active, so the list stays short until there's a reason to
++// grow it.
++std::vector<AppSwapResponsiveLabOverlayView::DevicePreset>
++BuildDevicePresets() {
++  return {
++      {"Mobile", 390, 844},
++      {"Tablet", 820, 1180},
++      {"Desktop", 1440, 900},
++  };
++}
++
++}  // namespace
++
++AppSwapResponsiveLabButton::AppSwapResponsiveLabButton(
++    BrowserWindowInterface* browser)
++    : ToolbarButton(base::BindRepeating(
++          &AppSwapResponsiveLabButton::ButtonPressed, base::Unretained(this))),
++      browser_(browser) {
++  SetVectorIcon(vector_icons::kDevicesIcon);
++  SetTooltipText(u"Preview in Responsive Lab");
++  SetAccessibleName(u"Responsive Lab");
++  SetVisible(false);
++  browser_->GetTabStripModel()->AddObserver(this);
++  UpdateForActiveTab();
++}
++
++AppSwapResponsiveLabButton::~AppSwapResponsiveLabButton() {
++  browser_->GetTabStripModel()->RemoveObserver(this);
++}
++
++void AppSwapResponsiveLabButton::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  if (selection.active_tab_changed()) {
++    UpdateForActiveTab();
++  }
++}
++
++void AppSwapResponsiveLabButton::OnTabChangedAt(tabs::TabInterface* tab,
++                                                TabChangeType change_type) {
++  UpdateForActiveTab();
++}
++
++void AppSwapResponsiveLabButton::ButtonPressed() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  LOG(ERROR) << "[ResponsiveLab] ButtonPressed: web_contents="
++             << web_contents;
++  if (!web_contents) {
++    return;
++  }
++  AppSwapResponsiveLabTabHelper* helper =
++      AppSwapResponsiveLabTabHelper::GetOrCreateForWebContents(web_contents);
++  const bool new_active = !helper->active();
++  LOG(ERROR) << "[ResponsiveLab] ButtonPressed: new_active=" << new_active;
++  helper->SetActive(new_active);
++  SyncContentsContainer(web_contents, new_active);
++  if (!new_active) {
++    // An explicit toggle-off (as opposed to merely switching tabs away
++    // from an active grid, which keeps it cached in its
++    // AppSwapResponsiveLabGridHolder for a possible later reactivation) --
++    // actually free the grid's renderer processes rather than leaving them
++    // cached for a reactivation the user hasn't asked for.
++    if (AppSwapResponsiveLabGridHolder* holder =
++            AppSwapResponsiveLabGridHolder::FromWebContents(web_contents)) {
++      holder->Discard();
++    }
++  }
++  SetActiveVisual(new_active);
++}
++
++void AppSwapResponsiveLabButton::UpdateForActiveTab() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  if (!web_contents) {
++    SetVisible(false);
++    return;
++  }
++
++  // The button itself only makes sense on an http(s) page, but the
++  // container sync below must still run even when it doesn't -- e.g.
++  // switching to a chrome://newtab/ tab while a previous http(s) tab has
++  // Responsive Lab active. Returning early here (skipping
++  // SyncContentsContainer) used to leave that tab's grid on screen
++  // indefinitely, since nothing else ever told the (per-content-slot, not
++  // per-tab) overlay to hide or contents_view() to show again -- this is
++  // what made a brand new tab appear to inherit the previous tab's grid.
++  const bool applicable =
++      web_contents->GetLastCommittedURL().SchemeIsHTTPOrHTTPS();
++  SetVisible(applicable);
++
++  bool active = false;
++  if (applicable) {
++    if (AppSwapResponsiveLabTabHelper* helper =
++            AppSwapResponsiveLabTabHelper::FromWebContents(web_contents)) {
++      active = helper->active();
++    }
++  }
++  SetActiveVisual(active);
++  SyncContentsContainer(web_contents, active);
++}
++
++void AppSwapResponsiveLabButton::SetActiveVisual(bool active) {
++  if (active) {
++    SetBackground(views::CreateRoundedRectBackground(
++        ui::kColorSysNeutralContainer, kActiveBadgeCornerRadius));
++  } else {
++    SetBackground(nullptr);
++  }
++}
++
++void AppSwapResponsiveLabButton::SyncContentsContainer(
++    content::WebContents* web_contents,
++    bool active) {
++  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
++  LOG(ERROR) << "[ResponsiveLab] SyncContentsContainer: active=" << active
++             << " browser_view=" << browser_view;
++  if (!browser_view) {
++    return;
++  }
++  ContentsContainerView* container =
++      browser_view->GetContentsContainerViewFor(web_contents);
++  LOG(ERROR) << "[ResponsiveLab] SyncContentsContainer: container="
++             << container;
++  if (!container) {
++    // web_contents isn't currently shown by any container (e.g. it's a
++    // background tab) -- nothing on screen to sync.
++    return;
++  }
++
++  AppSwapResponsiveLabOverlayView* overlay =
++      container->app_swap_responsive_lab_overlay_view();
++  LOG(ERROR) << "[ResponsiveLab] SyncContentsContainer: overlay=" << overlay
++             << " overlay bounds=" << (overlay ? overlay->bounds().ToString()
++                                               : "n/a")
++             << " overlay widget=" << (overlay ? overlay->GetWidget() : nullptr);
++  if (!overlay) {
++    return;
++  }
++
++  if (active) {
++    const GURL url = web_contents->GetLastCommittedURL();
++    LOG(ERROR) << "[ResponsiveLab] SyncContentsContainer: showing grid for "
++               << url;
++    overlay->ShowGridFor(
++        web_contents,
++        Profile::FromBrowserContext(web_contents->GetBrowserContext()), url,
++        BuildDevicePresets());
++    container->contents_view()->SetVisible(false);
++    LOG(ERROR) << "[ResponsiveLab] SyncContentsContainer: after "
++               << "ShowGridFor(), overlay visible=" << overlay->GetVisible()
++               << " bounds=" << overlay->bounds().ToString()
++               << " contents_view visible="
++               << container->contents_view()->GetVisible();
++  } else {
++    // HideCurrent() detaches whatever the overlay is currently showing --
++    // which, since it's one-per-content-slot rather than one-per-tab, may
++    // belong to a *different* tab than `web_contents` (e.g. this call is
++    // for a newly-active tab that doesn't apply, while the previously
++    // active tab still has an attached grid to hand back to its holder).
++    overlay->HideCurrent();
++    container->contents_view()->SetVisible(true);
++  }
++}
++
++BEGIN_METADATA(AppSwapResponsiveLabButton)
++END_METADATA
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.h
+new file mode 100644
+index 0000000000000..a31238232ffd0
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.h
+@@ -0,0 +1,90 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_BUTTON_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_BUTTON_H_
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/ui/tabs/tab_change_type.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "chrome/browser/ui/views/toolbar/toolbar_button.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++
++class BrowserWindowInterface;
++class TabStripModel;
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++namespace tabs {
++class TabInterface;
++}  // namespace tabs
++
++// A toolbar-row toggle button, next to Home/Split-tabs: pressing it replaces
++// the active tab's own content view with a grid of several real viewports
++// of that same page, one per device preset -- see
++// AppSwapResponsiveLabTabHelper (owns the grid's WebContents) and
++// AppSwapResponsiveLabOverlayView (renders them, hosted alongside
++// ContentsWebView in ContentsContainerView). ToolbarButton (rather than a
++// plain ImageButton) is what SplitTabsToolbarButton and HomeButton use for
++// this same toolbar row, and gives this button the same hover/ink-drop/theme
++// handling as its neighbors for free.
++//
++// Lives here (rather than in //chrome/browser/ui/views/app_swap, where its
++// sibling AppSwap buttons live) for the same reason
++// AppSwapProjectSelectorButton does -- see that file's own comment: this
++// button needs BrowserView::GetContentsContainerViewFor(), which only exists
++// inside this target, and this target depends ON views/app_swap, not the
++// other way around, so pulling this button into views/app_swap instead
++// would be a circular dependency.
++//
++// Toggling is per-tab state (AppSwapResponsiveLabTabHelper is a
++// WebContentsUserData), but the actual overlay/ContentsWebView visibility
++// this button drives lives one level up, in whichever ContentsContainerView
++// currently shows the active tab -- so both a toggle click and an active-tab
++// change need to re-sync that container to match the (possibly new) active
++// tab's own helper state. See SyncContentsContainer().
++class AppSwapResponsiveLabButton : public ToolbarButton,
++                                   public TabStripModelObserver {
++  METADATA_HEADER(AppSwapResponsiveLabButton, ToolbarButton)
++
++ public:
++  explicit AppSwapResponsiveLabButton(BrowserWindowInterface* browser);
++  AppSwapResponsiveLabButton(const AppSwapResponsiveLabButton&) = delete;
++  AppSwapResponsiveLabButton& operator=(const AppSwapResponsiveLabButton&) =
++      delete;
++  ~AppSwapResponsiveLabButton() override;
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      TabChangeType change_type) override;
++
++ private:
++  void ButtonPressed();
++
++  // Recomputes this button's own visibility/active-visual state from the
++  // active tab's own AppSwapResponsiveLabTabHelper, and re-syncs the
++  // container showing that tab to match.
++  void UpdateForActiveTab();
++
++  // Toggles this button's own "currently active" visual treatment -- a
++  // filled background, the same technique AppSwapRouteGroupTabStripButton
++  // uses for its own badge, simplified to a plain on/off state here.
++  void SetActiveVisual(bool active);
++
++  // Shows/hides `web_contents`'s ContentsWebView vs. its
++  // AppSwapResponsiveLabOverlayView (populating the overlay's grid from the
++  // tab's helper first, if activating). No-op if `web_contents` isn't
++  // currently shown by any ContentsContainerView (e.g. a background tab).
++  void SyncContentsContainer(content::WebContents* web_contents, bool active);
++
++  raw_ptr<BrowserWindowInterface> browser_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_BUTTON_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc
+new file mode 100644
+index 0000000000000..c74efa6760520
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc
+@@ -0,0 +1,232 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h"
++
++#include <algorithm>
++#include <utility>
++
++#include "base/logging.h"
++#include "base/numerics/safe_conversions.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
++#include "ui/compositor/layer.h"
++#include "ui/events/event.h"
++#include "ui/gfx/geometry/transform.h"
++#include "ui/gfx/geometry/vector2d.h"
++#include "ui/views/background.h"
++
++AppSwapResponsiveLabCanvasView::DetachResult::DetachResult() = default;
++AppSwapResponsiveLabCanvasView::DetachResult::DetachResult(DetachResult&&) =
++    default;
++AppSwapResponsiveLabCanvasView::DetachResult&
++AppSwapResponsiveLabCanvasView::DetachResult::operator=(DetachResult&&) =
++    default;
++AppSwapResponsiveLabCanvasView::DetachResult::~DetachResult() = default;
++
++AppSwapResponsiveLabCanvasView::AppSwapResponsiveLabCanvasView() {
++  // The actual root cause of the browser-window-wide positioning glitch
++  // (grid content painting over the toolbar, "cropped" at the window's
++  // right/bottom edges) turned out to be neither of the two layer-ordering
++  // theories tried earlier: debug logging showed the overlay and this
++  // view's own bounds were correct throughout. The real issue is that
++  // content_ (the grid) legitimately extends outside this view's bounds
++  // the moment it's panned/zoomed -- that's inherent to how zoom-toward-a-
++  // point works (pan_offset_ goes negative to keep the zoomed point fixed
++  // under the cursor) -- and nothing was ever clipping that overflow to
++  // this view's own visible area, so at high zoom the scaled content's
++  // edges paint wherever their transformed position lands, including
++  // above this view's top edge and into the toolbar.
++  //
++  // A layer with SetMasksToBounds() is what actually fixes that (a plain,
++  // non-layered View doesn't clip WebView-hosted native content the way it
++  // clips its own painting), and it happens to *also* be the same
++  // mechanism needed to keep AppSwapResponsiveLabMinimapView's own layer
++  // stacking above the grid's WebView layers -- see the class comment on
++  // why a layer belongs here rather than on the parent overlay (whose
++  // bounds are set externally, precisely, by ContentsContainerView).
++  SetPaintToLayer();
++  layer()->SetMasksToBounds(true);
++
++  // Once this view paints to its own layer, it's a separate compositing
++  // surface -- the overlay's own background (painted into a different
++  // layer) no longer shows through wherever content_ doesn't cover, since
++  // this view never paints anything of its own there. Panning/zooming
++  // constantly changes how much of this view's area content_ covers, so
++  // without an explicit background here that empty area would show
++  // whatever undefined content the compositor happens to have, not a
++  // deliberate canvas color.
++  SetBackground(views::CreateSolidBackground(ui::kColorWindowBackground));
++}
++AppSwapResponsiveLabCanvasView::~AppSwapResponsiveLabCanvasView() = default;
++
++views::View* AppSwapResponsiveLabCanvasView::SetContent(
++    std::unique_ptr<views::View> content,
++    const gfx::Vector2dF& pan_offset,
++    float scale) {
++  content_ = AddChildView(std::move(content));
++  pan_offset_ = pan_offset;
++  scale_ = std::clamp(scale, kMinScale, kMaxScale);
++  ApplyPanAndScale();
++  NotifyChanged();
++  return content_;
++}
++
++AppSwapResponsiveLabCanvasView::DetachResult
++AppSwapResponsiveLabCanvasView::DetachContent() {
++  DetachResult result;
++  result.pan_offset = pan_offset_;
++  result.scale = scale_;
++  if (content_) {
++    result.content = RemoveChildViewT(content_.get());
++    content_ = nullptr;
++  }
++  NotifyChanged();
++  return result;
++}
++
++gfx::Size AppSwapResponsiveLabCanvasView::ContentPreferredSize() const {
++  return content_ ? content_->GetPreferredSize() : gfx::Size();
++}
++
++gfx::RectF AppSwapResponsiveLabCanvasView::VisibleContentRect() const {
++  if (!content_ || scale_ <= 0) {
++    return gfx::RectF();
++  }
++  return gfx::RectF(-pan_offset_.x() / scale_, -pan_offset_.y() / scale_,
++                    width() / scale_, height() / scale_);
++}
++
++void AppSwapResponsiveLabCanvasView::CenterOn(
++    const gfx::PointF& content_point) {
++  if (!content_) {
++    return;
++  }
++  SetPanOffset(gfx::Vector2dF(width() / 2.0f - content_point.x() * scale_,
++                              height() / 2.0f - content_point.y() * scale_));
++}
++
++bool AppSwapResponsiveLabCanvasView::OnMousePressed(
++    const ui::MouseEvent& event) {
++  if (!content_ || !event.IsOnlyLeftMouseButton()) {
++    return false;
++  }
++  dragging_ = true;
++  drag_start_location_ = event.location();
++  drag_start_pan_offset_ = pan_offset_;
++  return true;
++}
++
++bool AppSwapResponsiveLabCanvasView::OnMouseDragged(
++    const ui::MouseEvent& event) {
++  if (!dragging_) {
++    return false;
++  }
++  const gfx::Vector2d delta = event.location() - drag_start_location_;
++  SetPanOffset(drag_start_pan_offset_ +
++              gfx::Vector2dF(delta.x(), delta.y()));
++  return true;
++}
++
++void AppSwapResponsiveLabCanvasView::OnMouseReleased(
++    const ui::MouseEvent& event) {
++  dragging_ = false;
++}
++
++bool AppSwapResponsiveLabCanvasView::OnMouseWheel(
++    const ui::MouseWheelEvent& event) {
++  if (!content_) {
++    return false;
++  }
++  if (event.IsControlDown()) {
++    // Scaled by the actual offset, not just its sign, so a fast/hard
++    // scroll (or a bigger trackpad pinch, which arrives as a larger wheel
++    // delta) zooms faster than a small one -- kWheelDelta is the size of
++    // one "notch" of a standard wheel, so this reads as "kZoomStepPerNotch
++    // of zoom per notch scrolled, proportionally for partial/larger deltas".
++    constexpr float kZoomStepPerNotch = 0.1f;
++    const float delta_scale = (static_cast<float>(event.y_offset()) /
++                               ui::MouseWheelEvent::kWheelDelta) *
++                              kZoomStepPerNotch;
++    ZoomBy(delta_scale, gfx::PointF(event.location()));
++  } else {
++    SetPanOffset(pan_offset_ + gfx::Vector2dF(event.x_offset() / 4.0f,
++                                              event.y_offset() / 4.0f));
++  }
++  return true;
++}
++
++void AppSwapResponsiveLabCanvasView::SetPanOffset(
++    const gfx::Vector2dF& pan_offset) {
++  pan_offset_ = pan_offset;
++  ApplyPanAndScale();
++  NotifyChanged();
++}
++
++void AppSwapResponsiveLabCanvasView::ZoomBy(float delta_scale,
++                                            const gfx::PointF& anchor) {
++  const float new_scale = std::clamp(scale_ + delta_scale, kMinScale, kMaxScale);
++  if (new_scale == scale_) {
++    return;
++  }
++  // Keep the content point currently under `anchor` fixed on screen.
++  const gfx::PointF content_point((anchor.x() - pan_offset_.x()) / scale_,
++                                  (anchor.y() - pan_offset_.y()) / scale_);
++  scale_ = new_scale;
++  pan_offset_ = gfx::Vector2dF(anchor.x() - content_point.x() * scale_,
++                               anchor.y() - content_point.y() * scale_);
++  ApplyPanAndScale();
++  NotifyChanged();
++}
++
++void AppSwapResponsiveLabCanvasView::ApplyPanAndScale() {
++  if (!content_) {
++    return;
++  }
++  content_->SetPosition(
++      gfx::Point(base::ClampRound(pan_offset_.x()),
++                base::ClampRound(pan_offset_.y())));
++  gfx::Transform transform;
++  transform.Scale(scale_);
++  content_->SetTransform(transform);
++  // TEMPORARY debug logging: chasing the browser-window-wide positioning
++  // glitch (canvas painting over the toolbar, cropped at the window's
++  // right/bottom edges). Remove once found.
++  LOG(ERROR) << "[ResponsiveLab] CanvasView::ApplyPanAndScale: this bounds="
++             << bounds().ToString() << " widget=" << GetWidget()
++             << " pan_offset=" << pan_offset_.ToString()
++             << " scale=" << scale_
++             << " content bounds=" << content_->bounds().ToString()
++             << " content transform=" << content_->GetTransform().ToString()
++             << " content layer=" << content_->layer();
++  // TEMPORARY debug logging: chasing "webviews get cropped too much" when
++  // dragging the pane toward the top (pan_offset_.y() goes negative,
++  // content_'s top edge moves above this view's own origin). Logs each
++  // cell's own bounds/visible-bounds unconditionally now -- gating this on
++  // pan_offset_.y() < 0 sounded right but missed the previous repro
++  // entirely, since zooming toward any point other than content_'s own
++  // top-left already pushes pan_offset_ negative on its own,
++  // independent of manual panning direction. So: always log; it's only
++  // ~2 lines per cell. Remove once found.
++  for (views::View* cell : content_->children()) {
++    LOG(ERROR) << "[ResponsiveLab] CanvasView::ApplyPanAndScale: cell "
++               << "bounds=" << cell->bounds().ToString()
++               << " visible_bounds=" << cell->GetVisibleBounds().ToString();
++    for (views::View* child : cell->children()) {
++      LOG(ERROR) << "[ResponsiveLab] CanvasView::ApplyPanAndScale:   "
++                 << "child bounds=" << child->bounds().ToString()
++                 << " visible_bounds="
++                 << child->GetVisibleBounds().ToString();
++    }
++  }
++}
++
++void AppSwapResponsiveLabCanvasView::NotifyChanged() {
++  if (change_callback_) {
++    change_callback_.Run();
++  }
++}
++
++BEGIN_METADATA(AppSwapResponsiveLabCanvasView)
++END_METADATA
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h
+new file mode 100644
+index 0000000000000..88748f1e10edc
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h
+@@ -0,0 +1,151 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CANVAS_VIEW_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CANVAS_VIEW_H_
++
++#include <memory>
++
++#include "base/functional/callback.h"
++#include "base/memory/raw_ptr.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/gfx/geometry/point.h"
++#include "ui/gfx/geometry/point_f.h"
++#include "ui/gfx/geometry/rect_f.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/gfx/geometry/vector2d_f.h"
++#include "ui/views/view.h"
++
++// A pannable, zoomable host for one tab's Responsive Lab grid content (see
++// AppSwapResponsiveLabGridHolder, which owns that content across tab
++// switches -- this view only ever displays whatever it's currently handed
++// via SetContent()/DetachContent(), the same one-per-content-slot role
++// AppSwapResponsiveLabOverlayView itself has relative to tabs).
++//
++// Deliberately not a views::ScrollView: the grid can be arbitrarily wide (one
++// column per device preset) and a plain horizontal scrollbar doesn't give a
++// way to zoom out for an overview or to jump around quickly, which is what
++// motivated this -- drag-to-pan on empty canvas background, Ctrl+wheel to
++// zoom, plain wheel to pan. AppSwapResponsiveLabMinimapView (a sibling in the
++// overlay) reads this view's current viewport/content extents to draw a
++// small overview + lets the user jump the pan directly via CenterOn().
++//
++// Panning moves content_'s own position (SetPosition()), not a transform --
++// deliberately, since a view whose *painted* position diverges from its
++// *bounds* position risks falling outside the default ViewTargeter's hit
++// testing (see the warning on views::View::SetTransform()); repositioning
++// bounds directly is the same mechanism a plain oversized child inside a
++// ScrollView already relies on in this codebase; content_'s bounds size
++// never changes (WebViews keep the exact pixel size their device preset
++// asks for -- panning must not touch that). Zoom, unlike pan, has no bounds-
++// only equivalent (scaling would mean actually resizing every WebView,
++// which is not what "zoom out to see more of the canvas" should do to
++// them), so it's the one thing here that does use SetTransform() -- scale
++// only, anchored at content_'s own top-left corner, with pan_offset_
++// compensated so the point under the cursor stays fixed. That leaves one
++// known, accepted rough edge: when scale_ > 1, content_'s *painted* size
++// exceeds its *bounds* size, so clicks right at the outer edge of
++// zoomed-in content can miss -- kMaxScale is kept modest to limit how much
++// that can happen, and it's a rough edge, not a broken feature (see the
++// deferred section of the Responsive Lab plan for the same trade-off
++// already accepted for other polish items).
++//
++// This view (not its parent overlay -- see this class's own constructor)
++// is given its own layer with SetMasksToBounds(true). Two independent
++// things need that: content_ legitimately paints outside this view's own
++// bounds the moment it's panned/zoomed (pan_offset_ goes negative to keep
++// a zoomed point fixed under the cursor, and content_'s *scaled* footprint
++// can far exceed this view's size), and without a masking layer that
++// overflow isn't clipped -- it paints wherever its transformed position
++// lands, which at high zoom can be above this view's own top edge, over
++// the browser's toolbar. Separately, giving this view a layer is also
++// what makes AppSwapResponsiveLabMinimapView's own layer correctly stack
++// above the grid's WebView layers (see that class's comment).
++class AppSwapResponsiveLabCanvasView : public views::View {
++  METADATA_HEADER(AppSwapResponsiveLabCanvasView, views::View)
++
++ public:
++  static constexpr float kMinScale = 0.25f;
++  static constexpr float kMaxScale = 1.5f;
++
++  AppSwapResponsiveLabCanvasView();
++  AppSwapResponsiveLabCanvasView(const AppSwapResponsiveLabCanvasView&) =
++      delete;
++  AppSwapResponsiveLabCanvasView& operator=(
++      const AppSwapResponsiveLabCanvasView&) = delete;
++  ~AppSwapResponsiveLabCanvasView() override;
++
++  // Result of DetachContent(): the content view (now parentless) plus the
++  // pan/zoom state it had at the moment of detaching, so the caller (the
++  // overlay) can hand both back to the tab's AppSwapResponsiveLabGridHolder
++  // and restore them exactly on a later SetContent().
++  struct DetachResult {
++    DetachResult();
++    DetachResult(DetachResult&&);
++    DetachResult& operator=(DetachResult&&);
++    ~DetachResult();
++
++    std::unique_ptr<views::View> content;
++    gfx::Vector2dF pan_offset;
++    float scale = 1.0f;
++  };
++
++  // Attaches `content` as the sole child, applying the given initial
++  // pan/zoom. Must be called with no content currently attached (call
++  // DetachContent() first).
++  views::View* SetContent(std::unique_ptr<views::View> content,
++                          const gfx::Vector2dF& pan_offset,
++                          float scale);
++
++  // Detaches the current content (if any) and returns it along with its
++  // current pan/zoom, resetting this view to empty.
++  DetachResult DetachContent();
++
++  bool has_content() const { return content_ != nullptr; }
++
++  // The content view's own natural (unscaled) size, or an empty size if
++  // there's no content attached.
++  gfx::Size ContentPreferredSize() const;
++
++  // The portion of content-local (unscaled, pre-pan/zoom) space currently
++  // visible within this view's own bounds -- used by the minimap to
++  // position its viewport indicator.
++  gfx::RectF VisibleContentRect() const;
++
++  // Re-centers the viewport on `content_point` (in content-local space),
++  // preserving the current zoom level. Used by the minimap's click/drag-to-
++  // jump navigation.
++  void CenterOn(const gfx::PointF& content_point);
++
++  // Invoked whenever content, pan, or zoom changes -- lets the overlay
++  // refresh the minimap without this view needing to know about it
++  // directly.
++  void set_change_callback(base::RepeatingClosure callback) {
++    change_callback_ = std::move(callback);
++  }
++
++  // views::View:
++  bool OnMousePressed(const ui::MouseEvent& event) override;
++  bool OnMouseDragged(const ui::MouseEvent& event) override;
++  void OnMouseReleased(const ui::MouseEvent& event) override;
++  bool OnMouseWheel(const ui::MouseWheelEvent& event) override;
++
++ private:
++  void SetPanOffset(const gfx::Vector2dF& pan_offset);
++  void ZoomBy(float delta_scale, const gfx::PointF& anchor);
++  void ApplyPanAndScale();
++  void NotifyChanged();
++
++  raw_ptr<views::View> content_ = nullptr;
++  gfx::Vector2dF pan_offset_;
++  float scale_ = 1.0f;
++
++  bool dragging_ = false;
++  gfx::Point drag_start_location_;
++  gfx::Vector2dF drag_start_pan_offset_;
++
++  base::RepeatingClosure change_callback_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CANVAS_VIEW_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.cc
+new file mode 100644
+index 0000000000000..79a4331a65c4b
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.cc
+@@ -0,0 +1,190 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.h"
++
++#include <utility>
++
++#include "base/strings/strcat.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/profiles/profile.h"
++#include "components/zoom/zoom_controller.h"
++#include "ui/color/color_id.h"
++#include "ui/gfx/geometry/insets.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/views/background.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/controls/webview/webview.h"
++#include "ui/views/layout/box_layout.h"
++#include "ui/views/view.h"
++#include "ui/views/view_class_properties.h"
++#include "url/gurl.h"
++
++namespace {
++
++constexpr int kCellSpacing = 16;
++constexpr int kHeaderBottomMargin = 6;
++
++// A WebView whose *native* renderer surface stays pinned at `native_size`
++// forever, regardless of this view's own (possibly zoom-transform-scaled)
++// bounds -- see BuildGridView's call site for why that matters.
++//
++// A one-time NativeViewHost::SetNativeViewSize() call isn't enough:
++// views::WebView::OnBoundsChanged() unconditionally resets it back to
++// "match my own bounds" (holder()->SetNativeViewSize(gfx::Size()), an
++// empty size meaning "no override") on *every* call, which happens on
++// essentially every layout pass -- including whenever
++// AppSwapResponsiveLabCanvasView's zoom transform changes what this view's
++// bounds convert to in widget space. Re-pinning it right after the base
++// class's own OnBoundsChanged() runs is what actually makes it stick.
++class PinnedSizeWebView : public views::WebView {
++ public:
++  PinnedSizeWebView(Profile* profile, const gfx::Size& native_size)
++      : views::WebView(profile), native_size_(native_size) {}
++
++  void OnBoundsChanged(const gfx::Rect& previous_bounds) override {
++    views::WebView::OnBoundsChanged(previous_bounds);
++    holder()->SetNativeViewSize(native_size_);
++  }
++
++ private:
++  const gfx::Size native_size_;
++};
++
++// One "name / width x height" header plus its fixed-size WebView, wrapped
++// in a vertical column so the two lay out together as one grid cell.
++// `web_view` already owns its own real, navigated WebContents (created via
++// LoadInitialURL by the caller) -- see AppSwapResponsiveLabOverlayView's
++// class comment for why the WebView must create it, rather than being
++// handed one built independently.
++std::unique_ptr<views::View> BuildCell(
++    const AppSwapResponsiveLabOverlayView::DevicePreset& preset,
++    std::unique_ptr<views::WebView> web_view) {
++  auto cell = std::make_unique<views::View>();
++  cell->SetLayoutManager(std::make_unique<views::BoxLayout>(
++      views::BoxLayout::Orientation::kVertical));
++
++  const std::string label_text =
++      base::StrCat({preset.name, "  ", base::NumberToString(preset.width),
++                    " × ", base::NumberToString(preset.height)});
++  auto header =
++      std::make_unique<views::Label>(base::UTF8ToUTF16(label_text));
++  header->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  header->SetProperty(views::kMarginsKey,
++                      gfx::Insets::TLBR(0, 0, kHeaderBottomMargin, 0));
++  cell->AddChildView(std::move(header));
++
++  cell->AddChildView(std::move(web_view));
++
++  return cell;
++}
++
++// The row every cell is added to -- a plain horizontal BoxLayout container.
++// This is the view AppSwapResponsiveLabCanvasView pans/zooms as a whole.
++std::unique_ptr<views::View> BuildGridView(
++    Profile* profile,
++    const GURL& url,
++    const std::vector<AppSwapResponsiveLabOverlayView::DevicePreset>&
++        presets) {
++  auto row = std::make_unique<views::View>();
++  // views::View::SetTransform() with a non-identity transform implicitly
++  // gives the view its own compositor layer (see its own implementation --
++  // paint_to_layer_for_transform_ = true), which is what
++  // AppSwapResponsiveLabCanvasView's ApplyPanAndScale() puts on `row` here
++  // via its zoom scale. A layer with nothing of its own painted into it
++  // doesn't necessarily get fully cleared between repaints -- during
++  // continuous zoom/pan, that showed up as old header-label text ghosting
++  // behind the current frame's text instead of being cleared first. An
++  // explicit, opaque background makes every repaint start from a clean
++  // base.
++  row->SetBackground(views::CreateSolidBackground(ui::kColorWindowBackground));
++  auto* row_layout = row->SetLayoutManager(std::make_unique<views::BoxLayout>(
++      views::BoxLayout::Orientation::kHorizontal));
++  row_layout->set_between_child_spacing(kCellSpacing);
++  row_layout->set_inside_border_insets(gfx::Insets(kCellSpacing));
++
++  for (const auto& preset : presets) {
++    const gfx::Size preset_size(preset.width, preset.height);
++    // PinnedSizeWebView (not a plain views::WebView) is what makes the
++    // *actual* renderer surface stay at the device preset's real size,
++    // independent of AppSwapResponsiveLabCanvasView's zoom transform.
++    // Without it, NativeViewHost::Layout() -- which WebView uses
++    // internally -- positions/sizes the native renderer window via
++    // ConvertRectToWidget(), a transform-aware conversion (the same
++    // mechanism that makes hit-testing work through a transformed
++    // ancestor). That means it would resize the *actual*
++    // RenderWidgetHostView to `preset_size * canvas_scale`, not just
++    // display it bigger/smaller -- a real resize the page actually
++    // reflows to, defeating the entire point of comparing real, fixed
++    // device widths side by side (this is what previously made zooming
++    // visibly reveal/hide page content rather than just magnify it).
++    // Pinning the native size makes NativeViewHostAura::ShowWidget() take
++    // its transform-scale branch instead: the renderer keeps rendering at
++    // `preset_size` always, and the canvas transform only ever visually
++    // magnifies that fixed-resolution surface.
++    auto web_view = std::make_unique<PinnedSizeWebView>(profile, preset_size);
++    web_view->SetPreferredSize(preset_size);
++    web_view->LoadInitialURL(url);
++
++    // ZoomController's default mode zooms every WebContents showing the
++    // same origin together (see its own ZOOM_MODE_DEFAULT comment) -- so
++    // without this, Ctrl+Wheel over one grid cell (Chrome's native
++    // per-page zoom shortcut) would also zoom every other cell showing the
++    // same site, *on top of* whatever AppSwapResponsiveLabCanvasView's own
++    // Ctrl+Wheel handling already does when the same gesture starts over
++    // empty canvas background -- two independent zoom mechanisms
++    // compounding on the same pixels. Each grid cell is meant to render at
++    // a fixed, real device width/height regardless of the canvas's own
++    // zoom, so native per-page zoom has no business applying to it at all.
++    zoom::ZoomController::CreateForWebContents(web_view->web_contents());
++    zoom::ZoomController::FromWebContents(web_view->web_contents())
++        ->SetZoomMode(zoom::ZoomController::ZOOM_MODE_DISABLED);
++
++    row->AddChildView(BuildCell(preset, std::move(web_view)));
++  }
++
++  // BoxLayout only positions children once this view itself has a size --
++  // nothing above ever resizes it for us (AppSwapResponsiveLabCanvasView
++  // repositions this view via SetPosition() and scales it via a transform,
++  // neither of which touches its bounds *size*), so it must be sized to its
++  // own preferred size explicitly here or every cell inside it lays out
++  // into a zero-size area.
++  row->SetBoundsRect(gfx::Rect(row->GetPreferredSize()));
++  return row;
++}
++
++}  // namespace
++
++AppSwapResponsiveLabGridHolder::AppSwapResponsiveLabGridHolder(
++    content::WebContents* web_contents)
++    : content::WebContentsUserData<AppSwapResponsiveLabGridHolder>(
++          *web_contents) {}
++
++AppSwapResponsiveLabGridHolder::~AppSwapResponsiveLabGridHolder() = default;
++
++std::unique_ptr<views::View>
++AppSwapResponsiveLabGridHolder::TakeOrBuildGridView(
++    Profile* profile,
++    const GURL& url,
++    std::vector<AppSwapResponsiveLabOverlayView::DevicePreset> presets) {
++  if (grid_view_) {
++    return std::move(grid_view_);
++  }
++  return BuildGridView(profile, url, presets);
++}
++
++void AppSwapResponsiveLabGridHolder::PutBackGridView(
++    std::unique_ptr<views::View> grid_view) {
++  grid_view_ = std::move(grid_view);
++}
++
++void AppSwapResponsiveLabGridHolder::Discard() {
++  grid_view_.reset();
++  pan_offset_ = gfx::Vector2dF();
++  scale_ = 1.0f;
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapResponsiveLabGridHolder);
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.h
+new file mode 100644
+index 0000000000000..08b38cda693ff
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.h
+@@ -0,0 +1,92 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_GRID_HOLDER_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_GRID_HOLDER_H_
++
++#include <memory>
++#include <vector>
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h"
++#include "content/public/browser/web_contents_user_data.h"
++#include "ui/gfx/geometry/vector2d_f.h"
++
++class GURL;
++class Profile;
++
++namespace views {
++class View;
++}  // namespace views
++
++// Owns one tab's Responsive Lab grid content (a views::View holding one
++// views::WebView per device preset) across tab switches. This is the piece
++// that AppSwapResponsiveLabTabHelper (chrome/browser/app_swap/, deliberately
++// Views-agnostic like its sibling tab helpers) can't own itself -- hence a
++// second, Views-layer WebContentsUserData rather than adding a views::View
++// member to that one.
++//
++// AppSwapResponsiveLabOverlayView is one-per-content-slot, not one-per-tab
++// (see its own class comment), so it can't hold each tab's grid as a member
++// either; it borrows this class's grid_view_ for as long as this tab is the
++// one being displayed (TakeOrBuildGridView()) and hands it back the moment
++// another tab needs the slot (PutBackGridView()) -- which is what lets
++// switching away and back show the *same* grid instead of a freshly
++// reloaded one.
++class AppSwapResponsiveLabGridHolder
++    : public content::WebContentsUserData<AppSwapResponsiveLabGridHolder> {
++ public:
++  ~AppSwapResponsiveLabGridHolder() override;
++
++  AppSwapResponsiveLabGridHolder(const AppSwapResponsiveLabGridHolder&) =
++      delete;
++  AppSwapResponsiveLabGridHolder& operator=(
++      const AppSwapResponsiveLabGridHolder&) = delete;
++
++  // Returns this tab's grid content view: the one already held (from a
++  // previous PutBackGridView()) if there is one, or a freshly built one
++  // (one views::WebView per preset, each navigated to `url`) otherwise.
++  // Ownership transfers to the caller; this class holds nothing in between
++  // a Take and its matching PutBack.
++  std::unique_ptr<views::View> TakeOrBuildGridView(
++      Profile* profile,
++      const GURL& url,
++      std::vector<AppSwapResponsiveLabOverlayView::DevicePreset> presets);
++
++  // Called when this tab is switched away from (or the browser is closing)
++  // while its grid is still live -- keeps it (and every WebView/WebContents
++  // in it) alive, detached, for a possible later reactivation.
++  void PutBackGridView(std::unique_ptr<views::View> grid_view);
++
++  // Discards any held grid view -- called on an explicit toggle-off (as
++  // opposed to merely switching tabs away from an active grid), so the
++  // extra renderer processes it holds don't linger once the user has
++  // actually turned Responsive Lab off for this tab. Also resets the
++  // remembered pan/zoom, so a later reactivation starts fresh rather than
++  // resuming wherever the user last left the (now-discarded) canvas.
++  void Discard();
++
++  // The canvas pan/zoom this tab's grid was left at, remembered across
++  // detach/reattach the same way the grid view itself is -- so switching
++  // away and back doesn't just avoid reloading the grid, it also leaves
++  // the viewport exactly where the user left it. Defaults (0 pan, 1x
++  // scale) for a tab that's never had a grid built yet.
++  gfx::Vector2dF pan_offset() const { return pan_offset_; }
++  float scale() const { return scale_; }
++  void SetViewport(const gfx::Vector2dF& pan_offset, float scale) {
++    pan_offset_ = pan_offset;
++    scale_ = scale;
++  }
++
++ private:
++  friend class content::WebContentsUserData<AppSwapResponsiveLabGridHolder>;
++  explicit AppSwapResponsiveLabGridHolder(content::WebContents* web_contents);
++
++  std::unique_ptr<views::View> grid_view_;
++  gfx::Vector2dF pan_offset_;
++  float scale_ = 1.0f;
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_GRID_HOLDER_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.cc
+new file mode 100644
+index 0000000000000..58d1b642ec196
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.cc
+@@ -0,0 +1,131 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h"
++
++#include <algorithm>
++#include <memory>
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
++#include "ui/compositor/layer.h"
++#include "ui/events/event.h"
++#include "ui/gfx/geometry/insets.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/rect_conversions.h"
++#include "ui/gfx/geometry/rect_f.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/views/background.h"
++#include "ui/views/border.h"
++
++namespace {
++
++constexpr int kPanelWidth = 200;
++constexpr int kPanelHeight = 130;
++constexpr int kPanelPadding = 10;
++constexpr float kPanelCornerRadius = 8.0f;
++constexpr int kContentOutlineThickness = 1;
++constexpr int kViewportIndicatorThickness = 2;
++
++}  // namespace
++
++AppSwapResponsiveLabMinimapView::AppSwapResponsiveLabMinimapView(
++    AppSwapResponsiveLabCanvasView* canvas)
++    : canvas_(canvas) {
++  // Needs its own layer to actually stack above the grid's WebView layers
++  // -- see AppSwapResponsiveLabOverlayView's constructor comment. Its
++  // background has rounded corners, so it doesn't fill its bounds
++  // opaquely (the corners are transparent).
++  SetPaintToLayer();
++  layer()->SetFillsBoundsOpaquely(false);
++
++  SetPreferredSize(gfx::Size(kPanelWidth, kPanelHeight));
++  SetBackground(views::CreateRoundedRectBackground(
++      ui::kColorSysSurfaceVariant, kPanelCornerRadius));
++  SetBorder(views::CreateEmptyBorder(gfx::Insets(kPanelPadding)));
++
++  auto content_outline = std::make_unique<views::View>();
++  content_outline->SetBorder(views::CreateSolidBorder(
++      kContentOutlineThickness, ui::kColorSysOutline));
++  content_outline_ = AddChildView(std::move(content_outline));
++
++  auto viewport_indicator = std::make_unique<views::View>();
++  viewport_indicator->SetBorder(views::CreateSolidBorder(
++      kViewportIndicatorThickness, ui::kColorSysPrimary));
++  viewport_indicator_ = AddChildView(std::move(viewport_indicator));
++
++  SetVisible(false);
++}
++
++AppSwapResponsiveLabMinimapView::~AppSwapResponsiveLabMinimapView() = default;
++
++void AppSwapResponsiveLabMinimapView::Refresh() {
++  if (!canvas_->has_content()) {
++    SetVisible(false);
++    return;
++  }
++
++  const gfx::Size content_size = canvas_->ContentPreferredSize();
++  const gfx::Rect inner = GetContentsBounds();
++  if (content_size.IsEmpty() || inner.IsEmpty()) {
++    SetVisible(false);
++    return;
++  }
++  SetVisible(true);
++
++  fit_scale_ = std::min(
++      inner.width() / static_cast<float>(content_size.width()),
++      inner.height() / static_cast<float>(content_size.height()));
++  const float scaled_width = content_size.width() * fit_scale_;
++  const float scaled_height = content_size.height() * fit_scale_;
++  fit_offset_ = gfx::Vector2dF(
++      inner.x() + (inner.width() - scaled_width) / 2.0f,
++      inner.y() + (inner.height() - scaled_height) / 2.0f);
++
++  content_outline_->SetBoundsRect(gfx::ToEnclosingRect(
++      gfx::RectF(fit_offset_.x(), fit_offset_.y(), scaled_width,
++                scaled_height)));
++
++  gfx::RectF indicator(canvas_->VisibleContentRect());
++  indicator.Scale(fit_scale_);
++  indicator.Offset(fit_offset_);
++  indicator.Intersect(gfx::RectF(inner));
++  viewport_indicator_->SetVisible(!indicator.IsEmpty());
++  if (!indicator.IsEmpty()) {
++    viewport_indicator_->SetBoundsRect(gfx::ToEnclosingRect(indicator));
++  }
++}
++
++bool AppSwapResponsiveLabMinimapView::OnMousePressed(
++    const ui::MouseEvent& event) {
++  if (!event.IsOnlyLeftMouseButton() || !canvas_->has_content()) {
++    return false;
++  }
++  JumpTo(event.location());
++  return true;
++}
++
++bool AppSwapResponsiveLabMinimapView::OnMouseDragged(
++    const ui::MouseEvent& event) {
++  if (!canvas_->has_content()) {
++    return false;
++  }
++  JumpTo(event.location());
++  return true;
++}
++
++void AppSwapResponsiveLabMinimapView::JumpTo(
++    const gfx::Point& minimap_local_point) {
++  if (fit_scale_ <= 0) {
++    return;
++  }
++  const gfx::PointF content_point(
++      (minimap_local_point.x() - fit_offset_.x()) / fit_scale_,
++      (minimap_local_point.y() - fit_offset_.y()) / fit_scale_);
++  canvas_->CenterOn(content_point);
++}
++
++BEGIN_METADATA(AppSwapResponsiveLabMinimapView)
++END_METADATA
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h
+new file mode 100644
+index 0000000000000..808cecbeee537
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h
+@@ -0,0 +1,76 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_MINIMAP_VIEW_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_MINIMAP_VIEW_H_
++
++#include "base/memory/raw_ptr.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/gfx/geometry/point.h"
++#include "ui/gfx/geometry/vector2d_f.h"
++#include "ui/views/view.h"
++
++class AppSwapResponsiveLabCanvasView;
++
++// A small, fixed-size overview panel anchored to the bottom-right corner of
++// AppSwapResponsiveLabOverlayView, showing the full extent of the current
++// tab's grid content (a plain outline -- this doesn't attempt a live
++// pixel-accurate thumbnail of the WebViews inside it, since ui::Layer::
++// Mirror() only mirrors a layer's own painted/surface content and
++// explicitly does not mirror children, which is all the grid content
++// actually has) plus a highlighted rectangle showing the portion of it
++// AppSwapResponsiveLabCanvasView currently has in view. Clicking or
++// dragging inside the panel re-centers the canvas's viewport on that point
++// (via AppSwapResponsiveLabCanvasView::CenterOn()), so it doubles as a
++// jump-navigation control for a canvas that's otherwise only pannable by
++// dragging its (potentially much larger) content around.
++//
++// One-per-content-slot, same as the overlay and canvas view it lives
++// beside -- Refresh() re-reads whatever the canvas is currently showing
++// each time it's called, rather than tracking any tab-specific state of
++// its own.
++class AppSwapResponsiveLabMinimapView : public views::View {
++  METADATA_HEADER(AppSwapResponsiveLabMinimapView, views::View)
++
++ public:
++  // `canvas` is the sibling view this minimap always tracks -- both are
++  // constructed once by the overlay and destroyed together, so a raw,
++  // non-owning pointer held for this view's whole lifetime is safe.
++  explicit AppSwapResponsiveLabMinimapView(AppSwapResponsiveLabCanvasView* canvas);
++  AppSwapResponsiveLabMinimapView(const AppSwapResponsiveLabMinimapView&) =
++      delete;
++  AppSwapResponsiveLabMinimapView& operator=(
++      const AppSwapResponsiveLabMinimapView&) = delete;
++  ~AppSwapResponsiveLabMinimapView() override;
++
++  // Recomputes the content outline and viewport indicator from the canvas's
++  // current content size and visible rect. Hides this view entirely when
++  // the canvas has no content to show. Call whenever the canvas's content,
++  // pan, or zoom changes.
++  void Refresh();
++
++  // views::View:
++  bool OnMousePressed(const ui::MouseEvent& event) override;
++  bool OnMouseDragged(const ui::MouseEvent& event) override;
++
++ private:
++  // Converts a point in this view's own local coordinates to a point in
++  // the canvas content's (unscaled) local space, using the same fit
++  // mapping Refresh() just computed, and re-centers the canvas there.
++  void JumpTo(const gfx::Point& minimap_local_point);
++
++  const raw_ptr<AppSwapResponsiveLabCanvasView> canvas_;
++
++  raw_ptr<views::View> content_outline_ = nullptr;
++  raw_ptr<views::View> viewport_indicator_ = nullptr;
++
++  // The "fit content into this panel's inner area" mapping Refresh() last
++  // computed -- content-local point p maps to fit_offset_ + p * fit_scale_
++  // in this view's local space. Used both to place the outline/indicator
++  // and, inverted, by JumpTo() to map a click back to a content point.
++  float fit_scale_ = 1.0f;
++  gfx::Vector2dF fit_offset_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_MINIMAP_VIEW_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc
+new file mode 100644
+index 0000000000000..c16bc7bfeeef4
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc
+@@ -0,0 +1,231 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h"
++
++#include <memory>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/views/background.h"
++#include "ui/views/widget/widget.h"
++#include "url/gurl.h"
++
++#if defined(USE_AURA)
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.h"
++#include "ui/aura/window.h"
++#endif
++
++namespace {
++
++constexpr int kMinimapMargin = 16;
++
++}  // namespace
++
++AppSwapResponsiveLabOverlayView::AppSwapResponsiveLabOverlayView() {
++  SetVisible(false);
++  SetBackground(views::CreateSolidBackground(ui::kColorWindowBackground));
++
++  // No LayoutManager here -- canvas_view_ fills this view's own bounds and
++  // minimap_view_ is anchored to a corner of it, which Layout(PassKey)
++  // below positions directly rather than through a declarative manager.
++  canvas_view_ = AddChildView(std::make_unique<AppSwapResponsiveLabCanvasView>());
++  canvas_view_->set_change_callback(base::BindRepeating(
++      &AppSwapResponsiveLabOverlayView::OnCanvasChanged,
++      base::Unretained(this)));
++
++  // Constructed after canvas_view_ so it paints on top -- see
++  // AppSwapResponsiveLabCanvasView's own constructor comment for why
++  // canvas_view_ (not this view) is the one given a layer to make that
++  // ordering actually stick against the grid's WebView layers.
++  minimap_view_ = AddChildView(
++      std::make_unique<AppSwapResponsiveLabMinimapView>(canvas_view_));
++}
++
++AppSwapResponsiveLabOverlayView::~AppSwapResponsiveLabOverlayView() {
++  // minimap_view_ holds a non-owning raw_ptr to canvas_view_ (see
++  // AppSwapResponsiveLabMinimapView's own comment). views::View::~View()
++  // destroys children_ in add order, which would destroy canvas_view_
++  // (added first) before minimap_view_ (added second) -- leaving that
++  // raw_ptr dangling for the remainder of minimap_view_'s own destruction,
++  // which is exactly what MiraclePtr's dangling-pointer detector caught
++  // during window teardown. Destroying minimap_view_ explicitly here,
++  // before the base class destructor runs, keeps canvas_view_ alive for
++  // minimap_view_'s entire lifetime instead.
++  //
++  // A first attempt at this cleared minimap_view_ *after* calling
++  // RemoveChildViewT(minimap_view_.get()) -- which doesn't work, because
++  // that call's return value (the freed object's now-sole owning
++  // unique_ptr) isn't captured, so it's destroyed at the end of that same
++  // statement: the object is already gone before the next line runs.
++  // MiraclePtr still caught it. Saving a plain (non-raw_ptr) pointer
++  // first, clearing minimap_view_ *before* triggering destruction, then
++  // destroying via the plain pointer is what actually closes the gap: no
++  // raw_ptr is watching that address at the moment it's freed.
++  if (minimap_view_) {
++    AppSwapResponsiveLabMinimapView* minimap = minimap_view_.get();
++    minimap_view_ = nullptr;
++    RemoveChildViewT(minimap);
++  }
++}
++
++void AppSwapResponsiveLabOverlayView::ShowGridFor(
++    content::WebContents* web_contents,
++    Profile* profile,
++    const GURL& url,
++    std::vector<DevicePreset> presets) {
++  LOG(ERROR) << "[ResponsiveLab] OverlayView::ShowGridFor: web_contents="
++             << web_contents << " current_owner_=" << current_owner_
++             << " url=" << url;
++  if (current_owner_ == web_contents) {
++    SetVisible(true);
++    return;
++  }
++
++  // Hands the previous owner's grid (and pan/zoom) back to its own holder
++  // internally, so there's nothing further to do with it here.
++  DetachCurrent();
++
++  AppSwapResponsiveLabGridHolder* holder =
++      AppSwapResponsiveLabGridHolder::GetOrCreateForWebContents(web_contents);
++  canvas_view_->SetContent(
++      holder->TakeOrBuildGridView(profile, url, std::move(presets)),
++      holder->pan_offset(), holder->scale());
++
++  current_owner_ = web_contents;
++  Observe(web_contents);
++  SetVisible(true);
++  LogState("ShowGridFor (end)");
++}
++
++void AppSwapResponsiveLabOverlayView::HideCurrent() {
++  DetachCurrent();
++  SetVisible(false);
++}
++
++void AppSwapResponsiveLabOverlayView::DetachCurrent() {
++  if (!current_owner_) {
++    return;
++  }
++
++  AppSwapResponsiveLabGridHolder* holder =
++      AppSwapResponsiveLabGridHolder::FromWebContents(current_owner_);
++  AppSwapResponsiveLabCanvasView::DetachResult detached =
++      canvas_view_->DetachContent();
++  if (holder && detached.content) {
++    holder->SetViewport(detached.pan_offset, detached.scale);
++    holder->PutBackGridView(std::move(detached.content));
++  }
++  // If the holder is already gone (shouldn't normally happen -- it and
++  // this view's observation of current_owner_ are torn down together via
++  // WebContentsDestroyed() -- but kept as a safe fallback), detached.content
++  // simply goes out of scope and its WebViews/WebContents are destroyed.
++
++  current_owner_ = nullptr;
++  Observe(nullptr);
++}
++
++void AppSwapResponsiveLabOverlayView::OnCanvasChanged() {
++  minimap_view_->Refresh();
++}
++
++void AppSwapResponsiveLabOverlayView::WebContentsDestroyed() {
++  // The tab whose grid we're currently showing is being destroyed. Detach
++  // without trying to hand the grid back to its holder -- that
++  // WebContentsUserData is being torn down along with the WebContents
++  // itself, so there's nothing to hand it to; just let it go.
++  LOG(ERROR) << "[ResponsiveLab] OverlayView::WebContentsDestroyed: "
++             << "current_owner_=" << current_owner_;
++  current_owner_ = nullptr;
++  Observe(nullptr);
++  canvas_view_->DetachContent();  // dropped -- see comment above
++  SetVisible(false);
++}
++
++void AppSwapResponsiveLabOverlayView::OnBoundsChanged(
++    const gfx::Rect& previous_bounds) {
++  views::View::OnBoundsChanged(previous_bounds);
++  LogState("OnBoundsChanged");
++}
++
++void AppSwapResponsiveLabOverlayView::Layout(PassKey) {
++  canvas_view_->SetBoundsRect(GetLocalBounds());
++
++  const gfx::Size minimap_size = minimap_view_->GetPreferredSize();
++  const gfx::Rect local_bounds = GetLocalBounds();
++  minimap_view_->SetBoundsRect(gfx::Rect(
++      local_bounds.right() - minimap_size.width() - kMinimapMargin,
++      local_bounds.bottom() - minimap_size.height() - kMinimapMargin,
++      minimap_size.width(), minimap_size.height()));
++
++  minimap_view_->Refresh();
++  LogState("Layout");
++}
++
++void AppSwapResponsiveLabOverlayView::AddedToWidget() {
++#if defined(USE_AURA)
++  // Registered on the whole browser window, not just this view's own
++  // bounds -- a pre-target handler has no narrower attachment point, and
++  // its own early-out checks (not a Ctrl+Wheel event, or outside
++  // canvas_view_'s bounds) keep it a no-op for everything else. See
++  // AppSwapResponsiveLabWheelInterceptorAura's class comment for why this
++  // exists at all.
++  if (aura::Window* window = GetWidget()->GetNativeView()) {
++    wheel_interceptor_ =
++        std::make_unique<AppSwapResponsiveLabWheelInterceptorAura>(
++            canvas_view_);
++    window->AddPreTargetHandler(wheel_interceptor_.get());
++  }
++#endif
++}
++
++void AppSwapResponsiveLabOverlayView::RemovedFromWidget() {
++#if defined(USE_AURA)
++  if (wheel_interceptor_) {
++    if (aura::Window* window = GetWidget()->GetNativeView()) {
++      window->RemovePreTargetHandler(wheel_interceptor_.get());
++    }
++    wheel_interceptor_.reset();
++  }
++#endif
++}
++
++void AppSwapResponsiveLabOverlayView::LogState(const char* where) {
++  gfx::Point origin_in_screen;
++  gfx::Point origin_in_widget;
++  if (GetWidget()) {
++    views::View::ConvertPointToScreen(this, &origin_in_screen);
++    views::View::ConvertPointToWidget(this, &origin_in_widget);
++  }
++  LOG(ERROR) << "[ResponsiveLab] OverlayView::LogState(" << where
++             << "): this bounds=" << bounds().ToString()
++             << " visible=" << GetVisible() << " widget=" << GetWidget()
++             << " this layer=" << layer()
++             << " origin_in_widget=" << origin_in_widget.ToString()
++             << " origin_in_screen=" << origin_in_screen.ToString()
++             << " widget window bounds="
++             << (GetWidget() ? GetWidget()->GetWindowBoundsInScreen().ToString()
++                             : "n/a")
++             << " widget client bounds="
++             << (GetWidget()
++                     ? GetWidget()->GetClientAreaBoundsInScreen().ToString()
++                     : "n/a")
++             << " current_owner_=" << current_owner_
++             << " canvas bounds=" << canvas_view_->bounds().ToString()
++             << " canvas layer=" << canvas_view_->layer()
++             << " canvas has_content=" << canvas_view_->has_content()
++             << " content preferred_size="
++             << canvas_view_->ContentPreferredSize().ToString();
++}
++
++BEGIN_METADATA(AppSwapResponsiveLabOverlayView)
++END_METADATA
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h
+new file mode 100644
+index 0000000000000..88c4ecf95cad8
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h
+@@ -0,0 +1,157 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_OVERLAY_VIEW_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_OVERLAY_VIEW_H_
++
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "build/build_config.h"
++#include "content/public/browser/web_contents_observer.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/views/view.h"
++
++class AppSwapResponsiveLabCanvasView;
++class AppSwapResponsiveLabMinimapView;
++class GURL;
++class Profile;
++
++#if defined(USE_AURA)
++class AppSwapResponsiveLabWheelInterceptorAura;
++#endif
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++namespace gfx {
++class Rect;
++}  // namespace gfx
++
++// Shown in place of ContentsWebView, full-size, while a tab's
++// AppSwapResponsiveLabTabHelper is active (see ContentsContainerView, which
++// constructs and lays out this view alongside its other overlay siblings,
++// and AppSwapResponsiveLabButton, which is what actually toggles it and
++// keeps its content in sync with the active tab).
++//
++// This view is one-per-content-slot (like ContentsWebView itself), not
++// one-per-tab: it only ever displays whichever tab is currently active, and
++// re-points itself to a different tab's content via ShowGridFor(). The grid
++// content it displays for a given tab -- one views::WebView per device
++// preset, hosted in a pannable/zoomable AppSwapResponsiveLabCanvasView, with
++// an AppSwapResponsiveLabMinimapView overview anchored to the bottom-right
++// corner -- is actually owned by that tab's own
++// AppSwapResponsiveLabGridHolder (content::WebContentsUserData), not by this
++// view; ShowGridFor()/HideCurrent() borrow and return that content (plus its
++// pan/zoom state) so that switching away from a tab and back shows the exact
++// same, still-live grid at the same viewport instead of tearing it down and
++// rebuilding (and re-navigating, and re-centering) it every time.
++//
++// Each grid cell owns a real content::WebContents, created and navigated the
++// same way AppSwapVersionPickerDialog's own WebView does (see
++// CreateAppSwapVersionPickerSubpageView): the views::WebView creates its
++// WebContents itself, via LoadInitialURL(), rather than being handed an
++// already-navigating WebContents built independently via
++// content::WebContents::Create(). That's not an arbitrary style choice --
++// a WebContents built separately and only later attached via
++// WebView::SetWebContents() never gets a real RenderWidgetHostView/
++// compositor surface wired up in time for its already-in-flight navigation
++// to actually paint anything, which is what produced a blank white grid
++// with unresponsive right-click (no working hit-testing) the first time
++// this shipped. Letting the WebView own creation from the start avoids that
++// entirely, and is the only WebContents-creation path this codebase has
++// already proven to work for a WebView hosted outside the normal tab strip.
++class AppSwapResponsiveLabOverlayView : public views::View,
++                                        public content::WebContentsObserver {
++  METADATA_HEADER(AppSwapResponsiveLabOverlayView, views::View)
++
++ public:
++  // One grid cell's device preset -- just the name/size for the header
++  // label and the fixed WebView size; no WebContents here (see the class
++  // comment on why this view creates its own rather than being handed one).
++  struct DevicePreset {
++    std::string name;
++    int width;
++    int height;
++  };
++
++  AppSwapResponsiveLabOverlayView();
++  AppSwapResponsiveLabOverlayView(const AppSwapResponsiveLabOverlayView&) =
++      delete;
++  AppSwapResponsiveLabOverlayView& operator=(
++      const AppSwapResponsiveLabOverlayView&) = delete;
++  ~AppSwapResponsiveLabOverlayView() override;
++
++  // Shows `web_contents`'s grid, becoming visible if it wasn't already. If
++  // this view is already showing `web_contents`'s grid, does nothing (no
++  // rebuild, no re-navigation, no viewport reset). Otherwise detaches
++  // whatever was previously shown (handing it, and its pan/zoom, back to
++  // its own tab's AppSwapResponsiveLabGridHolder untouched) and takes
++  // `web_contents`'s grid from its holder -- building it fresh, one cell
++  // per entry in `presets` navigated to `url`, only if that holder didn't
++  // already have one cached from an earlier activation.
++  void ShowGridFor(content::WebContents* web_contents,
++                   Profile* profile,
++                   const GURL& url,
++                   std::vector<DevicePreset> presets);
++
++  // Detaches whatever's currently shown (if anything), handing it back to
++  // its tab's AppSwapResponsiveLabGridHolder for safekeeping, and hides
++  // this view. Does NOT discard the grid -- callers that want the grid
++  // itself gone (an explicit toggle-off, as opposed to merely switching
++  // tabs away from one with an active grid) must also call
++  // AppSwapResponsiveLabGridHolder::Discard() for that tab.
++  void HideCurrent();
++
++  // views::View:
++  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
++  void Layout(PassKey) override;
++  void AddedToWidget() override;
++  void RemovedFromWidget() override;
++
++  // content::WebContentsObserver:
++  void WebContentsDestroyed() override;
++
++ private:
++  // Detaches the current child from canvas_view_ (if any), handing it (and
++  // its pan/zoom) back to its tab's holder, and returns whether anything
++  // was detached. Clears current_owner_ and stops observation either way.
++  // Shared by ShowGridFor(), HideCurrent(), and WebContentsDestroyed().
++  void DetachCurrent();
++
++  // Passed to canvas_view_ as its change callback -- refreshes the minimap
++  // whenever the canvas's content, pan, or zoom changes.
++  void OnCanvasChanged();
++
++  // TEMPORARY debug helper: logs this view's own state plus the canvas's
++  // current content/viewport. Remove once the blank-grid bug is found.
++  void LogState(const char* where);
++
++  // The tab whose grid is currently attached to canvas_view_, or null if
++  // nothing is currently shown. Non-owning -- the grid content's real
++  // owner is always either canvas_view_ (while attached) or that tab's
++  // AppSwapResponsiveLabGridHolder (while detached); this is just a key.
++  // Watched via WebContentsObserver so a tab closing while its grid is the
++  // one attached here can't leave this dangling (see WebContentsDestroyed).
++  raw_ptr<content::WebContents> current_owner_ = nullptr;
++
++  raw_ptr<AppSwapResponsiveLabCanvasView> canvas_view_ = nullptr;
++  raw_ptr<AppSwapResponsiveLabMinimapView> minimap_view_ = nullptr;
++
++  // A grid cell's WebView hosts a real native renderer window, which
++  // receives wheel input directly rather than through normal views::View
++  // dispatch -- so canvas_view_'s own Ctrl+Wheel-to-zoom handling never
++  // sees the event when the cursor is over a cell instead of empty canvas
++  // background. This intercepts it one level up, before native content
++  // gets it. Aura-only (see the .cc); null on other platforms, so
++  // Ctrl+Wheel there only zooms from empty background, same as before.
++#if defined(USE_AURA)
++  std::unique_ptr<AppSwapResponsiveLabWheelInterceptorAura> wheel_interceptor_;
++#endif
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_OVERLAY_VIEW_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.cc
+new file mode 100644
+index 0000000000000..3d2def202373b
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.cc
+@@ -0,0 +1,59 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.h"
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h"
++#include "ui/aura/window.h"
++#include "ui/events/event.h"
++#include "ui/gfx/geometry/point.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/views/view.h"
++#include "ui/views/widget/widget.h"
++
++AppSwapResponsiveLabWheelInterceptorAura::
++    AppSwapResponsiveLabWheelInterceptorAura(
++        AppSwapResponsiveLabCanvasView* canvas_view)
++    : canvas_view_(canvas_view) {}
++
++AppSwapResponsiveLabWheelInterceptorAura::
++    ~AppSwapResponsiveLabWheelInterceptorAura() = default;
++
++void AppSwapResponsiveLabWheelInterceptorAura::OnMouseEvent(
++    ui::MouseEvent* event) {
++  if (!event->IsMouseWheelEvent() || !event->IsControlDown() ||
++      !canvas_view_->GetVisible() || !canvas_view_->has_content()) {
++    return;
++  }
++
++  views::Widget* widget = canvas_view_->GetWidget();
++  auto* target = static_cast<aura::Window*>(event->target());
++  if (!widget || !widget->GetNativeView() || !target) {
++    return;
++  }
++
++  // event->location() is local to `target` -- the actual native window
++  // under the cursor, e.g. a grid cell's WebView -- not to canvas_view_.
++  // Bridge it into canvas_view_'s own local space the same way normal
++  // views::View event dispatch would, via the browser window's own aura
++  // window as the common intermediate coordinate space.
++  gfx::Point point_in_widget = event->location();
++  aura::Window::ConvertPointToTarget(target, widget->GetNativeView(),
++                                     &point_in_widget);
++  views::View::ConvertPointFromWidget(canvas_view_, &point_in_widget);
++  if (!canvas_view_->GetLocalBounds().Contains(point_in_widget)) {
++    return;
++  }
++
++  ui::MouseWheelEvent* wheel_event = event->AsMouseWheelEvent();
++  wheel_event->set_location(point_in_widget);
++  canvas_view_->OnMouseWheel(*wheel_event);
++
++  // Claim it fully -- otherwise the same gesture would also reach the
++  // WebView underneath (Chrome's native per-page zoom, even though it's
++  // disabled for grid cells -- see BuildGridView's ZOOM_MODE_DISABLED
++  // comment -- or, at minimum, a wasted scroll attempt).
++  event->SetHandled();
++  event->StopPropagation();
++}
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.h
+new file mode 100644
+index 0000000000000..e17c7d9dbce70
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.h
+@@ -0,0 +1,48 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_WHEEL_INTERCEPTOR_AURA_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_WHEEL_INTERCEPTOR_AURA_H_
++
++#include "base/memory/raw_ptr.h"
++#include "ui/events/event_handler.h"
++
++class AppSwapResponsiveLabCanvasView;
++
++// A pre-target event handler (registered on the browser window's own
++// aura::Window -- see AppSwapResponsiveLabOverlayView::AddedToWidget())
++// that intercepts Ctrl+Wheel events anywhere in the window, before they
++// reach their normal target, and routes them to `canvas_view`'s own
++// Ctrl+Wheel-to-zoom handling if they land within it.
++//
++// This exists because a grid cell's views::WebView hosts a real native
++// renderer window (RenderWidgetHostView), which receives wheel input
++// directly rather than through normal views::View event dispatch --
++// canvas_view's own OnMouseWheel() override only ever sees events that
++// land on empty canvas background, never ones over a cell, since the
++// WebView (being on top, and native) claims those first. Modeled on
++// WebUIBubbleEventHandlerAura (chrome/browser/ui/views/bubble/), which
++// solves the same "native content is stealing events an ancestor view
++// needs first" problem for bubble-drag handling.
++class AppSwapResponsiveLabWheelInterceptorAura : public ui::EventHandler {
++ public:
++  explicit AppSwapResponsiveLabWheelInterceptorAura(
++      AppSwapResponsiveLabCanvasView* canvas_view);
++  AppSwapResponsiveLabWheelInterceptorAura(
++      const AppSwapResponsiveLabWheelInterceptorAura&) = delete;
++  AppSwapResponsiveLabWheelInterceptorAura& operator=(
++      const AppSwapResponsiveLabWheelInterceptorAura&) = delete;
++  ~AppSwapResponsiveLabWheelInterceptorAura() override;
++
++  // ui::EventHandler:
++  void OnMouseEvent(ui::MouseEvent* event) override;
++
++ private:
++  // Owned by AppSwapResponsiveLabOverlayView, which outlives this object
++  // (constructed/destroyed alongside it in AddedToWidget()/
++  // RemovedFromWidget()) and owns canvas_view_ too, for the same lifetime.
++  const raw_ptr<AppSwapResponsiveLabCanvasView> canvas_view_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_WHEEL_INTERCEPTOR_AURA_H_
+diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
+index 099b89a24c048..36d1718361144 100644
+--- a/chrome/browser/ui/views/frame/contents_container_view.cc
++++ b/chrome/browser/ui/views/frame/contents_container_view.cc
+@@ -9,7 +9,9 @@
+ #include <utility>
+ 
+ #include "base/i18n/rtl.h"
++#include "base/logging.h"
+ #include "chrome/browser/actor/ui/actor_overlay_web_view.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h"
+ #include "chrome/browser/devtools/devtools_contents_resizing_strategy.h"
+ #include "chrome/browser/enterprise/data_protection/data_protection_overlay_view.h"
+ #include "chrome/browser/glic/browser_ui/context_sharing_border_view.h"
+@@ -126,6 +128,9 @@ ContentsContainerView::ContentsContainerView(BrowserView* browser_view)
+   read_anything_immersive_overlay_view_ =
+       AddChildView(std::move(read_anything_immersive_overlay_view));
+ 
++  app_swap_responsive_lab_overlay_view_ = AddChildView(
++      std::make_unique<AppSwapResponsiveLabOverlayView>());
++
+   contents_scrim_view_ = AddChildView(std::make_unique<ScrimView>());
+   contents_scrim_view_->layer()->SetName("ContentsScrimView");
+ 
+@@ -600,6 +605,19 @@ views::ProposedLayout ContentsContainerView::CalculateProposedLayout(
+                                        non_devtools_contents_bounds);
+   }
+ 
++  // Same bounds as the contents view -- this replaces it entirely while
++  // AppSwap Responsive Lab is active, rather than overlaying on top of it
++  // (see AppSwapResponsiveLabButton::SyncContentsContainer, which hides
++  // contents_view_ for the same tab this shows for).
++  // TEMPORARY debug logging: remove once the blank-grid bug is found.
++  LOG(ERROR) << "[ResponsiveLab] CalculateProposedLayout: overlay visible="
++             << app_swap_responsive_lab_overlay_view_->GetVisible()
++             << " bounds=" << non_devtools_contents_bounds.ToString();
++  layouts.child_layouts.emplace_back(
++      app_swap_responsive_lab_overlay_view_.get(),
++      app_swap_responsive_lab_overlay_view_->GetVisible(),
++      non_devtools_contents_bounds);
++
+   if (mini_toolbar_) {
+     // |mini_toolbar_| should be offset in the bottom right corner, overlapping
+     // the outline. Shrink the available space by corner radius to ensure we
+diff --git a/chrome/browser/ui/views/frame/contents_container_view.h b/chrome/browser/ui/views/frame/contents_container_view.h
+index e3ae9d104db2d..c2237b19698ff 100644
+--- a/chrome/browser/ui/views/frame/contents_container_view.h
++++ b/chrome/browser/ui/views/frame/contents_container_view.h
+@@ -17,6 +17,7 @@
+ #include "ui/views/layout/delegating_layout_manager.h"
+ #include "ui/views/view.h"
+ 
++class AppSwapResponsiveLabOverlayView;
+ class BrowserView;
+ class ContentsCaptureBorderView;
+ class ContentsContainerOutline;
+@@ -107,6 +108,14 @@ class ContentsContainerView : public views::View,
+ 
+   views::View* indigo_overlay_view() { return indigo_overlay_view_; }
+ 
++  // Shown in place of contents_view() while AppSwap Responsive Lab is
++  // active for the tab currently shown here -- see
++  // AppSwapResponsiveLabButton, which toggles it and keeps it in sync with
++  // the active tab.
++  AppSwapResponsiveLabOverlayView* app_swap_responsive_lab_overlay_view() {
++    return app_swap_responsive_lab_overlay_view_;
++  }
++
+   // Sets the contents resizing strategy.
+   void SetContentsResizingStrategy(
+       const DevToolsContentsResizingStrategy& strategy);
+@@ -229,6 +238,12 @@ class ContentsContainerView : public views::View,
+   // area it wants to float.
+   raw_ptr<views::View> indigo_overlay_view_ = nullptr;
+ 
++  // The grid of device-preset viewports shown in place of contents_view_
++  // while AppSwap Responsive Lab is active for the tab this container
++  // currently shows.
++  raw_ptr<AppSwapResponsiveLabOverlayView>
++      app_swap_responsive_lab_overlay_view_ = nullptr;
++
+   // See `SetTargetContentSize()`.
+   std::optional<gfx::Outsets> target_content_bounds_;
+ 
+diff --git a/ui/views/controls/native/native_view_host.cc b/ui/views/controls/native/native_view_host.cc
+index 9a8c18843cddc..83158aafe2137 100644
+--- a/ui/views/controls/native/native_view_host.cc
++++ b/ui/views/controls/native/native_view_host.cc
+@@ -157,7 +157,22 @@ void NativeViewHost::Layout(PassKey) {
+   bool visible = !vis_bounds.IsEmpty();
+ 
+ #if !BUILDFLAG(IS_MAC)
+-  if (visible && !fast_resize_) {
++  // Skip this when a fixed native_view_size_ is set (AppSwap Responsive
++  // Lab): that means the native view's own size is pinned independent of
++  // this View's (possibly transform-scaled) bounds, precisely so an
++  // ancestor's zoom transform visually magnifies a fixed-resolution
++  // surface rather than resizing/reflowing it (see
++  // AppSwapResponsiveLabGridHolder's PinnedSizeWebView). This clip, by
++  // contrast, is computed from GetVisibleBounds() -- a view-bounds-based
++  // (not native-size-based) computation -- and installed on the native
++  // layer independent of the transform ShowWidget() applies below; in
++  // testing, combined with a scaled ancestor, that produced clipping that
++  // didn't match the transformed visual position (content appearing to
++  // start partway down the viewport instead of flush with its edge). The
++  // ancestor that owns the transform already has its own layer mask
++  // clipping everything in this scenario, making this View-level clip
++  // both redundant and, here, actively wrong.
++  if (visible && !fast_resize_ && native_view_size_.IsEmpty()) {
+     if (vis_bounds.size() != size()) {
+       // Only a portion of the Widget is really visible.
+       int x = vis_bounds.x();
+@@ -169,6 +184,8 @@ void NativeViewHost::Layout(PassKey) {
+       // uninstall it.
+       native_wrapper_->UninstallClip();
+     }
++  } else if (native_wrapper_->HasInstalledClip()) {
++    native_wrapper_->UninstallClip();
+   }
+ #endif
+   if (visible) {
