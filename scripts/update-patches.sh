@@ -107,12 +107,24 @@ echo "Generating patches..."
 
 sync_binary_resources
 
+# The exclude() below carves each locale scripts/update-translations.py
+# has actually generated AppSwap-specific translations for out of this
+# patch's otherwise-blanket xtb glob, so that locale's translations live
+# solely in 0018-i18n-*.patch instead of being captured redundantly here
+# too -- see that patch's own comment. Every other (not-yet-touched)
+# locale's xtb stays owned by this glob as before (still just the
+# original vanilla-Chromium "Chromium"->"AppSwap" substitution from this
+# patch's own initial rebrand). When a future session adds another
+# locale's translations to 0018, add that locale's exclude() here in the
+# SAME change -- excluding a locale here without 0018 covering it yet
+# would silently drop its existing translations from every patch.
 gen 0001-branding.patch \
   chrome/app/chromium_strings.grd \
   chrome/app/password_manager_ui_strings.grdp \
   chrome/app/settings_chromium_strings.grdp \
   components/components_chromium_strings.grd \
   'components/strings/components_chromium_strings_*.xtb' \
+  ':(exclude)components/strings/components_chromium_strings_ru.xtb' \
   extensions/strings/extensions_chromium_strings.grdp \
   'extensions/strings/extensions_strings_*.xtb' \
   chrome/app/theme/chromium/BRANDING \
@@ -420,15 +432,19 @@ gen 0015-projects.patch \
 # code uses to open it -- every other reference is to the shared Route
 # object or an internal view id, not the path string itself, so only these
 # two needed to change) and retextures the stock profile-creation/
-# management dialogs' English strings plus their Russian translations from
-# "profile" to "project" wording (profiles_strings.grdp,
-# settings_strings.grdp, generated_resources_ru.xtb, chromium_strings_ru.xtb
-# -- settings_chromium_strings.grdp is already covered by 0001 above). New
-# message ids for the retextured strings were computed with grit's own
-# `xmb` tool against a minimal probe .grd (verified by first reproducing
-# the *existing* ids from the current Russian translations before trusting
-# the new ones), not hand-derived, since grit's fingerprint depends on the
-# exact processed message content.
+# management dialogs' English strings from "profile" to "project" wording
+# (profiles_strings.grdp, settings_strings.grdp -- settings_chromium_strings.grdp
+# is already covered by 0001 above). The matching Russian retranslations for
+# these (and every other AppSwap-specific string) live in
+# 0018-i18n-ru-translations.patch instead of here -- see that patch's own
+# comment and scripts/update-translations.py for why translations are kept
+# in one dedicated patch stream rather than scattered across whichever
+# feature patch happened to introduce each string. New message ids for the
+# retextured strings were computed with grit's own `xmb` tool against a
+# minimal probe .grd (verified by first reproducing the *existing* ids from
+# the current Russian translations before trusting the new ones), not
+# hand-derived, since grit's fingerprint depends on the exact processed
+# message content.
 #
 # Follow-up in this same patch: the button was rebuilt to reuse Chromium's
 # own native profile-switcher bubble (ProfileMenuCoordinator/ProfileMenuView)
@@ -454,8 +470,6 @@ gen 0015-projects.patch \
 gen 0016-project-selector-and-terminology.patch \
   chrome/app/generated_resources.grd \
   chrome/app/profiles_strings.grdp \
-  chrome/app/resources/chromium_strings_ru.xtb \
-  chrome/app/resources/generated_resources_ru.xtb \
   chrome/app/settings_strings.grdp \
   chrome/browser/resources/settings/route.ts \
   chrome/browser/resources/settings/page_visibility.ts \
@@ -520,6 +534,23 @@ gen 0017-responsive-lab.patch \
   chrome/browser/ui/views/frame/contents_container_view.h \
   ui/views/controls/native/native_view_host.cc \
   ui/views/controls/native/native_view_host_mac.mm
+
+# Translations for AppSwap-specific strings (new, or whose English text was
+# changed by one of our own patches -- vanilla Chromium's own strings
+# already get real translations from Google's own pipeline on every DEPS
+# roll, and re-translating those ourselves would just fight upstream).
+# Deliberately its own patch, decoupled from the feature patches that
+# actually introduced these strings: adding coverage for another locale
+# later means regenerating this one patch, not every feature patch that's
+# ever touched a translatable string. See scripts/update-translations.py.
+# Includes chromium_strings_ru.xtb/generated_resources_ru.xtb's Russian
+# retexturing that used to live in 0016's own patch -- moved here for the
+# same reason (0016 stayed responsible for the .grd/.grdp English source,
+# not the translations).
+gen 0018-i18n-ru-translations.patch \
+  chrome/app/resources/chromium_strings_ru.xtb \
+  chrome/app/resources/generated_resources_ru.xtb \
+  components/strings/components_chromium_strings_ru.xtb
 
 # Whether `f` (a path relative to src/) is one of the images tracked under
 # resources/ instead of as a patch -- sync_binary_resources() above already
