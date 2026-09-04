@@ -1284,10 +1284,10 @@ index 0000000000000..808cecbeee537
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_MINIMAP_VIEW_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc
 new file mode 100644
-index 0000000000000..c16bc7bfeeef4
+index 0000000000000..0aa5cc2ed178b
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc
-@@ -0,0 +1,231 @@
+@@ -0,0 +1,246 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1313,6 +1313,9 @@ index 0000000000000..c16bc7bfeeef4
 +#if defined(USE_AURA)
 +#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.h"
 +#include "ui/aura/window.h"
++#endif
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_observer_mac.h"
 +#endif
 +
 +namespace {
@@ -1476,6 +1479,15 @@ index 0000000000000..c16bc7bfeeef4
 +    window->AddPreTargetHandler(wheel_interceptor_.get());
 +  }
 +#endif
++#if BUILDFLAG(IS_MAC)
++  // See AppSwapResponsiveLabWheelObserverMac's own comment for why this
++  // exists (the Aura pre-target handler above has no macOS equivalent) and
++  // its accepted trade-off versus that Aura version. Its constructor reads
++  // GetWidget() itself, so it must be constructed here, after this view is
++  // actually attached to one.
++  wheel_observer_mac_ =
++      std::make_unique<AppSwapResponsiveLabWheelObserverMac>(canvas_view_);
++#endif
 +}
 +
 +void AppSwapResponsiveLabOverlayView::RemovedFromWidget() {
@@ -1486,6 +1498,9 @@ index 0000000000000..c16bc7bfeeef4
 +    }
 +    wheel_interceptor_.reset();
 +  }
++#endif
++#if BUILDFLAG(IS_MAC)
++  wheel_observer_mac_.reset();
 +#endif
 +}
 +
@@ -1521,10 +1536,10 @@ index 0000000000000..c16bc7bfeeef4
 +END_METADATA
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h
 new file mode 100644
-index 0000000000000..88c4ecf95cad8
+index 0000000000000..3919b18d81f3f
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,168 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1549,6 +1564,9 @@ index 0000000000000..88c4ecf95cad8
 +
 +#if defined(USE_AURA)
 +class AppSwapResponsiveLabWheelInterceptorAura;
++#endif
++#if BUILDFLAG(IS_MAC)
++class AppSwapResponsiveLabWheelObserverMac;
 +#endif
 +
 +namespace content {
@@ -1679,6 +1697,14 @@ index 0000000000000..88c4ecf95cad8
 +#if defined(USE_AURA)
 +  std::unique_ptr<AppSwapResponsiveLabWheelInterceptorAura> wheel_interceptor_;
 +#endif
++
++  // macOS equivalent of wheel_interceptor_ above -- Views on macOS doesn't
++  // use aura::Window, so there's no ui::EventHandler pre-target mechanism
++  // to hook into there. See AppSwapResponsiveLabWheelObserverMac's own
++  // comment for the (accepted) trade-off versus the Aura version.
++#if BUILDFLAG(IS_MAC)
++  std::unique_ptr<AppSwapResponsiveLabWheelObserverMac> wheel_observer_mac_;
++#endif
 +};
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_OVERLAY_VIEW_H_
@@ -1801,6 +1827,125 @@ index 0000000000000..e17c7d9dbce70
 +};
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_WHEEL_INTERCEPTOR_AURA_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_observer_mac.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_observer_mac.cc
+new file mode 100644
+index 0000000000000..dab20b67edd1b
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_observer_mac.cc
+@@ -0,0 +1,49 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_observer_mac.h"
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h"
++#include "ui/events/event.h"
++#include "ui/gfx/geometry/point.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/views/event_monitor.h"
++#include "ui/views/view.h"
++#include "ui/views/widget/widget.h"
++
++AppSwapResponsiveLabWheelObserverMac::AppSwapResponsiveLabWheelObserverMac(
++    AppSwapResponsiveLabCanvasView* canvas_view)
++    : canvas_view_(canvas_view) {
++  views::Widget* widget = canvas_view_->GetWidget();
++  if (!widget) {
++    return;
++  }
++  monitor_ = views::EventMonitor::CreateWindowMonitor(
++      this, widget->GetNativeWindow(), {ui::EventType::kMousewheel});
++}
++
++AppSwapResponsiveLabWheelObserverMac::
++    ~AppSwapResponsiveLabWheelObserverMac() = default;
++
++void AppSwapResponsiveLabWheelObserverMac::OnEvent(const ui::Event& event) {
++  if (!event.IsMouseWheelEvent() || !event.IsControlDown() ||
++      !canvas_view_->GetVisible() || !canvas_view_->has_content()) {
++    return;
++  }
++
++  // EventObserver's own class comment: "The root location of located
++  // events is always in screen coordinates" -- bridge that into
++  // canvas_view_'s own local space the same way normal views::View event
++  // dispatch would.
++  const ui::MouseWheelEvent* wheel_event = event.AsMouseWheelEvent();
++  gfx::Point point_in_canvas = wheel_event->root_location();
++  views::View::ConvertPointFromScreen(canvas_view_, &point_in_canvas);
++  if (!canvas_view_->GetLocalBounds().Contains(point_in_canvas)) {
++    return;
++  }
++
++  ui::MouseWheelEvent local_event(*wheel_event);
++  local_event.set_location(point_in_canvas);
++  canvas_view_->OnMouseWheel(local_event);
++}
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_observer_mac.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_observer_mac.h
+new file mode 100644
+index 0000000000000..59bdb7d64087a
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_observer_mac.h
+@@ -0,0 +1,58 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_WHEEL_OBSERVER_MAC_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_WHEEL_OBSERVER_MAC_H_
++
++#include <memory>
++
++#include "base/memory/raw_ptr.h"
++#include "ui/events/event_observer.h"
++
++class AppSwapResponsiveLabCanvasView;
++
++namespace views {
++class EventMonitor;
++}  // namespace views
++
++// macOS equivalent of AppSwapResponsiveLabWheelInterceptorAura (see that
++// class's own comment for the underlying problem: a grid cell's WebView
++// hosts native content that claims wheel input directly, so
++// canvas_view's own Ctrl+Wheel-to-zoom handling never sees the event when
++// the cursor is over a cell instead of empty canvas background). Views on
++// macOS doesn't use aura::Window, so there's no ui::EventHandler
++// pre-target mechanism to hook into there -- this uses views::EventMonitor
++// instead, which works cross-platform including on macOS.
++//
++// Trade-off: unlike Aura's pre-target handler, an EventMonitor's
++// ui::EventObserver "cannot modify events nor mark them as handled" (see
++// its own class comment) -- so on macOS, a Ctrl+Wheel gesture over a grid
++// cell still also reaches that cell's WebView afterward (as a plain
++// scroll; native per-page zoom is separately disabled regardless -- see
++// BuildGridView's ZOOM_MODE_DISABLED comment). That's an accepted rough
++// edge: still strictly better than Ctrl+Wheel not zooming the canvas at
++// all when the cursor is over a cell, which is the alternative.
++class AppSwapResponsiveLabWheelObserverMac : public ui::EventObserver {
++ public:
++  explicit AppSwapResponsiveLabWheelObserverMac(
++      AppSwapResponsiveLabCanvasView* canvas_view);
++  AppSwapResponsiveLabWheelObserverMac(
++      const AppSwapResponsiveLabWheelObserverMac&) = delete;
++  AppSwapResponsiveLabWheelObserverMac& operator=(
++      const AppSwapResponsiveLabWheelObserverMac&) = delete;
++  ~AppSwapResponsiveLabWheelObserverMac() override;
++
++  // ui::EventObserver:
++  void OnEvent(const ui::Event& event) override;
++
++ private:
++  // Owned by AppSwapResponsiveLabOverlayView, which outlives this object
++  // (constructed/destroyed alongside it in AddedToWidget()/
++  // RemovedFromWidget()) and owns canvas_view_ too, for the same lifetime.
++  const raw_ptr<AppSwapResponsiveLabCanvasView> canvas_view_;
++
++  std::unique_ptr<views::EventMonitor> monitor_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_WHEEL_OBSERVER_MAC_H_
 diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
 index 099b89a24c048..36d1718361144 100644
 --- a/chrome/browser/ui/views/frame/contents_container_view.cc
@@ -1922,3 +2067,55 @@ index 9a8c18843cddc..83158aafe2137 100644
    }
  #endif
    if (visible) {
+diff --git a/ui/views/controls/native/native_view_host_mac.mm b/ui/views/controls/native/native_view_host_mac.mm
+index 94c27df8874ab..85448d56ad049 100644
+--- a/ui/views/controls/native/native_view_host_mac.mm
++++ b/ui/views/controls/native/native_view_host_mac.mm
+@@ -11,6 +11,7 @@
+ #import "ui/accessibility/platform/ax_platform_node_mac.h"
+ #include "ui/compositor/layer.h"
+ #include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/transform.h"
+ #include "ui/gfx/native_ui_types.h"
+ #import "ui/views/cocoa/native_widget_mac_ns_window_host.h"
+ #include "ui/views/controls/native/native_view_host.h"
+@@ -285,8 +286,37 @@ void NativeViewHostMac::ShowWidget(int x,
+       host_->GetWidget()->GetClientAreaBoundsInScreen().height();
+ 
+   if (native_view_hostable_) {
+-    native_view_hostable_->ViewsHostableSetBounds(gfx::Rect(x, y, w, h),
+-                                                  superview_height);
++    // AppSwap Responsive Lab: when a fixed native_view_size_ is pinned
++    // (native_w/native_h differ from the logical, possibly zoom-transform-
++    // scaled w/h), keep the hosted WebContentsView rendering at its real,
++    // fixed resolution -- position it at (x, y) but size it to
++    // (native_w, native_h) rather than the scaled (w, h) -- and instead
++    // visually stretch that fixed-resolution content to the desired (w, h)
++    // footprint via a scale transform on the layer it's hosted in
++    // (GetUiLayer(), which ViewsHostableAttach() documents as where the
++    // WebContentsView's own ui::Layer gets added as a child, so scaling it
++    // scales that content too). This mirrors
++    // NativeViewHostAura::ShowWidget()'s transform-scale branch;
++    // ViewsHostableSetBounds() has no "native size" parameter of its own to
++    // do this natively. See NativeViewHost::SetNativeViewSize()'s own
++    // comment for why this matters: without it, zooming an ancestor view
++    // actually resizes (and reflows) the page instead of just visually
++    // magnifying it. In the common case (no pinning: native_w/h always
++    // default to w/h in NativeViewHost::Layout() when native_view_size_
++    // isn't set), the transform stays identity and behavior is unchanged.
++    if (ui::Layer* layer = GetUiLayer()) {
++      gfx::Transform transform;
++      if (w > 0 && h > 0 && native_w > 0 && native_h > 0 &&
++          (w != native_w || h != native_h)) {
++        transform.Scale(static_cast<float>(w) / native_w,
++                        static_cast<float>(h) / native_h);
++      }
++      if (layer->transform() != transform) {
++        layer->SetTransform(transform);
++      }
++    }
++    native_view_hostable_->ViewsHostableSetBounds(
++        gfx::Rect(x, y, native_w, native_h), superview_height);
+     native_view_hostable_->ViewsHostableSetVisible(true);
+   } else {
+     // Coordinates will be from the top left of the parent Widget. The

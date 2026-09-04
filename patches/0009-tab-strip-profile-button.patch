@@ -37,10 +37,10 @@ index 50920511caf57..1d60d43aaa310 100644
        "views/profiles/profile_menu_coordinator.cc",
 diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..25640a13d1881
+index 0000000000000..6be3008d5e0c6
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/BUILD.gn
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,70 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -102,6 +102,13 @@ index 0000000000000..25640a13d1881
 +      "app_swap_responsive_lab_wheel_interceptor_aura.h",
 +    ]
 +    deps += [ "//ui/aura" ]
++  }
++
++  if (is_mac) {
++    sources += [
++      "app_swap_responsive_lab_wheel_observer_mac.cc",
++      "app_swap_responsive_lab_wheel_observer_mac.h",
++    ]
 +  }
 +}
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc b/chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc

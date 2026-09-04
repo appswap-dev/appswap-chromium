@@ -512,11 +512,14 @@ gen 0017-responsive-lab.patch \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.cc \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_interceptor_aura.h \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_observer_mac.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_wheel_observer_mac.h \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.h \
   chrome/browser/ui/views/frame/contents_container_view.cc \
   chrome/browser/ui/views/frame/contents_container_view.h \
-  ui/views/controls/native/native_view_host.cc
+  ui/views/controls/native/native_view_host.cc \
+  ui/views/controls/native/native_view_host_mac.mm
 
 # Whether `f` (a path relative to src/) is one of the images tracked under
 # resources/ instead of as a patch -- sync_binary_resources() above already
