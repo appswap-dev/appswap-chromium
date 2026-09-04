@@ -13,3 +13,6 @@
 /dist/
 /out/
 *.log
+
+# ---- Python bytecode cache ----
+__pycache__/

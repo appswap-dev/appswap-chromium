@@ -17,6 +17,16 @@ echo "Resetting src/ to a clean checkout..."
 git -C "$ROOT/src" reset --hard HEAD
 git -C "$ROOT/src" clean -fd
 
+# PROJECT_NAME (outer repo, not src/) tracks whatever name
+# scripts/rename-project.py last renamed the product to -- reset it back to
+# its committed value here too, so it stays in sync with src/'s branding
+# text after a revert. rename-project.py reads this file to know what to
+# search for, so leaving it stale would make the next rename silently find
+# nothing to rename.
+if git -C "$ROOT" cat-file -e HEAD:PROJECT_NAME 2>/dev/null; then
+  git -C "$ROOT" checkout HEAD -- PROJECT_NAME
+fi
+
 DEVTOOLS_DIR="$ROOT/src/third_party/devtools-frontend/src"
 if [[ -d "$DEVTOOLS_DIR/.git" ]]; then
   echo "Resetting devtools-frontend checkout to a clean state..."
