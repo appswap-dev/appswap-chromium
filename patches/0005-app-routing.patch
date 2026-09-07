@@ -2523,7 +2523,7 @@ index 0000000000000..fe601f5a4a79b
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index dde051181fa13..a3f29515c07cc 100644
+index dde051181fa13..9ac8b4e37ba27 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
 @@ -644,6 +644,9 @@
@@ -2603,6 +2603,41 @@ index dde051181fa13..a3f29515c07cc 100644
  #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
    if (disable_secure_dns) {
      WebContents* web_contents = WebContents::FromRenderFrameHost(frame);
+@@ -7391,20 +7440,21 @@ bool ChromeContentBrowserClient::ShowPaymentHandlerWindow(
+ bool ChromeContentBrowserClient::HandleWebUIReverse(
+     GURL* url,
+     content::BrowserContext* browser_context) {
+-#if BUILDFLAG(CHROME_ROOT_STORE_CERT_MANAGEMENT_UI)
+-  // No need to actually reverse-rewrite the URL, but return true to update the
+-  // displayed URL when rewriting chrome://settings/certificates to
+-  // chrome://certificate-manager
+-  if (url->SchemeIs(content::kChromeUIScheme) &&
+-      url->host() == chrome::kChromeUICertificateManagerHost) {
+-    return true;
++  // Show AppSwap's own scheme instead of the internal WebUI scheme for
++  // every WebUI page -- the reverse side of HandleAppSwapURLRewrite
++  // (browser_about_handler.cc), which does the opposite on the way in.
++  // This subsumes the old certificate-manager/settings-host special
++  // cases this function used to have (both only ever needed to return
++  // true, to force the displayed/virtual URL to settle onto the
++  // just-committed real URL): this does that for every WebUI host, not
++  // just those two, while also swapping the scheme shown.
++  if (!url->SchemeIs(content::kChromeUIScheme)) {
++    return false;
+   }
+-#endif  // BUILDFLAG(CHROME_ROOT_STORE_CERT_MANAGEMENT_UI)
+-
+-  // No need to actually reverse-rewrite the URL, but return true to update the
+-  // displayed URL when rewriting chrome://help to chrome://settings/help.
+-  return url->SchemeIs(content::kChromeUIScheme) &&
+-         url->host() == chrome::kChromeUISettingsHost;
++  GURL::Replacements replacements;
++  replacements.SetSchemeStr(content::kAppSwapUIScheme);
++  *url = url->ReplaceComponents(replacements);
++  return true;
+ }
+ 
+ void ChromeContentBrowserClient::AddExtraPart(
 diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
 index 17a9289e00ac8..de8b852c459c4 100644
 --- a/chrome/browser/ui/webui/BUILD.gn

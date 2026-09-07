@@ -219,7 +219,12 @@ gen 0007-appswap-scheme-omnibox-badge.patch \
   chrome/browser/ui/views/page_info/page_info_main_view.cc \
   components/page_info/page_info.cc \
   components/omnibox/browser/BUILD.gn \
-  components/omnibox/browser/vector_icons/npm_package.icon
+  components/omnibox/browser/vector_icons/npm_package.icon \
+  chrome/browser/download/insecure_download_blocking.cc \
+  chrome/browser/ssl/known_interception_disclosure_infobar_delegate.cc \
+  chrome/browser/ui/webui/top_chrome/top_chrome_webui_config.cc \
+  chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.cc \
+  chrome/browser/favicon/chrome_favicon_client.cc
 
 gen 0008-app-profiles.patch \
   chrome/browser/app_swap/app_swap_profiles_service.cc \

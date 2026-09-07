@@ -1,3 +1,62 @@
+diff --git a/chrome/browser/download/insecure_download_blocking.cc b/chrome/browser/download/insecure_download_blocking.cc
+index 61c2bb0ce86d3..c6970347a82ec 100644
+--- a/chrome/browser/download/insecure_download_blocking.cc
++++ b/chrome/browser/download/insecure_download_blocking.cc
+@@ -294,6 +294,7 @@ struct InsecureDownloadData {
+         content::DownloadItemUtils::GetRenderFrameHost(item);
+     is_initiated_from_trusted_webui_ =
+         item->GetTabUrl().SchemeIs(content::kChromeUIScheme) ||
++        item->GetTabUrl().SchemeIs(content::kAppSwapUIScheme) ||
+         (rfh && rfh->GetLastCommittedURL().SchemeIs(content::kChromeUIScheme));
+   }
+ 
+diff --git a/chrome/browser/favicon/chrome_favicon_client.cc b/chrome/browser/favicon/chrome_favicon_client.cc
+index 3818b98afd1bb..830004a87b11d 100644
+--- a/chrome/browser/favicon/chrome_favicon_client.cc
++++ b/chrome/browser/favicon/chrome_favicon_client.cc
+@@ -11,6 +11,7 @@
+ #include "components/bookmarks/browser/bookmark_model.h"
+ #include "components/dom_distiller/core/url_constants.h"
+ #include "components/dom_distiller/core/url_utils.h"
++#include "content/public/common/url_constants.h"
+ #include "extensions/buildflags/buildflags.h"
+ #include "url/gurl.h"
+ 
+@@ -61,7 +62,12 @@ bool ChromeFaviconClient::IsNativeApplicationURL(const GURL& url) {
+   }
+ #endif
+ 
+-  return url.SchemeIs(content::kChromeUIScheme);
++  // A bookmark/history entry for a WebUI page is stored under AppSwap's
++  // own appswap:// display alias (ChromeContentBrowserClient::
++  // HandleWebUIReverse), not the real chrome:// scheme -- still a native
++  // (bundled-resource) favicon, not one to fetch/cache like a real site's.
++  return url.SchemeIs(content::kChromeUIScheme) ||
++         url.SchemeIs(content::kAppSwapUIScheme);
+ }
+ 
+ bool ChromeFaviconClient::IsReaderModeURL(const GURL& url) {
+diff --git a/chrome/browser/ssl/known_interception_disclosure_infobar_delegate.cc b/chrome/browser/ssl/known_interception_disclosure_infobar_delegate.cc
+index 91fd096a6f9ba..900266e7d18af 100644
+--- a/chrome/browser/ssl/known_interception_disclosure_infobar_delegate.cc
++++ b/chrome/browser/ssl/known_interception_disclosure_infobar_delegate.cc
+@@ -73,10 +73,12 @@ KnownInterceptionDisclosureCooldown::~KnownInterceptionDisclosureCooldown() =
+ void MaybeShowKnownInterceptionDisclosureDialog(
+     content::WebContents* web_contents,
+     net::CertStatus cert_status) {
+-  // Don't show the disclosure on chrome:// URLs. This prevents the somewhat
+-  // confusing case of the infobar/message showing on top of the learn more
+-  // page.
+-  if (web_contents->GetVisibleURL().SchemeIs(content::kChromeUIScheme)) {
++  // Don't show the disclosure on chrome:// (or its appswap:// display
++  // alias -- GetVisibleURL() reflects whichever scheme the page is
++  // currently shown under) URLs. This prevents the somewhat confusing
++  // case of the infobar/message showing on top of the learn more page.
++  if (web_contents->GetVisibleURL().SchemeIs(content::kChromeUIScheme) ||
++      web_contents->GetVisibleURL().SchemeIs(content::kAppSwapUIScheme)) {
+     return;
+   }
+ 
 diff --git a/chrome/browser/ui/toolbar/BUILD.gn b/chrome/browser/ui/toolbar/BUILD.gn
 index bbbeb90544d75..f781975b120dc 100644
 --- a/chrome/browser/ui/toolbar/BUILD.gn
@@ -436,6 +495,65 @@ index 5bcdfb8d63a66..8f8b6ed6d5be4 100644
    if (identity_info.safe_browsing_status ==
        PageInfo::SAFE_BROWSING_STATUS_WARNABLE_SUSPICIOUS_SITE) {
      security_container_view_->AddChildView(
+diff --git a/chrome/browser/ui/webui/top_chrome/top_chrome_webui_config.cc b/chrome/browser/ui/webui/top_chrome/top_chrome_webui_config.cc
+index c2339acc207fe..edce59586708f 100644
+--- a/chrome/browser/ui/webui/top_chrome/top_chrome_webui_config.cc
++++ b/chrome/browser/ui/webui/top_chrome/top_chrome_webui_config.cc
+@@ -10,6 +10,7 @@
+ #include "base/memory/raw_ptr.h"
+ #include "base/no_destructor.h"
+ #include "content/public/browser/webui_config_map.h"
++#include "content/public/common/url_constants.h"
+ 
+ namespace {
+ 
+@@ -40,8 +41,23 @@ bool TopChromeWebUIConfig::SupportsInProcessResourceLoadingV2() const {
+ TopChromeWebUIConfig* TopChromeWebUIConfig::From(
+     content::BrowserContext* browser_context,
+     const GURL& url) {
++  // Callers commonly pass a WebContents's *visible* URL (see
++  // WebUIContentsPreloadManager::OnWebContentsPrimaryPageChanged), which for
++  // a top-chrome WebUI page may carry AppSwap's own appswap:// display
++  // alias (ChromeContentBrowserClient::HandleWebUIReverse) rather than the
++  // real chrome:// scheme every WebUIConfig is actually registered under.
++  // Normalize before looking up, or the lookup silently fails and every
++  // caller here gets a null TopChromeWebUIConfig for a page that really
++  // does have one.
++  GURL lookup_url = url;
++  if (url.SchemeIs(content::kAppSwapUIScheme)) {
++    GURL::Replacements replacements;
++    replacements.SetSchemeStr(content::kChromeUIScheme);
++    lookup_url = url.ReplaceComponents(replacements);
++  }
+   content::WebUIConfig* config =
+-      content::WebUIConfigMap::GetInstance().GetConfig(browser_context, url);
++      content::WebUIConfigMap::GetInstance().GetConfig(browser_context,
++                                                        lookup_url);
+   return GetTopChromeWebUIConfigSet().contains(config)
+              ? static_cast<TopChromeWebUIConfig*>(config)
+              : nullptr;
+diff --git a/chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.cc b/chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.cc
+index b45f3ba245bb8..2fdd14e1613e7 100644
+--- a/chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.cc
++++ b/chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.cc
+@@ -674,10 +674,14 @@ void WebUIContentsPreloadManager::OnWebContentsPrimaryPageChanged(
+                               .GetDeprecatedSiteURL()
+                               .possibly_invalid_spec());
+ 
++    // TopChromeWebUIConfig::From() can legitimately return null here (see
++    // the TODO above) -- don't crash on it, just skip the auto-resize this
++    // one time; the crash keys above already capture what's needed to
++    // investigate why the lookup missed.
++    TopChromeWebUIConfig* top_chrome_config = TopChromeWebUIConfig::From(
++        web_contents->GetBrowserContext(), web_contents->GetVisibleURL());
+     const bool should_auto_reisze_host =
+-        TopChromeWebUIConfig::From(web_contents->GetBrowserContext(),
+-                                   web_contents->GetVisibleURL())
+-            ->ShouldAutoResizeHost();
++        top_chrome_config && top_chrome_config->ShouldAutoResizeHost();
+     if (render_widget_host_view && should_auto_reisze_host) {
+       render_widget_host_view->EnableAutoResize(gfx::Size(1, 1),
+                                                 gfx::Size(INT_MAX, INT_MAX));
 diff --git a/components/omnibox/browser/BUILD.gn b/components/omnibox/browser/BUILD.gn
 index 295c822aea260..b350aae6da714 100644
 --- a/components/omnibox/browser/BUILD.gn
