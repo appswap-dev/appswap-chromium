@@ -1,8 +1,8 @@
 diff --git a/ui/base/l10n/l10n_util.cc b/ui/base/l10n/l10n_util.cc
-index 466e9001064cb..cb9cf532254dc 100644
+index 588f181c6af68..73837211f1ed5 100644
 --- a/ui/base/l10n/l10n_util.cc
 +++ b/ui/base/l10n/l10n_util.cc
-@@ -569,6 +569,29 @@ bool IsUserFacingUILocale(std::string_view locale) {
+@@ -568,6 +568,29 @@ bool IsUserFacingUILocale(std::string_view locale) {
      return false;
    }
  

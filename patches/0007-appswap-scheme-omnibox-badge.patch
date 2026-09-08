@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/download/insecure_download_blocking.cc b/chrome/browser/download/insecure_download_blocking.cc
-index 61c2bb0ce86d3..c6970347a82ec 100644
+index 2ecba5bf9ab24..40d0d4c3883bc 100644
 --- a/chrome/browser/download/insecure_download_blocking.cc
 +++ b/chrome/browser/download/insecure_download_blocking.cc
-@@ -294,6 +294,7 @@ struct InsecureDownloadData {
+@@ -295,6 +295,7 @@ struct InsecureDownloadData {
          content::DownloadItemUtils::GetRenderFrameHost(item);
      is_initiated_from_trusted_webui_ =
          item->GetTabUrl().SchemeIs(content::kChromeUIScheme) ||
@@ -104,7 +104,7 @@ index 4e23238dea745..d3a193b759016 100644
                   ? omnibox::kChromeProductIcon
                   : omnibox::kProductChromeRefreshOldIcon);
 diff --git a/chrome/browser/ui/views/location_bar/BUILD.gn b/chrome/browser/ui/views/location_bar/BUILD.gn
-index 8ec3b04f08a10..62e50333a5819 100644
+index dc501a5030186..4d96d304a425a 100644
 --- a/chrome/browser/ui/views/location_bar/BUILD.gn
 +++ b/chrome/browser/ui/views/location_bar/BUILD.gn
 @@ -73,6 +73,7 @@ source_set("impl") {
@@ -244,7 +244,7 @@ index 2db8d679023ad..9d487eaee8729 100644
      "//components/safe_browsing/core/browser:suspicious_site_warning_allowlist",
      "//components/strings:components_branded_strings_grit",
 diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
-index ce635526633ef..b3686d2864b4b 100644
+index 2b27529f4473b..42780417cb9d0 100644
 --- a/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 +++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.cc
 @@ -5,17 +5,27 @@
@@ -377,7 +377,7 @@ index ce635526633ef..b3686d2864b4b 100644
    }
  
    // Title insets assume there is content (and thus have no bottom padding). Use
-@@ -222,6 +303,8 @@ PageInfoBubbleView::PageInfoBubbleView(
+@@ -224,6 +305,8 @@ PageInfoBubbleView::PageInfoBubbleView(
    std::unique_ptr<views::View> main_page_view =
        view_factory_->CreateMainPageView(std::move(initialized_callback));
    main_page_view->SetID(PageInfoViewFactory::VIEW_ID_PAGE_INFO_CURRENT_VIEW);
@@ -386,7 +386,7 @@ index ce635526633ef..b3686d2864b4b 100644
    page_container_ = AddChildView(
        std::make_unique<PageSwitcherView>(std::move(main_page_view)));
  
-@@ -238,6 +321,19 @@ PageInfoBubbleView::~PageInfoBubbleView() {
+@@ -240,6 +323,19 @@ PageInfoBubbleView::~PageInfoBubbleView() {
    RemoveAllChildViews();
  }
  
@@ -406,7 +406,7 @@ index ce635526633ef..b3686d2864b4b 100644
  // static
  views::BubbleDialogDelegateView* PageInfoBubbleView::CreatePageInfoBubble(
      std::unique_ptr<PageInfoBubbleSpecification> specification) {
-@@ -270,6 +366,7 @@ void PageInfoBubbleView::OpenMainPage(base::OnceClosure initialized_callback) {
+@@ -273,6 +369,7 @@ void PageInfoBubbleView::OpenMainPage(base::OnceClosure initialized_callback) {
    std::unique_ptr<views::View> main_page_view =
        view_factory_->CreateMainPageView(std::move(initialized_callback));
    main_page_view->SetID(PageInfoViewFactory::VIEW_ID_PAGE_INFO_CURRENT_VIEW);
@@ -414,7 +414,7 @@ index ce635526633ef..b3686d2864b4b 100644
    page_container_->SwitchToPage(std::move(main_page_view));
  
    auto* close_button = page_container_->GetViewByID(
-@@ -310,6 +407,18 @@ void PageInfoBubbleView::OpenCookiesPage() {
+@@ -313,6 +410,18 @@ void PageInfoBubbleView::OpenCookiesPage() {
    AnnouncePageOpened(l10n_util::GetStringUTF16(IDS_PAGE_INFO_COOKIES));
  }
  
@@ -433,7 +433,7 @@ index ce635526633ef..b3686d2864b4b 100644
  void PageInfoBubbleView::OpenMerchantTrustPage() {
    CHECK(merchant_trust_coordinator_);
    auto title = l10n_util::GetStringUTF16(IDS_PAGE_INFO_MERCHANT_TRUST_HEADER);
-@@ -331,6 +440,14 @@ void PageInfoBubbleView::CloseBubble() {
+@@ -334,6 +443,14 @@ void PageInfoBubbleView::CloseBubble() {
        views::Widget::ClosedReason::kCloseButtonClicked);
  }
  
@@ -449,7 +449,7 @@ index ce635526633ef..b3686d2864b4b 100644
    presenter_->UpdateSecurityState();
  }
 diff --git a/chrome/browser/ui/views/page_info/page_info_main_view.cc b/chrome/browser/ui/views/page_info/page_info_main_view.cc
-index 5bcdfb8d63a66..8f8b6ed6d5be4 100644
+index 7664f9eed5091..b966023dc5459 100644
 --- a/chrome/browser/ui/views/page_info/page_info_main_view.cc
 +++ b/chrome/browser/ui/views/page_info/page_info_main_view.cc
 @@ -11,9 +11,11 @@
@@ -472,7 +472,7 @@ index 5bcdfb8d63a66..8f8b6ed6d5be4 100644
  #include "ui/base/l10n/l10n_util.h"
  #include "ui/base/metadata/metadata_impl_macros.h"
  #include "ui/base/models/image_model.h"
-@@ -438,6 +441,22 @@ void PageInfoMainView::SetIdentityInfo(const IdentityInfo& identity_info) {
+@@ -468,6 +471,22 @@ void PageInfoMainView::SetIdentityInfo(const IdentityInfo& identity_info) {
  
    security_container_view_->RemoveAllChildViews();
    extended_site_info_section_->SetVisible(false);
@@ -533,10 +533,10 @@ index c2339acc207fe..edce59586708f 100644
               ? static_cast<TopChromeWebUIConfig*>(config)
               : nullptr;
 diff --git a/chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.cc b/chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.cc
-index b45f3ba245bb8..2fdd14e1613e7 100644
+index bdc15de2863c7..ba6b1c4584594 100644
 --- a/chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.cc
 +++ b/chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.cc
-@@ -674,10 +674,14 @@ void WebUIContentsPreloadManager::OnWebContentsPrimaryPageChanged(
+@@ -675,10 +675,14 @@ void WebUIContentsPreloadManager::OnWebContentsPrimaryPageChanged(
                                .GetDeprecatedSiteURL()
                                .possibly_invalid_spec());
  
@@ -555,7 +555,7 @@ index b45f3ba245bb8..2fdd14e1613e7 100644
        render_widget_host_view->EnableAutoResize(gfx::Size(1, 1),
                                                  gfx::Size(INT_MAX, INT_MAX));
 diff --git a/components/omnibox/browser/BUILD.gn b/components/omnibox/browser/BUILD.gn
-index 295c822aea260..b350aae6da714 100644
+index 1fe7f40cfccf9..8970e3ef88f5d 100644
 --- a/components/omnibox/browser/BUILD.gn
 +++ b/components/omnibox/browser/BUILD.gn
 @@ -78,6 +78,7 @@ aggregate_vector_icons("omnibox_vector_icons") {

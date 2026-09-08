@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index 2a3958f78ddb6..4e6f3b49ffa24 100644
+index bde7030b6eeb6..0b76382b548ff 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
 @@ -916,6 +916,7 @@ source_set("core") {
@@ -2523,10 +2523,10 @@ index 0000000000000..fe601f5a4a79b
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index dde051181fa13..9ac8b4e37ba27 100644
+index b30e20b986fb2..1d6f0b26f756f 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -644,6 +644,9 @@
+@@ -650,6 +650,9 @@
  
  #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
      BUILDFLAG(IS_CHROMEOS)
@@ -2536,7 +2536,7 @@ index dde051181fa13..9ac8b4e37ba27 100644
  #include "chrome/browser/enterprise/network_header_injection/http_header_injection_proxying_url_loader_factory.h"
  #include "chrome/browser/enterprise/network_header_injection/http_header_injection_utils.h"
  #include "components/webapps/isolated_web_apps/scheme.h"
-@@ -1802,6 +1805,44 @@ ChromeContentBrowserClient::GetStoragePartitionConfigForSite(
+@@ -1826,6 +1829,44 @@ ChromeContentBrowserClient::GetStoragePartitionConfigForSite(
    }
  #endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE) && !BUILDFLAG(IS_ANDROID)
  
@@ -2581,7 +2581,7 @@ index dde051181fa13..9ac8b4e37ba27 100644
    return default_storage_partition_config;
  }
  
-@@ -4981,6 +5022,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
+@@ -5031,6 +5072,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
    handler->AddHandlerPair(&HandleChromeAboutAndChromeSyncRewrite,
                            BrowserURLHandler::null_handler());
  
@@ -2593,7 +2593,7 @@ index dde051181fa13..9ac8b4e37ba27 100644
  #if BUILDFLAG(IS_ANDROID)
    // Handler to rewrite chrome://newtab on Android.
    handler->AddHandlerPair(&chrome::android::HandleAndroidNativePageURL,
-@@ -6599,6 +6645,9 @@ void ChromeContentBrowserClient::WillCreateURLLoaderFactory(
+@@ -6679,6 +6725,9 @@ void ChromeContentBrowserClient::WillCreateURLLoaderFactory(
        frame, type == URLLoaderFactoryType::kNavigation, request_initiator,
        isolation_info, factory_builder);
  
@@ -2603,7 +2603,7 @@ index dde051181fa13..9ac8b4e37ba27 100644
  #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
    if (disable_secure_dns) {
      WebContents* web_contents = WebContents::FromRenderFrameHost(frame);
-@@ -7391,20 +7440,21 @@ bool ChromeContentBrowserClient::ShowPaymentHandlerWindow(
+@@ -7471,20 +7520,21 @@ bool ChromeContentBrowserClient::ShowPaymentHandlerWindow(
  bool ChromeContentBrowserClient::HandleWebUIReverse(
      GURL* url,
      content::BrowserContext* browser_context) {
@@ -2639,17 +2639,17 @@ index dde051181fa13..9ac8b4e37ba27 100644
  
  void ChromeContentBrowserClient::AddExtraPart(
 diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
-index 17a9289e00ac8..de8b852c459c4 100644
+index b87d31178d3d2..d2ce9c644896c 100644
 --- a/chrome/browser/ui/webui/BUILD.gn
 +++ b/chrome/browser/ui/webui/BUILD.gn
-@@ -53,6 +53,7 @@ source_set("configs") {
+@@ -52,6 +52,7 @@ source_set("configs") {
      ":ntp_tiles_internals_ui",
      ":signin_internals_ui",
      ":webui",
 +    "//chrome/browser/app_swap",
      "//chrome/browser/actor/ui:actor_overlay",
+     "//chrome/browser/browser_actuator/internals",
      "//chrome/browser/contextual_tasks:ui",
-     "//chrome/browser/glic",
 @@ -114,6 +115,8 @@ source_set("configs") {
        "//chrome/browser/actor/ui:actor_overlay_web_view",
        "//chrome/browser/ui/webui/access_code_cast",
@@ -2660,10 +2660,10 @@ index 17a9289e00ac8..de8b852c459c4 100644
        "//chrome/browser/ui/webui/color_pipeline_internals",
        "//chrome/browser/ui/webui/history",
 diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-index 7a947c092bfaf..01b55b0253cea 100644
+index 00d3cd306db0d..9d57325179c57 100644
 --- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-@@ -13,6 +13,8 @@
+@@ -14,6 +14,8 @@
  #include "chrome/browser/optimization_guide/optimization_guide_internals_ui.h"
  #include "chrome/browser/ui/webui/about/about_ui.h"
  #include "chrome/browser/ui/webui/accessibility/accessibility_ui.h"
@@ -2672,7 +2672,7 @@ index 7a947c092bfaf..01b55b0253cea 100644
  #include "chrome/browser/ui/webui/actor_internals/actor_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/autofill_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/password_manager_internals_ui.h"
-@@ -252,6 +254,8 @@ void RegisterChromeWebUIConfigs() {
+@@ -262,6 +264,8 @@ void RegisterChromeWebUIConfigs() {
  
    auto& map = content::WebUIConfigMap::GetInstance();
    map.AddWebUIConfig(std::make_unique<AccessibilityUIConfig>());
@@ -2680,4 +2680,4 @@ index 7a947c092bfaf..01b55b0253cea 100644
 +  map.AddWebUIConfig(std::make_unique<AppSwapVersionPickerUIConfig>());
    map.AddWebUIConfig(std::make_unique<AutofillInternalsUIConfig>());
    map.AddWebUIConfig(std::make_unique<BluetoothInternalsUIConfig>());
-   map.AddWebUIConfig(
+   map.AddWebUIConfig(std::make_unique<BrowserActuatorInternalsUIConfig>());

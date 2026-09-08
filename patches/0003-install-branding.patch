@@ -1,8 +1,8 @@
 diff --git a/chrome/common/chrome_content_client.cc b/chrome/common/chrome_content_client.cc
-index 1136dad871e5f..923371e603770 100644
+index a97283168c97c..f2305bf55315b 100644
 --- a/chrome/common/chrome_content_client.cc
 +++ b/chrome/common/chrome_content_client.cc
-@@ -126,7 +126,7 @@ void ChromeContentClient::AddPlugins(
+@@ -125,7 +125,7 @@ void ChromeContentClient::AddPlugins(
  #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
    static constexpr char16_t kPDFPluginName[] = u"Chrome PDF Plugin";
  #else
@@ -70,10 +70,10 @@ index 13154e1cb5f67..4935e1e7f1d6e 100644
  const wchar_t kVersionStringField[] = L"pv";
  
 diff --git a/chrome/installer/mini_installer/mini_installer_constants.cc b/chrome/installer/mini_installer/mini_installer_constants.cc
-index c2a03ccbb6460..0746e572abac9 100644
+index ed578609ad4b6..4322768cb7599 100644
 --- a/chrome/installer/mini_installer/mini_installer_constants.cc
 +++ b/chrome/installer/mini_installer/mini_installer_constants.cc
-@@ -67,12 +67,12 @@ const wchar_t kCleanupRegistryKey[] = L"Software\\Chrome for Testing";
+@@ -68,12 +68,12 @@ const wchar_t kCleanupRegistryKey[] = L"Software\\Chrome for Testing";
  #else
  // The path to the key containing each app's Clients registry key.
  // No trailing slash on this one because the app's GUID is not appended.

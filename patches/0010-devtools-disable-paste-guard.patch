@@ -1,5 +1,5 @@
 diff --git a/front_end/panels/console/ConsolePinPane.ts b/front_end/panels/console/ConsolePinPane.ts
-index 705f6f40..4ca4d5aa 100644
+index 705f6f4095..4ca4d5aaa3 100644
 --- a/front_end/panels/console/ConsolePinPane.ts
 +++ b/front_end/panels/console/ConsolePinPane.ts
 @@ -299,7 +299,7 @@ export class ConsolePinPresenter extends UI.Widget.Widget {
@@ -12,10 +12,10 @@ index 705f6f40..4ca4d5aa 100644
      this.#pinEditor = {
        workingCopy: () => this.#editor?.state.doc.toString() ?? '',
 diff --git a/front_end/panels/console/ConsolePrompt.ts b/front_end/panels/console/ConsolePrompt.ts
-index a7e2857d..3daad162 100644
+index 6667a47803..10d7db3718 100644
 --- a/front_end/panels/console/ConsolePrompt.ts
 +++ b/front_end/panels/console/ConsolePrompt.ts
-@@ -385,7 +385,7 @@ export class ConsolePrompt extends Common.ObjectWrapper.eventMixin<EventTypes, t
+@@ -389,7 +389,7 @@ export class ConsolePrompt extends ConsolePromptBase {
          scrollIntoView: true,
        });
        Common.Settings.Settings.instance()
@@ -25,7 +25,7 @@ index a7e2857d..3daad162 100644
        this.#selfXssWarningShown = false;
        Host.userMetrics.actionTaken(Host.UserMetrics.Action.SelfXssAllowPastingInConsole);
 diff --git a/front_end/panels/console/ConsoleView.ts b/front_end/panels/console/ConsoleView.ts
-index 94203451..056ae301 100644
+index 94203451d6..056ae30159 100644
 --- a/front_end/panels/console/ConsoleView.ts
 +++ b/front_end/panels/console/ConsoleView.ts
 @@ -490,7 +490,7 @@ export class ConsoleView extends UI.Widget.VBox implements

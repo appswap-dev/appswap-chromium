@@ -1,5 +1,5 @@
 diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
-index 875bfcfedb8a8..b99c52feb955a 100644
+index d5f9a09fc06cb..cc8a5d63438cf 100644
 --- a/chrome/app/chromium_strings.grd
 +++ b/chrome/app/chromium_strings.grd
 @@ -278,7 +278,7 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
@@ -1895,7 +1895,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
        </if>
        <message name="IDS_RECOVERY_BUBBLE_TEXT" desc="Text for the chrome recovery bubble view full description.">
-@@ -1918,78 +1918,78 @@ Chromium is unable to recover your settings.
+@@ -1918,14 +1918,14 @@ Chromium is unable to recover your settings.
        </message>
  
        <!-- Critical Notification bubble -->
@@ -1916,6 +1916,9 @@ index 875bfcfedb8a8..b99c52feb955a 100644
        </message>
  
        <!-- Desktop Capture -->
+@@ -1933,66 +1933,66 @@ Chromium is unable to recover your settings.
+         Choose what to share with Chromium
+       </message>
        <message name="IDS_DESKTOP_MEDIA_PICKER_SOURCE_TYPE_TAB" desc="Text for the button on the window picker dialog, clicking which takes one to tab sharing">
 -        Chromium Tab
 +        AppSwap Tab
@@ -1998,7 +2001,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
          <message name="IDS_LOCAL_NETWORK_ACCESS_PERMISSION_DESC" desc="Text shown in the macOS permission dialog, describing why Chrome needs the permission to access local network.">
            This will allow you to select from available devices and display content on them.
-@@ -1998,12 +1998,12 @@ Chromium is unable to recover your settings.
+@@ -2001,12 +2001,12 @@ Chromium is unable to recover your settings.
  
        <!-- Side panel strings -->
        <message name="IDS_SIDE_PANEL_CUSTOMIZE_CHROME_TITLE" desc="The name of the Customize Chrome feature in the side panel combo box.">
@@ -2013,7 +2016,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
        </message>
  
        <!-- Lens Overlay Strings -->
-@@ -2378,7 +2378,7 @@ Chromium is unable to recover your settings.
+@@ -2381,7 +2381,7 @@ Chromium is unable to recover your settings.
          </message>
          <message name="IDS_LENS_PERMISSION_BUBBLE_DIALOG_LEARN_MORE_ABOUT_GOOGLE_LENS_LINK"
            desc="Accessibility label for text link that is shown to users to learn more about privacy in relation to Google Lens.">
@@ -2022,7 +2025,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
          <message name="IDS_LENS_PERMISSION_BUBBLE_DIALOG_TITLE"
            desc="The title of the lens permission search bubble dialog, introducing Lens as a way to search what's on their screen.">
-@@ -2463,7 +2463,7 @@ Chromium is unable to recover your settings.
+@@ -2466,7 +2466,7 @@ Chromium is unable to recover your settings.
        <!-- OOBE -->
        <if expr="is_chromeos">
          <message name="IDS_INSTALLING_UPDATE" desc="Label shown on the updates installation screen during OOBE">
@@ -2031,7 +2034,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
          <message name="IDS_EULA_SCREEN_ACCESSIBLE_TITLE" desc="Title to be spoken on opening the OOBE EULA screen">
            ChromiumOS terms
-@@ -2473,7 +2473,7 @@ Chromium is unable to recover your settings.
+@@ -2476,7 +2476,7 @@ Chromium is unable to recover your settings.
        <!-- Native notifications for Windows 10 -->
        <if expr="is_win">
          <message name="IDS_WIN_NOTIFICATION_SETTINGS_CONTEXT_MENU_ITEM_NAME" desc="The name of the button in Windows Notification Center which leads to Chrome notification settings.">
@@ -2040,7 +2043,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
        </if>
        <!-- Relaunch notification bubble and dialog. -->
-@@ -2481,115 +2481,115 @@ Chromium is unable to recover your settings.
+@@ -2484,115 +2484,115 @@ Chromium is unable to recover your settings.
          <if expr="not is_chromeos">
            <message name="IDS_RELAUNCH_RECOMMENDED_TITLE" desc="The title of a dialog that tells users that a browser relaunch is recommended for an update available for some number of days.">
              {0, plural,
@@ -2206,7 +2209,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
        </if>
  
-@@ -2603,108 +2603,108 @@ Chromium is unable to recover your settings.
+@@ -2606,108 +2606,108 @@ Chromium is unable to recover your settings.
        <!-- Chrome parent extension/app install blocking dialog. -->
        <if expr="enable_extensions_core">
          <message name="IDS_EXTENSION_PERMISSIONS_BLOCKED_BY_PARENT_PROMPT_MESSAGE" desc="Text for the dialog indicating that a parent has blocked extensions and apps.">
@@ -2357,7 +2360,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
  
          <!-- Feature Showcase - Password Manager -->
-@@ -2712,7 +2712,7 @@ Chromium is unable to recover your settings.
+@@ -2715,7 +2715,7 @@ Chromium is unable to recover your settings.
            Stay safe with Password Manager
          </message>
          <message name="IDS_FEATURE_SHOWCASE_PASSWORD_MANAGER_SUBTITLE" desc="Description for the Password Manager page in the Feature Showcase.">
@@ -2366,7 +2369,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
  
          <!-- Feature Showcase - Lens -->
-@@ -2725,14 +2725,14 @@ Chromium is unable to recover your settings.
+@@ -2728,14 +2728,14 @@ Chromium is unable to recover your settings.
  
          <!-- Feature Showcase - Gemini -->
          <message name="IDS_FEATURE_SHOWCASE_GEMINI_TITLE" desc="This is the headline for the Gemini (AI assistant) opt-in screen. It introduces the benefit of AI assistance for productivity. (CHAR LIMIT = 60)">
@@ -2383,7 +2386,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
        </message>
  
        <!-- Notification quiet permission IPH -->
-@@ -2745,20 +2745,20 @@ Chromium is unable to recover your settings.
+@@ -2748,20 +2748,20 @@ Chromium is unable to recover your settings.
  
        <!-- ChromeLabs bubble -->
        <message name="IDS_CHROMELABS_RELAUNCH_FOOTER_MESSAGE" desc="Text that shows in the footer of the Chrome Labs bubble when relaunch is needed for changes to take effect.">
@@ -2408,7 +2411,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
        </message>
        <message name="IDS_TAILORED_SECURITY_UNCONSENTED_PROMOTION_MESSAGE_DESCRIPTION" desc="Description shown in the message shown when a user changes their account-level tailored security setting encouraging them to enable Enhanced Safe Browsing">
          Enhanced protection does more to block phishing and malware
-@@ -2772,40 +2772,40 @@ Chromium is unable to recover your settings.
+@@ -2775,40 +2775,40 @@ Chromium is unable to recover your settings.
  
        <!--Launch On Startup-->
        <if expr="is_win">
@@ -2463,7 +2466,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
          <message name="IDS_NO_UPDATE_RESPONSE" desc="Updater response for no updates when handling install result.">
            No update is available
-@@ -2814,7 +2814,7 @@ Chromium is unable to recover your settings.
+@@ -2817,7 +2817,7 @@ Chromium is unable to recover your settings.
            Installation failed. Please try again.
          </message>
          <message name="IDS_INSTALLER_DISPLAY_NAME" desc="Name for the updater metainstaller.">
@@ -2472,7 +2475,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
          <message name="IDS_CLOSE_BUTTON" desc="Close button tooltip">
            Close
-@@ -2853,13 +2853,13 @@ Chromium is unable to recover your settings.
+@@ -2856,13 +2856,13 @@ Chromium is unable to recover your settings.
            Canceling...
          </message>
          <message name="IDS_TEXT_RESTART_BROWSER" desc="For when a browser must be restarted to complete the installation.">
@@ -2489,7 +2492,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
          <message name="IDS_UPDATER_CLOSE" desc="For close button on the UI post install completion.">
            Close
-@@ -3045,101 +3045,101 @@ Chromium is unable to recover your settings.
+@@ -3048,101 +3048,101 @@ Chromium is unable to recover your settings.
          <!--Windows service strings.-->
          <message name="IDS_UPDATER_SERVICE_DISPLAY_NAME"
                   desc="The name of the Windows service. Displayed in the Windows Services management console.">
@@ -2613,7 +2616,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
        </message>
        <message name="IDS_GLIC_STATUS_ICON_TOOLTIP_CANARY" translateable="false" desc="This is the tooltip that is shown when the glic status icon is hovered and the Glic window is closed. It indicates that this is the Canary version of the browser.">
          Open Gemini (Canary)
-@@ -3151,7 +3151,7 @@ Chromium is unable to recover your settings.
+@@ -3154,7 +3154,7 @@ Chromium is unable to recover your settings.
          Open Gemini (Beta)
        </message>
        <message name="IDS_GLIC_STATUS_ICON_TOOLTIP_CLOSE" translateable="false" desc="This is the tooltip that is shown when the glic status icon is hovered and the Glic window is open.">
@@ -2622,7 +2625,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
        </message>
        <message name="IDS_GLIC_STATUS_ICON_TOOLTIP_CLOSE_CANARY" translateable="false" desc="This is the tooltip that is shown when the glic status icon is hovered and the Glic window is open. It indicates that this is the Canary version of the browser.">
          Close Gemini (Canary)
-@@ -3163,7 +3163,7 @@ Chromium is unable to recover your settings.
+@@ -3166,7 +3166,7 @@ Chromium is unable to recover your settings.
          Close Gemini (Beta)
        </message>
        <message name="IDS_GLIC_STATUS_ICON_TOOLTIP_TOGGLE" translateable="false" desc="This is the tooltip that is shown when the glic status icon is hovered.">
@@ -2631,7 +2634,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
        </message>
        <message name="IDS_GLIC_STATUS_ICON_TOOLTIP_TOGGLE_CANARY" translateable="false" desc="This is the tooltip that is shown when the glic status icon is hovered. It indicates that this is the Canary version of the browser.">
          Toggle Gemini (Canary)
-@@ -3175,135 +3175,135 @@ Chromium is unable to recover your settings.
+@@ -3178,45 +3178,45 @@ Chromium is unable to recover your settings.
          Toggle Gemini (Beta)
        </message>
        <message name="IDS_GLIC_STATUS_ICON_MENU_SHOW" translateable="false" desc="This is the menu item for showing the glic UI.">
@@ -2645,11 +2648,6 @@ index 875bfcfedb8a8..b99c52feb955a 100644
        <message name="IDS_GLIC_STATUS_ICON_MENU_TOGGLE" translateable="false" desc="This is the menu item for toggling the glic UI.">
 -        Toggle Gemini in Chromium
 +        Toggle Gemini in AppSwap
-       </message>
-       <!-- TODO(crbug.com/532187976): Make strings translateable once finalized. -->
-       <message name="IDS_OMNIBOX_EVERYWHERE_STATUS_ICON_MENU_TOGGLE" desc="Label for the toggle item in the Omnibox Everywhere status tray context menu." translateable="false">
--        Toggle Search in Chromium
-+        Toggle Search in AppSwap
        </message>
        <message name ="IDS_GLIC_INELIGIBLE_PROFILE_NOTICE" translateable="false" desc="This is the text of the glic ineligible profile notice.">
 -        To use Gemini in Chromium, sign in with a different Google Account
@@ -2693,6 +2691,10 @@ index 875bfcfedb8a8..b99c52feb955a 100644
 +          Show Gemini in AppSwap in system tray
          </message>
        </if>
+       <if expr="is_macosx">
+@@ -3233,89 +3233,89 @@ Chromium is unable to recover your settings.
+         Search in Chromium
+       </message>
        <message name="IDS_SETTINGS_OMNIBOX_EVERYWHERE_TITLE" desc="Title of the Omnibox Everywhere section on the search settings page.">
 -        Search with Chromium
 +        Search with AppSwap
@@ -2805,7 +2807,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
        </message>
        <message name="IDS_DICE_MIGRATION_CONFIRMATION_TOAST_BUTTON" desc="The text on the button of the confirmation toast shown after the user clicks the accept button on the Dice Migration dialog, that allows the users to control the sync settings or sign out of Chrome.">
          Manage
-@@ -3313,12 +3313,12 @@ Chromium is unable to recover your settings.
+@@ -3325,12 +3325,12 @@ Chromium is unable to recover your settings.
        <if expr="not is_android">
          <if expr="use_titlecase">
            <message name="IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON" desc="Button in the avatar menu bubble view for opening Chrome account settings.">
@@ -2820,7 +2822,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
            </message>
          </if>
        </if>
-@@ -3332,10 +3332,10 @@ Chromium is unable to recover your settings.
+@@ -3344,10 +3344,10 @@ Chromium is unable to recover your settings.
          </message>
  
          <message name="IDS_DICTATION_ONBOARDING_TITLE" desc="The title string in the onboarding dialog for the dictation feature." translateable="false">
@@ -2833,7 +2835,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          </message>
          <message name="IDS_DICTATION_ONBOARDING_BULLET_DISCLAIMER" desc="The disclaimer text in the onboarding dialog describing the use of AI and potential for mistakes and providing a link for more details." translateable="false">
            Dictation uses AI and can make mistakes. <ph name="LEARN_MORE_LINK">$1<ex>Learn more</ex></ph>
-@@ -3345,151 +3345,151 @@ Chromium is unable to recover your settings.
+@@ -3357,151 +3357,151 @@ Chromium is unable to recover your settings.
        <!--Desktop to iOS promo strings-->
        <if expr="not is_android">
          <message name="IDS_IOS_DESKTOP_ESB_PROMO_BUBBLE_DESCRIPTION_REMINDER" desc="The description for the iOS desktop ESB promo bubble with a reminder button.">
@@ -3030,7 +3032,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
        </message>
        <message name="IDS_DEFAULT_SEARCH_ENGINE_RESET_NOTIFICATION_GOT_IT_BUTTON"
           desc="Label for the 'Got it' button in the default search engine reset notification, which dismisses the UI.">
-@@ -3505,10 +3505,10 @@ Chromium is unable to recover your settings.
+@@ -3517,10 +3517,10 @@ Chromium is unable to recover your settings.
        </message>
  
        <!--Report-unsafe-site Dialog (accessed from Help menu)-->
@@ -3043,7 +3045,7 @@ index 875bfcfedb8a8..b99c52feb955a 100644
          Improve online safety for everyone when you report a site you think is harmful.
        </message>
        <message name="IDS_REPORT_UNSAFE_SITE_DIALOG_FOOTER" desc="Explanatory text in dialog footer describing what other information is sent as part of the unsafe-site-report.">
-@@ -3517,23 +3517,23 @@ Chromium is unable to recover your settings.
+@@ -3529,23 +3529,23 @@ Chromium is unable to recover your settings.
  
        <!-- JS optimizations bubble -->
        <message name="IDS_JS_OPTIMIZATION_BUBBLE_BODY_NON_POLICY_BODY" desc="Body text for the JavaScript optimization bubble when disabled for other reasons.">

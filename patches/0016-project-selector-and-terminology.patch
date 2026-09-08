@@ -1,5 +1,5 @@
 diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
-index 7c0c51f10f35e..7cebb25b6c999 100644
+index b51dd24af70ac..5de00862bcc1b 100644
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
 @@ -709,7 +709,7 @@ are declared in tools/grit/grit_args.gni.
@@ -26,10 +26,10 @@ index 7c0c51f10f35e..7cebb25b6c999 100644
  
          <message name="IDS_FEEDBACK" desc="The text label of the Report Bug menu item">
 diff --git a/chrome/app/profiles_strings.grdp b/chrome/app/profiles_strings.grdp
-index db742e65b501b..3de12b2fabba3 100644
+index e71be7dc4e892..409f49b90161f 100644
 --- a/chrome/app/profiles_strings.grdp
 +++ b/chrome/app/profiles_strings.grdp
-@@ -245,7 +245,7 @@
+@@ -250,7 +250,7 @@
    </message>
    <if expr="not use_titlecase">
      <message name="IDS_PROFILE_MENU_OPEN_GUEST_PROFILE" desc="The text label of the open guest profile item in the profile menu.">
@@ -38,7 +38,7 @@ index db742e65b501b..3de12b2fabba3 100644
      </message>
      <message name="IDS_PROFILE_MENU_CLOSE_PROFILE_X_WINDOWS_BUTTON" desc="Button in the profile menu to close all windows of the current profile. This is not used for zero windows.">
        {0, plural,
-@@ -257,7 +257,7 @@
+@@ -262,7 +262,7 @@
        Sync is on
      </message>
      <message name="IDS_PROFILE_MENU_CUSTOMIZE_PROFILE_BUTTON" desc="Button in the avatar menu bubble view for editing the current profile.">
@@ -47,7 +47,7 @@ index db742e65b501b..3de12b2fabba3 100644
      </message>
      <message name="IDS_PROFILE_MENU_OPEN_ACCOUNT_SETTINGS" desc="Button in the avatar menu bubble view for opening Chrome account settings.">
        Google services settings
-@@ -274,7 +274,7 @@
+@@ -279,7 +279,7 @@
    </if>
    <if expr="use_titlecase">
      <message name="IDS_PROFILE_MENU_OPEN_GUEST_PROFILE" desc="The text label of the open guest profile item in the profile menu.">
@@ -56,7 +56,7 @@ index db742e65b501b..3de12b2fabba3 100644
      </message>
      <message name="IDS_PROFILE_MENU_CLOSE_PROFILE_X_WINDOWS_BUTTON" desc="Button in the profile menu to close all windows of the current profile. This is not used for zero windows.">
        {0, plural,
-@@ -286,7 +286,7 @@
+@@ -291,7 +291,7 @@
        Sync Is On
      </message>
      <message name="IDS_PROFILE_MENU_CUSTOMIZE_PROFILE_BUTTON" desc="Button in the avatar menu bubble view for editing the current profile. ">
@@ -65,7 +65,7 @@ index db742e65b501b..3de12b2fabba3 100644
      </message>
      <message name="IDS_PROFILE_MENU_OPEN_ACCOUNT_SETTINGS" desc="Button in the avatar menu bubble view for opening Chrome account settings.">
        Google Services Settings
-@@ -772,28 +772,28 @@
+@@ -777,28 +777,28 @@
        Done
      </message>
      <message name="IDS_PROFILE_CUSTOMIZATION_THEME_PICKER_LABEL" desc="Title text for the input used to pick a theme for the profile.">
@@ -100,10 +100,10 @@ index db742e65b501b..3de12b2fabba3 100644
      <message name="IDS_PROFILE_CUSTOMIZATION_LOCAL_PROFILE_CREATION_TITLE" desc="Title of the profile customization dialog for local profile creation (user is not signed-in)">
        Welcome!
 diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
-index d25afe1f80994..4c314fee895f7 100644
+index ddffbc0b1f6ed..22dcc96703c20 100644
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
-@@ -3607,6 +3607,9 @@
+@@ -3628,6 +3628,9 @@
      </message>
  
      <if expr="not is_chromeos">
@@ -113,7 +113,7 @@ index d25afe1f80994..4c314fee895f7 100644
        <message name="IDS_SETTINGS_PROFILE_NAME_INPUT_LABEL" desc="Aria label of the input field where the user can edit the name associated with the profile." meaning="Name of a person">
          Name
        </message>
-@@ -3614,7 +3617,7 @@
+@@ -3635,7 +3638,7 @@
          Show desktop shortcut
        </message>
        <message name="IDS_SETTINGS_CUSTOMIZE_PROFILE" desc="Title of the manage profile subpage. This is a subpage to customize Chrome Profile.">
@@ -122,7 +122,7 @@ index d25afe1f80994..4c314fee895f7 100644
        </message>
        <message name="IDS_SETTINGS_PICK_A_THEME_COLOR" desc="Title of edit profile theme color section on the manage profile page.">
          Pick a theme color
-@@ -3626,7 +3629,7 @@
+@@ -3647,7 +3650,7 @@
          Create desktop shortcut
        </message>
        <message name="IDS_SETTINGS_CREATE_SHORTCUT_SUBTITLE" desc="Subtitle of create shortcut section on the manage profile page.">
@@ -564,10 +564,10 @@ index 0000000000000..f888618363810
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROJECT_SELECTOR_BUTTON_H_
 diff --git a/chrome/browser/ui/views/profiles/profile_menu_view.cc b/chrome/browser/ui/views/profiles/profile_menu_view.cc
-index 4bbe727b6ca1a..aa2a968dfb60b 100644
+index 90dd03863bbbe..86958f9627508 100644
 --- a/chrome/browser/ui/views/profiles/profile_menu_view.cc
 +++ b/chrome/browser/ui/views/profiles/profile_menu_view.cc
-@@ -1267,9 +1267,8 @@ void ProfileMenuView::BuildFeatureButtons() {
+@@ -1257,9 +1257,8 @@ void ProfileMenuView::BuildFeatureButtons() {
      !identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync)))
        ? MaybeBuildChromeAccountSettingsButton()
        : MaybeBuildChromeAccountSettingsButtonWithSync();
@@ -579,7 +579,7 @@ index 4bbe727b6ca1a..aa2a968dfb60b 100644
    MaybeBuildCloseBrowsersButton();
    MaybeBuildSignoutButton();
  }
-@@ -1405,15 +1404,8 @@ void ProfileMenuView::BuildProfileManagementFeatureButtons() {
+@@ -1395,15 +1394,8 @@ void ProfileMenuView::BuildProfileManagementFeatureButtons() {
                              base::Unretained(this)));
    }
  
@@ -598,10 +598,10 @@ index 4bbe727b6ca1a..aa2a968dfb60b 100644
    AddProfileManagementFeatureButton(
        features::IsRoundedIconsEnabled() ? kManageAccountsIcon
 diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
-index c413a8d680cce..9dce9afedfa5a 100644
+index 7d68719289103..505b2b2545c50 100644
 --- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 +++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
-@@ -2399,6 +2399,7 @@ void AddPeopleStrings(content::WebUIDataSource* html_source, Profile* profile) {
+@@ -2405,6 +2405,7 @@ void AddPeopleStrings(content::WebUIDataSource* html_source, Profile* profile) {
    static constexpr webui::LocalizedString kLocalizedStrings[] = {
        // Top level people strings:
        {"peoplePageTitle", IDS_SETTINGS_PEOPLE},
@@ -623,10 +623,10 @@ index 3bbfa947460fa..dea6bc9510ce0 100644
        public theme_color_picker::mojom::ThemeColorPickerHandlerFactory,
        public signin::mojom::SigninPageHandlerFactory
 diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
-index 28c843b871593..fd66d5a6fb511 100644
+index a08bf1da16356..1b5ffb35ca3ba 100644
 --- a/chrome/common/webui_url_constants.h
 +++ b/chrome/common/webui_url_constants.h
-@@ -563,7 +563,7 @@ inline constexpr char kHistorySearchSubpage[] = "ai/historySearch";
+@@ -567,7 +567,7 @@ inline constexpr char kHistorySearchSubpage[] = "ai/historySearch";
  inline constexpr char kImportDataSubPage[] = "importData";
  inline constexpr char kLanguageOptionsSubPage[] = "languages";
  inline constexpr char kLanguagesSubPage[] = "languages/details";

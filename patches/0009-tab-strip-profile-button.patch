@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 50920511caf57..1d60d43aaa310 100644
+index 4a223bd530cdb..a338b5bea0a5e 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
-@@ -792,6 +792,9 @@ static_library("ui") {
+@@ -810,6 +810,9 @@ static_library("ui") {
      "//chrome/browser/ui/toolbar",
      "//chrome/browser/ui/toolbar:impl",
      "//chrome/browser/ui/translate",
@@ -12,7 +12,7 @@ index 50920511caf57..1d60d43aaa310 100644
      "//chrome/browser/ui/views/eye_dropper",
      "//chrome/browser/ui/views/file_system_access",
      "//chrome/browser/ui/views/file_system_access:impl",
-@@ -2151,6 +2154,22 @@ static_library("ui") {
+@@ -2173,6 +2176,22 @@ static_library("ui") {
  
    if (is_win || is_mac || is_linux || is_chromeos) {
      sources += [
@@ -34,7 +34,7 @@ index 50920511caf57..1d60d43aaa310 100644
 +      "views/app_swap/app_swap_responsive_lab_button.h",
        "views/profiles/incognito_menu_view.cc",
        "views/profiles/incognito_menu_view.h",
-       "views/profiles/profile_menu_coordinator.cc",
+       "views/profiles/isolated_mode_menu_view.cc",
 diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
 new file mode 100644
 index 0000000000000..6be3008d5e0c6
@@ -627,7 +627,7 @@ index 0000000000000..852a232574e1d
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_TAB_STRIP_BUTTON_H_
 diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
-index 76e408d422544..f1c42e70b1897 100644
+index 96f2b99affa07..7bc4fba8986d7 100644
 --- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
 +++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
 @@ -24,6 +24,7 @@
@@ -638,7 +638,7 @@ index 76e408d422544..f1c42e70b1897 100644
  #include "chrome/browser/ui/views/frame/browser_view.h"
  #include "chrome/browser/ui/views/tab_search_bubble_host.h"
  #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
-@@ -168,6 +169,22 @@ HorizontalTabStripRegionViewOld::HorizontalTabStripRegionViewOld(
+@@ -169,6 +170,22 @@ HorizontalTabStripRegionViewOld::HorizontalTabStripRegionViewOld(
  
    if (browser &&
        (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
@@ -661,7 +661,7 @@ index 76e408d422544..f1c42e70b1897 100644
      combo_button_ = AddChildView(std::make_unique<TabStripComboButton>(
          browser, TabStripComboButton::Context::kHorizontalTabStrip));
      combo_button_->SetProperty(views::kCrossAxisAlignmentKey,
-@@ -279,6 +296,9 @@ HorizontalTabStripRegionViewOld::~HorizontalTabStripRegionViewOld() {
+@@ -280,6 +297,9 @@ HorizontalTabStripRegionViewOld::~HorizontalTabStripRegionViewOld() {
    if (combo_button_) {
      RemoveChildViewT(std::exchange(combo_button_, nullptr));
    }
@@ -671,7 +671,7 @@ index 76e408d422544..f1c42e70b1897 100644
    if (new_tab_button_) {
      RemoveChildViewT(std::exchange(new_tab_button_, nullptr));
    }
-@@ -339,6 +359,10 @@ views::View::Views HorizontalTabStripRegionViewOld::GetChildrenInZOrder() {
+@@ -340,6 +360,10 @@ views::View::Views HorizontalTabStripRegionViewOld::GetChildrenInZOrder() {
      children.emplace_back(combo_button_.get());
    }
  
@@ -682,7 +682,7 @@ index 76e408d422544..f1c42e70b1897 100644
    if (unfocus_button_) {
      children.emplace_back(unfocus_button_.get());
    }
-@@ -777,6 +801,20 @@ HorizontalTabStripRegionViewNew::HorizontalTabStripRegionViewNew(
+@@ -778,6 +802,20 @@ HorizontalTabStripRegionViewNew::HorizontalTabStripRegionViewNew(
    std::unique_ptr<TabStripActionContainer> tab_strip_action_container;
    if (browser &&
        (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
@@ -703,7 +703,7 @@ index 76e408d422544..f1c42e70b1897 100644
      combo_button_ = AddChildView(std::make_unique<TabStripComboButton>(
          browser, TabStripComboButton::Context::kHorizontalTabStrip));
      combo_button_->SetProperty(views::kCrossAxisAlignmentKey,
-@@ -826,6 +864,9 @@ HorizontalTabStripRegionViewNew::~HorizontalTabStripRegionViewNew() {
+@@ -827,6 +865,9 @@ HorizontalTabStripRegionViewNew::~HorizontalTabStripRegionViewNew() {
    if (combo_button_) {
      RemoveChildViewT(std::exchange(combo_button_, nullptr));
    }
@@ -713,7 +713,7 @@ index 76e408d422544..f1c42e70b1897 100644
    if (new_tab_button_) {
      RemoveChildViewT(std::exchange(new_tab_button_, nullptr));
    }
-@@ -839,6 +880,9 @@ bool HorizontalTabStripRegionViewNew::IsPositionInWindowCaption(
+@@ -840,6 +881,9 @@ bool HorizontalTabStripRegionViewNew::IsPositionInWindowCaption(
    if (combo_button_ && IsHitInView(combo_button_, point)) {
      return false;
    }
@@ -723,7 +723,7 @@ index 76e408d422544..f1c42e70b1897 100644
    if (tab_strip_view() && IsHitInView(tab_strip_view(), point)) {
      gfx::Point point_in_tab_strip = point;
      views::View::ConvertPointToTarget(this, tab_strip_view(),
-@@ -864,6 +908,9 @@ views::View::Views HorizontalTabStripRegionViewNew::GetChildrenInZOrder() {
+@@ -865,6 +909,9 @@ views::View::Views HorizontalTabStripRegionViewNew::GetChildrenInZOrder() {
    if (combo_button_) {
      children.emplace_back(combo_button_.get());
    }
@@ -733,7 +733,7 @@ index 76e408d422544..f1c42e70b1897 100644
    if (reserved_grab_handle_space_) {
      children.emplace_back(reserved_grab_handle_space_.get());
    }
-@@ -983,7 +1030,8 @@ gfx::Point HorizontalTabStripRegionViewNew::GetLinkDropArrowPosition(
+@@ -984,7 +1031,8 @@ gfx::Point HorizontalTabStripRegionViewNew::GetLinkDropArrowPosition(
  }
  
  void HorizontalTabStripRegionViewNew::OnTabStripViewSet() {
@@ -772,7 +772,7 @@ index 3860b6181381b..48a534b38840c 100644
    raw_ptr<views::Button> new_tab_button_ = nullptr;
  
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-index f97b92504ba81..ac4d827d90431 100644
+index 78d275fd4484a..73b65d0a20edd 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
 @@ -56,6 +56,8 @@
@@ -784,7 +784,7 @@ index f97b92504ba81..ac4d827d90431 100644
  #include "chrome/browser/ui/views/bubble_anchor_util_views.h"
  #include "chrome/browser/ui/views/chrome_layout_provider.h"
  #include "chrome/browser/ui/views/chrome_typography.h"
-@@ -464,6 +466,14 @@ void LocationBarView::Init() {
+@@ -479,6 +481,14 @@ void LocationBarView::Init() {
            page_action_items, page_actions::PageActionPropertiesProvider(),
            page_action_params));
  
@@ -799,7 +799,7 @@ index f97b92504ba81..ac4d827d90431 100644
    auto clear_all_button = views::CreateVectorImageButton(base::BindRepeating(
        static_cast<void (OmniboxView::*)(const std::u16string&)>(
            &OmniboxView::SetUserText),
-@@ -842,6 +852,20 @@ void LocationBarView::Layout(PassKey) {
+@@ -857,6 +867,20 @@ void LocationBarView::Layout(PassKey) {
      }
    };
  
@@ -821,7 +821,7 @@ index f97b92504ba81..ac4d827d90431 100644
      if (page_action_container_ && page_action_container_->GetVisible()) {
        const bool is_capsule_active = page_action_container_->IsCapsuleActive();
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.h b/chrome/browser/ui/views/location_bar/location_bar_view.h
-index 2796ee6d49b16..0c958de475857 100644
+index a05ff59b05fd5..e8f2bb5875667 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.h
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.h
 @@ -52,6 +52,8 @@
@@ -833,7 +833,7 @@ index 2796ee6d49b16..0c958de475857 100644
  class BrowserWindowInterface;
  class CommandUpdater;
  class ContentSettingBubbleModelDelegate;
-@@ -581,6 +583,18 @@ class LocationBarView
+@@ -582,6 +584,18 @@ class LocationBarView
    raw_ptr<page_actions::PageActionContainerView> page_action_container_ =
        nullptr;
  

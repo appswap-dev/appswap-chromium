@@ -477,7 +477,7 @@ index 0000000000000..40b64ec6f2f32
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_UPDATE_CHECKER_H_
 diff --git a/chrome/browser/prefs/BUILD.gn b/chrome/browser/prefs/BUILD.gn
-index 79f7e90a7b9c4..985d6227556cc 100644
+index 2122b050eddef..2143fe6abbf83 100644
 --- a/chrome/browser/prefs/BUILD.gn
 +++ b/chrome/browser/prefs/BUILD.gn
 @@ -67,6 +67,7 @@ source_set("impl") {
@@ -489,7 +489,7 @@ index 79f7e90a7b9c4..985d6227556cc 100644
      "//chrome/browser/background/glic",
      "//chrome/browser/component_updater",
 diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
-index e8138bc8e72bf..6b08075a17654 100644
+index 672a882c45ee7..2d33b652f0456 100644
 --- a/chrome/browser/prefs/browser_prefs.cc
 +++ b/chrome/browser/prefs/browser_prefs.cc
 @@ -23,6 +23,7 @@
@@ -500,7 +500,7 @@ index e8138bc8e72bf..6b08075a17654 100644
  #include "chrome/browser/browser_process_impl.h"
  #include "chrome/browser/chrome_content_browser_client.h"
  #include "chrome/browser/component_updater/component_updater_prefs.h"
-@@ -1459,6 +1460,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
+@@ -1484,6 +1485,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
    accessibility::AccessibilityPrefsController::RegisterLocalStatePrefs(
        registry);
  #endif
@@ -724,7 +724,7 @@ index 0000000000000..225fc8cf25020
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RELOAD_BUTTON_CONTROLLER_H_
 diff --git a/chrome/browser/ui/views/toolbar/BUILD.gn b/chrome/browser/ui/views/toolbar/BUILD.gn
-index 93d2d2e1fd5a8..804916cd18110 100644
+index 720bcdd58c8a3..bec496e24566f 100644
 --- a/chrome/browser/ui/views/toolbar/BUILD.gn
 +++ b/chrome/browser/ui/views/toolbar/BUILD.gn
 @@ -234,6 +234,7 @@ source_set("impl") {
@@ -734,7 +734,7 @@ index 93d2d2e1fd5a8..804916cd18110 100644
 +    "//chrome/browser/ui/views/app_swap",
      "//chrome/browser/ui/views/contextual_tasks",
      "//chrome/browser/ui/views/download",
-     "//chrome/browser/ui/views/extensions:extensions_container_views",
+     "//chrome/browser/ui/views/extensions:extension_popup",
 diff --git a/chrome/browser/ui/views/toolbar/reload_button.cc b/chrome/browser/ui/views/toolbar/reload_button.cc
 index a86b7baa53a5d..dbd357c59422c 100644
 --- a/chrome/browser/ui/views/toolbar/reload_button.cc

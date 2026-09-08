@@ -1463,10 +1463,10 @@ index 0000000000000..d4a8d26f7e8bd
 +}  // namespace
 +}  // namespace app_swap
 diff --git a/chrome/browser/profiles/BUILD.gn b/chrome/browser/profiles/BUILD.gn
-index 867d41c79c658..39608f5ae9ca7 100644
+index 686d897cd09cc..b8ae7fe467732 100644
 --- a/chrome/browser/profiles/BUILD.gn
 +++ b/chrome/browser/profiles/BUILD.gn
-@@ -723,6 +723,7 @@ source_set("profiles_extra_parts_impl") {
+@@ -720,6 +720,7 @@ source_set("profiles_extra_parts_impl") {
      "//chrome/browser/account_settings",
      "//chrome/browser/affiliations",
      "//chrome/browser/ai",
@@ -1475,7 +1475,7 @@ index 867d41c79c658..39608f5ae9ca7 100644
      "//chrome/browser/autocomplete:aim_eligibility_service",
      "//chrome/browser/autofill",
 diff --git a/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc b/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
-index bbcce8ce57f44..f75449829a5c9 100644
+index 191ecd9db7e66..c29e19e8c7c4a 100644
 --- a/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
 +++ b/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
 @@ -15,6 +15,9 @@

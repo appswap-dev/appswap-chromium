@@ -1,8 +1,8 @@
 diff --git a/chrome/app/resources/chromium_strings_es.xtb b/chrome/app/resources/chromium_strings_es.xtb
-index 266f7fb8836b5..d71232a311055 100644
+index 6fdeb414bed8a..5850a751a85a7 100644
 --- a/chrome/app/resources/chromium_strings_es.xtb
 +++ b/chrome/app/resources/chromium_strings_es.xtb
-@@ -801,4 +801,564 @@ Chromium no puede recuperar tu configuración.</translation>
+@@ -806,4 +806,564 @@ Chromium no puede recuperar tu configuración.</translation>
  <translation id="985602178874221306">Los creadores de Chromium</translation>
  <translation id="989970834842471429">Selecciona cualquier texto o imagen para buscar con la búsqueda por imágenes</translation>
  <translation id="992780518932311116">Para usar tu ubicación, da acceso a Chromium en la <ph name="BEGIN_LINK" />configuración del sistema<ph name="END_LINK" /></translation>
@@ -569,10 +569,10 @@ index 266f7fb8836b5..d71232a311055 100644
  </translationbundle>
 \ No newline at end of file
 diff --git a/chrome/app/resources/chromium_strings_ru.xtb b/chrome/app/resources/chromium_strings_ru.xtb
-index 389f3ed37246a..e1b22e2ddc5cd 100644
+index 1094087f5b38c..fc0bfd33aa040 100644
 --- a/chrome/app/resources/chromium_strings_ru.xtb
 +++ b/chrome/app/resources/chromium_strings_ru.xtb
-@@ -1,113 +1,126 @@
+@@ -1,112 +1,126 @@
  <?xml version="1.0" ?>
  <!DOCTYPE translationbundle>
  <translationbundle lang="ru">
@@ -663,7 +663,6 @@ index 389f3ed37246a..e1b22e2ddc5cd 100644
 -<translation id="1574377791422810894">Инструменты безопасности Chromium</translation>
 -<translation id="1594928384848033697">Chromium пытается удалить ваши данные из Google Менеджера паролей. Чтобы разрешить это, введите свой пароль Windows.</translation>
 -<translation id="1607715478322902680">{COUNT,plural, =0{Администратор требует перезапустить Chromium для установки обновления.}=1{Администратор требует перезапустить Chromium для установки обновления. Окно в режиме инкогнито не будет открыто повторно.}one{Администратор требует перезапустить Chromium для установки обновления. # окно в режиме инкогнито не будет открыто повторно.}few{Администратор требует перезапустить Chromium для установки обновления. # окна в режиме инкогнито не будут открыты повторно.}many{Администратор требует перезапустить Chromium для установки обновления. # окон в режиме инкогнито не будут открыты повторно.}other{Администратор требует перезапустить Chromium для установки обновления. # окна в режиме инкогнито не будут открыты повторно.}}</translation>
--<translation id="161799137154286472">Позволяет быстро запускать Поиск в Chromium на устройстве, даже если браузер свернут.</translation>
 -<translation id="1623563412065267963">Используйте лучшие возможности Google в приложении Chromium на телефоне</translation>
 -<translation id="1625909126243026060">Проверьте основные настройки конфиденциальности и безопасности в Chromium.</translation>
 +<translation id="1562320819937089394">Закрепить AppSwap</translation>
@@ -767,7 +766,7 @@ index 389f3ed37246a..e1b22e2ddc5cd 100644
  <translation id="2190166659037789668">Ошибка проверки обновлений: <ph name="UPDATE_CHECK_ERROR" />.</translation>
  <translation id="2199210295479376551">Удалить аккаунт из Chromium</translation>
  <translation id="2201788217099588893">Лучшие инструменты для покупок всегда под рукой в приложении Chromium.</translation>
-@@ -797,4 +810,554 @@
+@@ -792,4 +806,554 @@
  <translation id="985602178874221306">Авторы Chromium</translation>
  <translation id="989970834842471429">Выберите текст или картинку для поиска по изображениям.</translation>
  <translation id="992780518932311116">Чтобы использовать свои геоданные, предоставьте Chromium доступ к ним в <ph name="BEGIN_LINK" />системных настройках<ph name="END_LINK" /></translation>
@@ -1324,10 +1323,10 @@ index 389f3ed37246a..e1b22e2ddc5cd 100644
  </translationbundle>
 \ No newline at end of file
 diff --git a/chrome/app/resources/generated_resources_es.xtb b/chrome/app/resources/generated_resources_es.xtb
-index 8c6864db821a8..5ad8bf0a2cd5a 100644
+index f77cf2351976f..36eb5ceba9b4b 100644
 --- a/chrome/app/resources/generated_resources_es.xtb
 +++ b/chrome/app/resources/generated_resources_es.xtb
-@@ -10683,4 +10683,26 @@ Puede tratarse de información sobre el software instalado, los archivos, el nav
+@@ -10705,4 +10705,26 @@ Puede tratarse de información sobre el software instalado, los archivos, el nav
  <translation id="998347228911661591">Sincroniza tus grupos de pestañas</translation>
  <translation id="998747458861718449">I&amp;nspeccionar</translation>
  <translation id="998852291477823323">Las políticas configuradas no permiten realizar esta acción.</translation>
@@ -1356,7 +1355,7 @@ index 8c6864db821a8..5ad8bf0a2cd5a 100644
  </translationbundle>
 \ No newline at end of file
 diff --git a/chrome/app/resources/generated_resources_ru.xtb b/chrome/app/resources/generated_resources_ru.xtb
-index 04fcc79e687f3..4cbde6deb8cb1 100644
+index 1dc8c1fdf1934..498a03720296f 100644
 --- a/chrome/app/resources/generated_resources_ru.xtb
 +++ b/chrome/app/resources/generated_resources_ru.xtb
 @@ -1,6 +1,7 @@
@@ -1376,7 +1375,7 @@ index 04fcc79e687f3..4cbde6deb8cb1 100644
  <translation id="1451375123200651445">Веб-страница, один файл</translation>
  <translation id="1452651021404174820">Выберите устройство</translation>
  <translation id="1453561711872398978">Отправить <ph name="BEGIN_LINK" />журналы отладки<ph name="END_LINK" /> (рекомендуется)</translation>
-@@ -2221,7 +2222,7 @@
+@@ -2220,7 +2221,7 @@
  <translation id="2721037002783622288">&amp;Найти картинку (<ph name="SEARCH_ENGINE" />)</translation>
  <translation id="2721334646575696520">Microsoft Edge</translation>
  <translation id="2722547199758472013">Идентификатор: <ph name="EXTENSION_ID" /></translation>
@@ -1385,7 +1384,7 @@ index 04fcc79e687f3..4cbde6deb8cb1 100644
  <translation id="2723819893410108315">Лимон</translation>
  <translation id="2724822892847436256">Ограничения</translation>
  <translation id="2724841811573117416">Журналы WebRTC</translation>
-@@ -2286,7 +2287,7 @@
+@@ -2285,7 +2286,7 @@
  <translation id="2761632996810146912"><ph name="HASHTAG_SETTINGS" /> По запросу "<ph name="SEARCH_QUERY" />" результатов не найдено</translation>
  <translation id="2762441749940182211">Доступ к камере запрещен</translation>
  <translation id="2764786626780673772">Сведения о VPN</translation>
@@ -1394,7 +1393,7 @@ index 04fcc79e687f3..4cbde6deb8cb1 100644
  <translation id="2765100602267695013">Обратитесь к оператору мобильной связи.</translation>
  <translation id="2765217105034171413">Мелкий</translation>
  <translation id="2765820627968019645">Светлая</translation>
-@@ -4234,7 +4235,7 @@
+@@ -4233,7 +4234,7 @@
  <translation id="4249373718504745892">Этот сайт не имеет доступа к вашим камере и микрофону</translation>
  <translation id="4249785854468467847">Новые ИИ-функции в Chrome</translation>
  <translation id="4250229828105606438">Скриншот</translation>
@@ -1430,7 +1429,7 @@ index 04fcc79e687f3..4cbde6deb8cb1 100644
  <translation id="566956875537427204">Открыть чат</translation>
  <translation id="5669863904928111203">Версия ChromeOS устарела</translation>
  <translation id="5671641761787789573">Показ изображений запрещен</translation>
-@@ -6561,7 +6562,7 @@
+@@ -6562,7 +6563,7 @@
  <translation id="6090760257419195752">Закрытые предупреждения</translation>
  <translation id="609174145569509836">Освободить место</translation>
  <translation id="6091761513005122595">Ресурс подключен.</translation>
@@ -1439,7 +1438,7 @@ index 04fcc79e687f3..4cbde6deb8cb1 100644
  <translation id="6095696531220637741">Макарон</translation>
  <translation id="6095984072944024315">−</translation>
  <translation id="6096047740730590436">Развернуть</translation>
-@@ -6792,7 +6793,7 @@
+@@ -6793,7 +6794,7 @@
  <translation id="6265159465845424232">Запрашивать разрешение перед копированием или перемещением файлов Microsoft в Microsoft OneDrive</translation>
  <translation id="6265687851677020761">Удалить порт</translation>
  <translation id="6266532094411434237">Подключение к устройству "<ph name="DEVICE" />"</translation>
@@ -1466,7 +1465,7 @@ index 04fcc79e687f3..4cbde6deb8cb1 100644
  <translation id="7909969815743704077">Скачано в режиме инкогнито</translation>
  <translation id="7909986151924474987">Возможно, этот профиль не получится восстановить.</translation>
  <translation id="7910768399700579500">&amp;Новая папка</translation>
-@@ -9099,7 +9100,7 @@
+@@ -9100,7 +9101,7 @@
  <translation id="804786196054284061">Лицензионное соглашение с конечным пользователем</translation>
  <translation id="8048596485169033655">Скачиваются файлы аннотации основного узла (<ph name="PERCENT" /> %)</translation>
  <translation id="8048728378294435881">Создайте резервную копию данных и используйте их на любом устройстве.</translation>

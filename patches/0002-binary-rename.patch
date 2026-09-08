@@ -372,10 +372,10 @@ index 173c8590146cf..aade2e27e9dcc 100644
  [FFMPEG]
  ffmpeg.dll: %(VersionDir)s\
 diff --git a/chrome/installer/util/util_constants.h b/chrome/installer/util/util_constants.h
-index 2f0df7216ad9c..64bae980a926f 100644
+index aa0c83f03ad26..8df8d12b3726a 100644
 --- a/chrome/installer/util/util_constants.h
 +++ b/chrome/installer/util/util_constants.h
-@@ -347,13 +347,13 @@ inline constexpr char kGoogleUpdateIsMachineEnvVar[] = "GoogleUpdateIsMachine";
+@@ -363,13 +363,13 @@ inline constexpr char kGoogleUpdateIsMachineEnvVar[] = "GoogleUpdateIsMachine";
  // TODO(gab): Rename setup.exe itself altogether and use the same binary for
  // Active Setup.
  inline constexpr wchar_t kActiveSetupExe[] = L"chrmstp.exe";
@@ -396,7 +396,7 @@ index 2f0df7216ad9c..64bae980a926f 100644
  inline constexpr wchar_t kCmdAlternateRenameChromeExe[] = L"rename-chrome-exe";
  inline constexpr wchar_t kCmdRenameChromeExe[] = L"cmd";
  inline constexpr wchar_t kCmdOnOsUpgrade[] = L"on-os-upgrade";
-@@ -371,8 +371,9 @@ inline constexpr wchar_t kInstallBinaryDir[] = L"Application";
+@@ -387,8 +387,9 @@ inline constexpr wchar_t kInstallBinaryDir[] = L"Application";
  inline constexpr wchar_t kInstallerDir[] = L"Installer";
  inline constexpr wchar_t kInstallTempDir[] = L"Temp";
  inline constexpr wchar_t kLnkExt[] = L".lnk";

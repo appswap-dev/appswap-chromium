@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
-index a89c1a8c9fe16..6580d5f4867ae 100644
+index 6da26cc50c070..2cbf6bac9f674 100644
 --- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
 +++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
 @@ -30,6 +30,9 @@
@@ -12,7 +12,7 @@ index a89c1a8c9fe16..6580d5f4867ae 100644
  #include "chrome/browser/ui/webui/autofill_ml_internals/autofill_ml_internals_ui.h"
  #include "chrome/browser/ui/webui/bookmarks/bookmarks_ui.h"
  #include "chrome/browser/ui/webui/color_pipeline_internals/color_pipeline_internals_ui.h"
-@@ -637,6 +640,13 @@ void PopulateChromeWebUIFrameBindersPartsDesktop(
+@@ -638,6 +641,13 @@ void PopulateChromeWebUIFrameBindersPartsDesktop(
    RegisterWebUIControllerInterfaceBinder<
        feedback::report_unsafe_site::mojom::PageHandlerFactory, FeedbackUI>(map);
  
@@ -458,7 +458,7 @@ index 0000000000000..1c72e0fe3b13e
 +
 +let instance: BrowserProxy|null = null;
 diff --git a/chrome/browser/ui/views/page_info/page_info_bubble_view.h b/chrome/browser/ui/views/page_info/page_info_bubble_view.h
-index 71997156f1eff..47aaef97c5c99 100644
+index 54693cdc062a1..00db818397292 100644
 --- a/chrome/browser/ui/views/page_info/page_info_bubble_view.h
 +++ b/chrome/browser/ui/views/page_info/page_info_bubble_view.h
 @@ -46,7 +46,9 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
@@ -471,7 +471,7 @@ index 71997156f1eff..47aaef97c5c99 100644
  
    // WebContentsObserver:
    void DidChangeVisibleSecurityState() override;
-@@ -74,6 +76,13 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
+@@ -75,6 +77,13 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
  
    void AnnouncePageOpened(std::u16string announcement);
  
@@ -1164,7 +1164,7 @@ index 0000000000000..5b8b57da99c93
 +
 +#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_UI_H_
 diff --git a/third_party/lit/v3_0/BUILD.gn b/third_party/lit/v3_0/BUILD.gn
-index 087c776b3a90d..91585f0e0db8f 100644
+index 510846ce9fcaa..c7239bd41aa02 100644
 --- a/third_party/lit/v3_0/BUILD.gn
 +++ b/third_party/lit/v3_0/BUILD.gn
 @@ -30,6 +30,8 @@ ts_library("build_ts") {
@@ -1175,9 +1175,9 @@ index 087c776b3a90d..91585f0e0db8f 100644
 +    "//chrome/browser/resources/app_swap_version_picker:build_ts",
      "//chrome/browser/resources/autofill_ml_internals:build_ts",
      "//chrome/browser/resources/bookmarks:build_ts",
-     "//chrome/browser/resources/browser_switch:build_ts",
+     "//chrome/browser/resources/browser_actuator_internals:build_ts",
 diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_ids.spec
-index b5503c48ce1c4..aee17f467d8cd 100644
+index f3d3447299098..50eb9270fa786 100644
 --- a/tools/gritsettings/resource_ids.spec
 +++ b/tools/gritsettings/resource_ids.spec
 @@ -228,6 +228,10 @@
