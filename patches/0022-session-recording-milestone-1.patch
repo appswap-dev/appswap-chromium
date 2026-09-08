@@ -235,10 +235,10 @@ index 0000000000000..3bd563d6f3f40
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_TAB_HELPER_H_
 diff --git a/chrome/browser/app_swap/app_swap_session_recording_writer.cc b/chrome/browser/app_swap/app_swap_session_recording_writer.cc
 new file mode 100644
-index 0000000000000..af3d939536ab9
+index 0000000000000..8a5075c416762
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_session_recording_writer.cc
-@@ -0,0 +1,277 @@
+@@ -0,0 +1,362 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -246,6 +246,7 @@ index 0000000000000..af3d939536ab9
 +#include "chrome/browser/app_swap/app_swap_session_recording_writer.h"
 +
 +#include <array>
++#include <unordered_set>
 +#include <utility>
 +
 +#include "base/containers/span.h"
@@ -253,12 +254,14 @@ index 0000000000000..af3d939536ab9
 +#include "base/files/file_util.h"
 +#include "base/files/important_file_writer.h"
 +#include "base/functional/bind.h"
++#include "base/hash/hash.h"
 +#include "base/json/json_writer.h"
 +#include "base/logging.h"
 +#include "base/task/thread_pool.h"
 +#include "base/unguessable_token.h"
 +#include "base/values.h"
 +#include "chrome/browser/app_swap/app_swap_session_recording_paths.h"
++#include "third_party/zlib/google/compression_utils.h"
 +
 +namespace {
 +
@@ -281,7 +284,10 @@ index 0000000000000..af3d939536ab9
 +  explicit BackgroundWriter(const base::FilePath& session_dir)
 +      : session_dir_(session_dir) {}
 +
-+  ~BackgroundWriter() { current_segment_.Close(); }
++  ~BackgroundWriter() {
++    current_segment_.Close();
++    blobs_file_.Close();
++  }
 +
 +  void Initialize(const GURL& start_url) {
 +    if (!base::CreateDirectory(session_dir_)) {
@@ -303,22 +309,43 @@ index 0000000000000..af3d939536ab9
 +      return;
 +    }
 +
++    const uint64_t paintops_hash = WriteBlobIfNew(base::span(serialized.paintops));
++    const uint64_t strikedata_hash =
++        WriteBlobIfNew(base::span(serialized.strikedata));
++    if (failed_) {
++      return;
++    }
++
++    // Each image is deduplicated individually, not as part of one combined
++    // imagedata blob -- confirmed necessary because the SET of images
++    // visible in a commit drifts as new content scrolls into view, so a
++    // whole-blob hash would rarely match even when most of the individual
++    // photos are unchanged from an earlier commit.
++    std::vector<cc::ImageDataEntry> image_entries =
++        cc::ParseImageData(base::span(serialized.imagedata));
++    std::vector<std::pair<uint32_t, uint64_t>> image_refs;
++    image_refs.reserve(image_entries.size());
++    for (const cc::ImageDataEntry& entry : image_entries) {
++      image_refs.emplace_back(entry.id, WriteBlobIfNew(entry.bytes));
++      if (failed_) {
++        return;
++      }
++    }
++
 +    // Record layout (all fields fixed-size and little-endian on every
 +    // platform this fork ships on -- not attempting cross-endianness
 +    // portability here, this format never leaves the machine that wrote
-+    // it in Milestone 1's scope):
++    // it):
 +    //   uint32 frame_index (shared by every layer of one commit)
 +    //   uint32 layer_id
 +    //   int64  capture_time (milliseconds since Unix epoch)
 +    //   uint32 width
 +    //   uint32 height
 +    //   double transform[16] (column-major, gfx::Transform::GetColMajor())
-+    //   uint32 paintops_len
-+    //   byte[paintops_len] paintops
-+    //   uint32 strikedata_len
-+    //   byte[strikedata_len] strikedata
-+    //   uint32 imagedata_len
-+    //   byte[imagedata_len] imagedata
++    //   uint64 paintops_hash    -- resolved against blobs.dat, see
++    //   uint64 strikedata_hash     WriteBlobIfNew()'s own comment
++    //   uint32 image_ref_count
++    //   [image_ref_count * (uint32 id, uint64 content_hash)]
 +    // Prefixed by its own uint32 total-length so a reader can find record
 +    // boundaries in the segment file without parsing each record's inner
 +    // fields first.
@@ -330,19 +357,15 @@ index 0000000000000..af3d939536ab9
 +    const uint32_t height = static_cast<uint32_t>(bounds.height());
 +    std::array<double, 16> transform_col_major;
 +    transform.GetColMajor(base::span(transform_col_major));
-+    const uint32_t paintops_len =
-+        static_cast<uint32_t>(serialized.paintops.size());
-+    const uint32_t strikedata_len =
-+        static_cast<uint32_t>(serialized.strikedata.size());
-+    const uint32_t imagedata_len =
-+        static_cast<uint32_t>(serialized.imagedata.size());
++    const uint32_t image_ref_count =
++        static_cast<uint32_t>(image_refs.size());
 +
 +    const uint32_t record_len = static_cast<uint32_t>(
 +        sizeof(frame_index_field) + sizeof(layer_id_u32) +
 +        sizeof(capture_time_ms) + sizeof(width) + sizeof(height) +
-+        sizeof(transform_col_major) + sizeof(paintops_len) + paintops_len +
-+        sizeof(strikedata_len) + strikedata_len + sizeof(imagedata_len) +
-+        imagedata_len);
++        sizeof(transform_col_major) + sizeof(paintops_hash) +
++        sizeof(strikedata_hash) + sizeof(image_ref_count) +
++        image_refs.size() * (sizeof(uint32_t) + sizeof(uint64_t)));
 +
 +    if (!EnsureSegmentOpenForWrite(sizeof(record_len) + record_len)) {
 +      return;
@@ -365,17 +388,18 @@ index 0000000000000..af3d939536ab9
 +            base::as_byte_span(base::allow_nonunique_obj,
 +                              transform_col_major)) &&
 +        current_segment_.WriteAtCurrentPosAndCheck(
-+            base::byte_span_from_ref(paintops_len)) &&
++            base::byte_span_from_ref(paintops_hash)) &&
 +        current_segment_.WriteAtCurrentPosAndCheck(
-+            base::span(serialized.paintops)) &&
++            base::byte_span_from_ref(strikedata_hash)) &&
 +        current_segment_.WriteAtCurrentPosAndCheck(
-+            base::byte_span_from_ref(strikedata_len)) &&
-+        current_segment_.WriteAtCurrentPosAndCheck(
-+            base::span(serialized.strikedata)) &&
-+        current_segment_.WriteAtCurrentPosAndCheck(
-+            base::byte_span_from_ref(imagedata_len)) &&
-+        current_segment_.WriteAtCurrentPosAndCheck(
-+            base::span(serialized.imagedata));
++            base::byte_span_from_ref(image_ref_count));
++    for (const auto& [id, hash] : image_refs) {
++      ok = ok &&
++           current_segment_.WriteAtCurrentPosAndCheck(
++               base::byte_span_from_ref(id)) &&
++           current_segment_.WriteAtCurrentPosAndCheck(
++               base::byte_span_from_ref(hash));
++    }
 +    if (!ok) {
 +      LOG(ERROR) << "AppSwap: failed writing recording frame to "
 +                 << current_segment_path_;
@@ -450,6 +474,58 @@ index 0000000000000..af3d939536ab9
 +    return true;
 +  }
 +
++  // Content-addressed dedup for paintops/strikedata/each image (see this
++  // class's own header comment): computes a 64-bit hash of `content`,
++  // checks it against every hash already written this session, and only
++  // gzip-compresses and appends it to blobs.dat on a miss -- either way,
++  // returns the hash the caller should store as this content's reference.
++  // blobs.dat format: [uint64 hash][uint32 compressed_len][compressed
++  // bytes], repeated, append-only, never rolled over (an acceptable first
++  // cut -- dedup + compression should already keep typical sessions well
++  // under what today's un-deduped segments hit). Collision risk at
++  // base::FastHash's 64 bits is negligible at one session's scale of
++  // thousands, not billions, of distinct blobs.
++  uint64_t WriteBlobIfNew(base::span<const uint8_t> content) {
++    const uint64_t hash = static_cast<uint64_t>(base::FastHash(content));
++    if (known_hashes_.contains(hash)) {
++      return hash;
++    }
++    known_hashes_.insert(hash);
++
++    std::string compressed;
++    if (!compression::GzipCompress(content, &compressed)) {
++      LOG(ERROR) << "AppSwap: failed to compress recording blob in "
++                 << session_dir_;
++      failed_ = true;
++      return hash;
++    }
++
++    if (!blobs_file_.IsValid()) {
++      blobs_file_ = base::File(
++          GetAppSwapRecordingBlobsPath(session_dir_),
++          base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
++      if (!blobs_file_.IsValid()) {
++        LOG(ERROR) << "AppSwap: failed to open recording blob store in "
++                   << session_dir_;
++        failed_ = true;
++        return hash;
++      }
++    }
++
++    const uint32_t compressed_len = static_cast<uint32_t>(compressed.size());
++    if (!blobs_file_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(hash)) ||
++        !blobs_file_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(compressed_len)) ||
++        !blobs_file_.WriteAtCurrentPosAndCheck(
++            base::as_byte_span(compressed))) {
++      LOG(ERROR) << "AppSwap: failed writing recording blob in "
++                 << session_dir_;
++      failed_ = true;
++    }
++    return hash;
++  }
++
 +  void WriteManifest(const GURL& start_url) {
 +    base::DictValue manifest;
 +    manifest.Set("start_time_ms",
@@ -470,6 +546,15 @@ index 0000000000000..af3d939536ab9
 +  base::FilePath current_segment_path_;
 +  size_t current_segment_bytes_ = 0;
 +  int next_segment_index_ = 0;
++  // blobs.dat -- lazily opened on the first WriteBlobIfNew() call that
++  // actually needs to write something (a session with nothing to record
++  // yet, e.g. immediately stopped, need not create it at all).
++  base::File blobs_file_;
++  // Every hash already written to blobs.dat this session -- checked by
++  // WriteBlobIfNew() before writing anything new. Reset only by
++  // destroying this BackgroundWriter (one instance is always one
++  // recording session).
++  std::unordered_set<uint64_t> known_hashes_;
 +  bool failed_ = false;
 +};
 +
@@ -518,10 +603,10 @@ index 0000000000000..af3d939536ab9
 +}
 diff --git a/chrome/browser/app_swap/app_swap_session_recording_writer.h b/chrome/browser/app_swap/app_swap_session_recording_writer.h
 new file mode 100644
-index 0000000000000..cb964b8b51a65
+index 0000000000000..75c96a2d8ba05
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_session_recording_writer.h
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,117 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -557,6 +642,26 @@ index 0000000000000..cb964b8b51a65
 +// segment_0001.paintopseg, ...) so they're discoverable and orderable by a
 +// directory listing alone -- the manifest only records session-level
 +// metadata, not the segment list.
++//
++// A segment record does NOT embed a layer's full paintops/strikedata/image
++// bytes inline -- confirmed by real usage (scrolling an image-heavy page
++// produced tens of MB in a few seconds, since the same still-visible
++// photos were being fully re-captured and re-stored on every commit) that
++// this needed real deduplication, not just a smaller format. Instead each
++// record stores content hashes, resolved against a single
++// content-addressed blob store for the whole session (blobs.dat, see
++// WriteBlobIfNew()): identical content -- the same photo redrawn commit
++// after commit, or a genuinely static layer's unchanged paintops -- is
++// gzip-compressed and stored exactly once, regardless of how many commits
++// reference it. This works without requiring any cross-commit stability
++// from the ids DrawImageOp already embeds in paintops (RealImageProvider,
++// cc/paint/paint_op_capture_serializer.cc, still assigns a fresh id every
++// single capture, unchanged) -- playback already rebuilds a fresh
++// per-commit transfer-cache mapping regardless, so all that's needed is
++// resolving *this* commit's own ids to the right bytes, which a
++// (id, content_hash) reference list plus the shared blob store already
++// gives for free, with instant lookup by hash regardless of which commit
++// first introduced that content.
 +//
 +// All disk I/O runs on a dedicated SequencedTaskRunner (mirroring
 +// AppSwapConfigStore's own threading convention, see that class's own

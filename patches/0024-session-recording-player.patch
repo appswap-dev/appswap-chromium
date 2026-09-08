@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/app_swap/app_swap_session_recording_reader.cc b/chrome/browser/app_swap/app_swap_session_recording_reader.cc
 new file mode 100644
-index 0000000000000..3a1b5f3de0139
+index 0000000000000..11c0ad5cd3acc
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_session_recording_reader.cc
-@@ -0,0 +1,368 @@
+@@ -0,0 +1,467 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -24,6 +24,7 @@ index 0000000000000..3a1b5f3de0139
 +#include "base/task/task_traits.h"
 +#include "base/task/thread_pool.h"
 +#include "base/values.h"
++#include "cc/paint/paint_op_capture_serializer.h"
 +#include "chrome/browser/app_swap/app_swap_session_recording_paths.h"
 +// FrameBitmap lives in a separate mojom file/target from PlaybackRenderer
 +// (see app_swap_playback_bitmap.mojom's own comment for why) -- the header
@@ -32,6 +33,7 @@ index 0000000000000..3a1b5f3de0139
 +// the complete type.
 +#include "chrome/services/app_swap_playback/public/mojom/app_swap_playback_bitmap.mojom.h"
 +#include "mojo/public/cpp/bindings/callback_helpers.h"
++#include "third_party/zlib/google/compression_utils.h"
 +#include "ui/gfx/geometry/rect_f.h"
 +#include "ui/gfx/geometry/size_conversions.h"
 +#include "ui/gfx/geometry/transform.h"
@@ -41,6 +43,9 @@ index 0000000000000..3a1b5f3de0139
 +// One layer record, fully parsed -- the read-side mirror of
 +// AppSwapSessionRecordingWriter::BackgroundWriter::WriteFrame()'s record
 +// layout (see that function's own comment for the field-by-field format).
++// `paintops_hash`/`strikedata_hash`/`image_refs` are references into the
++// session's blobs.dat, not the actual bytes -- see ResolveBlob() below for
++// how they get turned back into content.
 +struct ParsedRecord {
 +  uint32_t frame_index = 0;
 +  int32_t layer_id = 0;
@@ -48,9 +53,9 @@ index 0000000000000..3a1b5f3de0139
 +  uint32_t width = 0;
 +  uint32_t height = 0;
 +  gfx::Transform transform;
-+  std::vector<uint8_t> paintops;
-+  std::vector<uint8_t> strikedata;
-+  std::vector<uint8_t> imagedata;
++  uint64_t paintops_hash = 0;
++  uint64_t strikedata_hash = 0;
++  std::vector<std::pair<uint32_t, uint64_t>> image_refs;  // (id, content_hash)
 +};
 +
 +std::optional<ParsedRecord> ParseRecordAt(base::File& file, int64_t offset) {
@@ -63,8 +68,6 @@ index 0000000000000..3a1b5f3de0139
 +  ParsedRecord result;
 +  uint32_t layer_id_u32;
 +  std::array<double, 16> transform_col_major;
-+  uint32_t paintops_len;
-+  uint32_t strikedata_len;
 +
 +  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(result.frame_index))) {
 +    return std::nullopt;
@@ -101,37 +104,63 @@ index 0000000000000..3a1b5f3de0139
 +  pos += sizeof(transform_col_major);
 +  result.transform = gfx::Transform::ColMajor(base::span(transform_col_major));
 +
-+  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(paintops_len))) {
++  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(result.paintops_hash))) {
 +    return std::nullopt;
 +  }
-+  pos += sizeof(paintops_len);
-+  result.paintops.resize(paintops_len);
-+  if (!file.ReadAndCheck(pos, base::span(result.paintops))) {
-+    return std::nullopt;
-+  }
-+  pos += paintops_len;
++  pos += sizeof(result.paintops_hash);
 +
-+  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(strikedata_len))) {
++  if (!file.ReadAndCheck(pos,
++                        base::byte_span_from_ref(result.strikedata_hash))) {
 +    return std::nullopt;
 +  }
-+  pos += sizeof(strikedata_len);
-+  result.strikedata.resize(strikedata_len);
-+  if (!file.ReadAndCheck(pos, base::span(result.strikedata))) {
-+    return std::nullopt;
-+  }
-+  pos += strikedata_len;
++  pos += sizeof(result.strikedata_hash);
 +
-+  uint32_t imagedata_len;
-+  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(imagedata_len))) {
++  uint32_t image_ref_count;
++  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(image_ref_count))) {
 +    return std::nullopt;
 +  }
-+  pos += sizeof(imagedata_len);
-+  result.imagedata.resize(imagedata_len);
-+  if (!file.ReadAndCheck(pos, base::span(result.imagedata))) {
-+    return std::nullopt;
++  pos += sizeof(image_ref_count);
++
++  result.image_refs.reserve(image_ref_count);
++  for (uint32_t i = 0; i < image_ref_count; ++i) {
++    uint32_t id;
++    uint64_t hash;
++    if (!file.ReadAndCheck(pos, base::byte_span_from_ref(id))) {
++      return std::nullopt;
++    }
++    pos += sizeof(id);
++    if (!file.ReadAndCheck(pos, base::byte_span_from_ref(hash))) {
++      return std::nullopt;
++    }
++    pos += sizeof(hash);
++    result.image_refs.emplace_back(id, hash);
 +  }
 +
 +  return result;
++}
++
++// Resolves one content hash against `blob_index` (see
++// AppSwapSessionRecordingReader::BlobIndex's own comment), reading and
++// decompressing the bytes from the already-open `blobs_file`. Returns
++// nullopt if the hash isn't in the index or the read/decompress fails.
++std::optional<std::vector<uint8_t>> ResolveBlob(
++    base::File& blobs_file,
++    const AppSwapSessionRecordingReader::BlobIndex& blob_index,
++    uint64_t hash) {
++  auto it = blob_index.find(hash);
++  if (it == blob_index.end() || !blobs_file.IsValid()) {
++    return std::nullopt;
++  }
++  std::string compressed(it->second.compressed_len, '\0');
++  if (!blobs_file.ReadAndCheck(it->second.offset,
++                               base::as_writable_byte_span(compressed))) {
++    return std::nullopt;
++  }
++  std::string uncompressed;
++  if (!compression::GzipUncompress(compressed, &uncompressed)) {
++    return std::nullopt;
++  }
++  return std::vector<uint8_t>(uncompressed.begin(), uncompressed.end());
 +}
 +
 +std::vector<AppSwapSessionRecordingReader::NavigationEvent>
@@ -164,6 +193,42 @@ index 0000000000000..3a1b5f3de0139
 +    result.push_back(std::move(event));
 +  }
 +  return result;
++}
++
++// Scans blobs.dat once, building a hash -> location index -- the same
++// "index once, seek anywhere" pattern segment scanning already uses.
++// Missing blobs.dat (a recording with nothing ever deduplicated into it,
++// e.g. stopped immediately) is not an error -- just an empty index.
++AppSwapSessionRecordingReader::BlobIndex BuildBlobIndex(
++    const base::FilePath& session_dir) {
++  AppSwapSessionRecordingReader::BlobIndex index;
++  base::FilePath blobs_path = GetAppSwapRecordingBlobsPath(session_dir);
++  if (!base::PathExists(blobs_path)) {
++    return index;
++  }
++  base::File file(blobs_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
++  if (!file.IsValid()) {
++    return index;
++  }
++
++  int64_t file_length = file.GetLength();
++  int64_t offset = 0;
++  while (offset < file_length) {
++    uint64_t hash;
++    if (!file.ReadAndCheck(offset, base::byte_span_from_ref(hash))) {
++      break;
++    }
++    int64_t len_offset = offset + sizeof(hash);
++    uint32_t compressed_len;
++    if (!file.ReadAndCheck(len_offset,
++                           base::byte_span_from_ref(compressed_len))) {
++      break;
++    }
++    int64_t data_offset = len_offset + sizeof(compressed_len);
++    index[hash] = {data_offset, compressed_len};
++    offset = data_offset + compressed_len;
++  }
++  return index;
 +}
 +
 +}  // namespace
@@ -264,6 +329,8 @@ index 0000000000000..3a1b5f3de0139
 +  }
 +  result.navigations =
 +      ParseNavigationsFile(GetAppSwapRecordingNavigationsPath(session_dir));
++  result.blob_index =
++      std::make_shared<const BlobIndex>(BuildBlobIndex(session_dir));
 +  result.success = true;
 +  return result;
 +}
@@ -280,6 +347,7 @@ index 0000000000000..3a1b5f3de0139
 +  bool success = result.success;
 +  std::vector<NavigationEvent> navigations = std::move(result.navigations);
 +  frames_ = std::move(result.frames);
++  blob_index_ = std::move(result.blob_index);
 +
 +  std::vector<int64_t> frame_timestamps_ms;
 +  frame_timestamps_ms.reserve(frames_.size());
@@ -294,12 +362,15 @@ index 0000000000000..3a1b5f3de0139
 +AppSwapSessionRecordingReader::ReadFrameResult
 +AppSwapSessionRecordingReader::ReadFrameLayers(
 +    const base::FilePath& session_dir,
-+    IndexedFrame frame) {
++    IndexedFrame frame,
++    std::shared_ptr<const BlobIndex> blob_index) {
 +  ReadFrameResult result;
 +  gfx::RectF bounds;
 +
 +  int cached_segment_index = -1;
 +  base::File cached_file;
++  base::File blobs_file(GetAppSwapRecordingBlobsPath(session_dir),
++                        base::File::FLAG_OPEN | base::File::FLAG_READ);
 +
 +  for (const LayerRecordLocation& location : frame.layers) {
 +    if (location.segment_index != cached_segment_index) {
@@ -321,10 +392,37 @@ index 0000000000000..3a1b5f3de0139
 +    bounds.Union(parsed->transform.MapRect(
 +        gfx::RectF(0, 0, parsed->width, parsed->height)));
 +
++    // A missing blob (an unresolvable hash -- shouldn't happen against a
++    // recording this reader itself indexed, but blobs.dat could in theory
++    // be truncated by a mid-write crash) degrades to an empty buffer
++    // rather than dropping the whole layer -- matches this pipeline's
++    // existing "missing content renders blank, doesn't crash" philosophy
++    // (see cc::DeserializePaintOpBufferForPlayback()'s own comment).
++    std::vector<uint8_t> paintops =
++        ResolveBlob(blobs_file, *blob_index, parsed->paintops_hash)
++            .value_or(std::vector<uint8_t>());
++    std::vector<uint8_t> strikedata =
++        ResolveBlob(blobs_file, *blob_index, parsed->strikedata_hash)
++            .value_or(std::vector<uint8_t>());
++
++    std::vector<std::vector<uint8_t>> resolved_images;
++    std::vector<cc::ImageDataEntry> image_entries;
++    resolved_images.reserve(parsed->image_refs.size());
++    image_entries.reserve(parsed->image_refs.size());
++    for (const auto& [id, hash] : parsed->image_refs) {
++      std::optional<std::vector<uint8_t>> bytes =
++          ResolveBlob(blobs_file, *blob_index, hash);
++      if (!bytes) {
++        continue;
++      }
++      resolved_images.push_back(std::move(*bytes));
++      image_entries.push_back({id, base::span(resolved_images.back())});
++    }
++
 +    auto layer_frame = app_swap_playback::mojom::LayerFrame::New();
-+    layer_frame->paintops = std::move(parsed->paintops);
-+    layer_frame->strikedata = std::move(parsed->strikedata);
-+    layer_frame->imagedata = std::move(parsed->imagedata);
++    layer_frame->paintops = std::move(paintops);
++    layer_frame->strikedata = std::move(strikedata);
++    layer_frame->imagedata = cc::BuildImageData(image_entries);
 +    layer_frame->width = parsed->width;
 +    layer_frame->height = parsed->height;
 +    layer_frame->transform = parsed->transform;
@@ -347,7 +445,8 @@ index 0000000000000..3a1b5f3de0139
 +  }
 +  task_runner_->PostTaskAndReplyWithResult(
 +      FROM_HERE,
-+      base::BindOnce(&ReadFrameLayers, session_dir_, frames_[frame_ordinal]),
++      base::BindOnce(&ReadFrameLayers, session_dir_, frames_[frame_ordinal],
++                     blob_index_),
 +      base::BindOnce(&AppSwapSessionRecordingReader::OnFrameLayersRead,
 +                     weak_factory_.GetWeakPtr(), std::move(callback)));
 +}
@@ -374,10 +473,10 @@ index 0000000000000..3a1b5f3de0139
 +}
 diff --git a/chrome/browser/app_swap/app_swap_session_recording_reader.h b/chrome/browser/app_swap/app_swap_session_recording_reader.h
 new file mode 100644
-index 0000000000000..f7c74dd5be550
+index 0000000000000..4b997148ef100
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_session_recording_reader.h
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,157 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -388,6 +487,8 @@ index 0000000000000..f7c74dd5be550
 +#include <cstdint>
 +#include <memory>
 +#include <string>
++#include <unordered_map>
++#include <utility>
 +#include <vector>
 +
 +#include "base/files/file_path.h"
@@ -423,6 +524,19 @@ index 0000000000000..f7c74dd5be550
 +    std::string package_name;
 +    std::string version;
 +  };
++
++  // Where one content-addressed blob lives in blobs.dat -- see
++  // AppSwapSessionRecordingWriter::WriteBlobIfNew()'s own comment for the
++  // file format this indexes. `compressed_len` is bytes on disk;
++  // GzipUncompress() figures out the real (uncompressed) size on its own.
++  // Public (like NavigationEvent above) because the free functions that
++  // build and resolve against this index (BuildBlobIndex()/ResolveBlob()
++  // in app_swap_session_recording_reader.cc) aren't members of this class.
++  struct BlobLocation {
++    int64_t offset = 0;  // of the compressed bytes themselves, not the hash
++    uint32_t compressed_len = 0;
++  };
++  using BlobIndex = std::unordered_map<uint64_t, BlobLocation>;
 +
 +  // `playback_service` must outlive this reader (and every callback it's
 +  // given) -- owned by whoever constructs this reader, typically
@@ -479,6 +593,7 @@ index 0000000000000..f7c74dd5be550
 +    bool success = false;
 +    std::vector<IndexedFrame> frames;  // sorted by frame_index
 +    std::vector<NavigationEvent> navigations;
++    std::shared_ptr<const BlobIndex> blob_index;
 +  };
 +
 +  // Runs on task_runner_.
@@ -486,8 +601,11 @@ index 0000000000000..f7c74dd5be550
 +  void OnIndexed(IndexCallback callback, IndexResult result);
 +
 +  // Runs on task_runner_. Reads and fully parses every layer record for
-+  // one frame, computing that frame's composite viewport size (the union
-+  // bounding box of each layer's transformed bounds) along the way.
++  // one frame -- resolving each record's content-hash references against
++  // `blob_index` (see BlobIndex's own comment) to reconstruct the actual
++  // paintops/strikedata/imagedata bytes -- computing that frame's
++  // composite viewport size (the union bounding box of each layer's
++  // transformed bounds) along the way.
 +  struct ReadFrameResult {
 +    ReadFrameResult();
 +    ReadFrameResult(ReadFrameResult&&);
@@ -497,8 +615,10 @@ index 0000000000000..f7c74dd5be550
 +    std::vector<app_swap_playback::mojom::LayerFramePtr> layers;
 +    gfx::Size viewport_size;
 +  };
-+  static ReadFrameResult ReadFrameLayers(const base::FilePath& session_dir,
-+                                        IndexedFrame frame);
++  static ReadFrameResult ReadFrameLayers(
++      const base::FilePath& session_dir,
++      IndexedFrame frame,
++      std::shared_ptr<const BlobIndex> blob_index);
 +  void OnFrameLayersRead(RenderFrameCallback callback,
 +                        ReadFrameResult result);
 +
@@ -506,8 +626,9 @@ index 0000000000000..f7c74dd5be550
 +  raw_ptr<app_swap_playback::mojom::PlaybackRenderer> playback_service_;
 +  scoped_refptr<base::SequencedTaskRunner> task_runner_;
 +
-+  // Populated once Index() completes; empty (and unused) before that.
++  // Populated once Index() completes; empty/null (and unused) before that.
 +  std::vector<IndexedFrame> frames_;
++  std::shared_ptr<const BlobIndex> blob_index_;
 +
 +  base::WeakPtrFactory<AppSwapSessionRecordingReader> weak_factory_{this};
 +};
@@ -550,10 +671,10 @@ index 0000000000000..1ee39868f2b22
 +}
 diff --git a/chrome/services/app_swap_playback/app_swap_playback_service.cc b/chrome/services/app_swap_playback/app_swap_playback_service.cc
 new file mode 100644
-index 0000000000000..fbd1227663ae3
+index 0000000000000..d8eb2ad4386b8
 --- /dev/null
 +++ b/chrome/services/app_swap_playback/app_swap_playback_service.cc
-@@ -0,0 +1,241 @@
+@@ -0,0 +1,215 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -608,37 +729,11 @@ index 0000000000000..fbd1227663ae3
 + public:
 +  PlaybackTransferCacheDeserializeHelper(base::span<const uint8_t> imagedata,
 +                                         GrDirectContext* gr_context) {
-+    size_t pos = 0;
-+    if (imagedata.size() < sizeof(uint32_t)) {
-+      return;
-+    }
-+    uint32_t count;
-+    base::byte_span_from_ref(count).copy_from(
-+        imagedata.subspan(pos, sizeof(count)));
-+    pos += sizeof(count);
-+
-+    for (uint32_t i = 0; i < count; ++i) {
-+      if (imagedata.size() - pos < 2 * sizeof(uint32_t)) {
-+        break;
-+      }
-+      uint32_t id;
-+      base::byte_span_from_ref(id).copy_from(
-+          imagedata.subspan(pos, sizeof(id)));
-+      pos += sizeof(id);
-+      uint32_t len;
-+      base::byte_span_from_ref(len).copy_from(
-+          imagedata.subspan(pos, sizeof(len)));
-+      pos += sizeof(len);
-+      if (imagedata.size() - pos < len) {
-+        break;
-+      }
-+      base::span<const uint8_t> entry_bytes = imagedata.subspan(pos, len);
-+      pos += len;
-+
++    for (const cc::ImageDataEntry& image : cc::ParseImageData(imagedata)) {
 +      auto entry = std::make_unique<cc::ServiceImageTransferCacheEntry>();
 +      if (entry->Deserialize(gr_context, /*graphite_recorder=*/nullptr,
-+                             entry_bytes)) {
-+        entries_[id] = std::move(entry);
++                             image.bytes)) {
++        entries_[image.id] = std::move(entry);
 +      }
 +    }
 +  }

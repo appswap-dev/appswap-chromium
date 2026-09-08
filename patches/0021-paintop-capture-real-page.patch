@@ -84,10 +84,10 @@ index 5299b3b337263..43ba4e99541ed 100644
    void CaptureContent(const gfx::Rect& rect,
 diff --git a/cc/paint/paint_op_capture_serializer.cc b/cc/paint/paint_op_capture_serializer.cc
 new file mode 100644
-index 0000000000000..bcfdd23b83c62
+index 0000000000000..fd39b4248b12c
 --- /dev/null
 +++ b/cc/paint/paint_op_capture_serializer.cc
-@@ -0,0 +1,264 @@
+@@ -0,0 +1,313 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -193,29 +193,31 @@ index 0000000000000..bcfdd23b83c62
 +  }
 +
 +  // Flattens every entry collected so far into this file's header-
-+  // documented [count][id,len,bytes]* format, and clears the collection
-+  // (this provider is single-use per SerializePaintOpBufferForCapture()
-+  // call, so there's nothing left to take a second time).
++  // documented [count][id,len,bytes]* format (via BuildImageData(), also
++  // used by every other consumer of this format), and clears the
++  // collection (this provider is single-use per
++  // SerializePaintOpBufferForCapture() call, so there's nothing left to
++  // take a second time).
 +  std::vector<uint8_t> TakeImageData() {
-+    std::vector<uint8_t> result;
-+    const uint32_t count = static_cast<uint32_t>(entries_.size());
-+    AppendBytes(result, base::byte_span_from_ref(count));
-+    for (auto& [id, data] : entries_) {
-+      AppendBytes(result, base::byte_span_from_ref(id));
-+      const uint32_t len = static_cast<uint32_t>(data.size());
-+      AppendBytes(result, base::byte_span_from_ref(len));
-+      AppendBytes(result, base::span(data));
++    std::vector<ImageDataEntry> entries;
++    entries.reserve(entries_.size());
++    for (const auto& [id, data] : entries_) {
++      entries.push_back({id, base::span(data)});
 +    }
++    std::vector<uint8_t> result = BuildImageData(entries);
++    // `entries`' raw_spans point into entries_'s own buffers -- they must
++    // be gone before entries_.clear() frees those buffers, or the
++    // raw_spans go dangling and get destroyed after the fact (a real
++    // DanglingPtr crash, confirmed by actually hitting it: "Recording
++    // stopped working on some websites"). entries_.clear() alone, with
++    // `entries` only going out of scope later at function return, hit
++    // exactly this ordering bug.
++    entries.clear();
 +    entries_.clear();
 +    return result;
 +  }
 +
 + private:
-+  static void AppendBytes(std::vector<uint8_t>& out,
-+                          base::span<const uint8_t> bytes) {
-+    out.insert(out.end(), bytes.begin(), bytes.end());
-+  }
-+
 +  std::vector<std::pair<uint32_t, std::vector<uint8_t>>> entries_;
 +};
 +
@@ -351,13 +353,60 @@ index 0000000000000..bcfdd23b83c62
 +  return PaintOpBuffer::MakeFromMemory(paintops, options);
 +}
 +
++std::vector<ImageDataEntry> ParseImageData(base::span<const uint8_t> imagedata) {
++  std::vector<ImageDataEntry> result;
++  size_t pos = 0;
++  if (imagedata.size() < sizeof(uint32_t)) {
++    return result;
++  }
++  uint32_t count;
++  base::byte_span_from_ref(count).copy_from(
++      imagedata.subspan(pos, sizeof(count)));
++  pos += sizeof(count);
++
++  for (uint32_t i = 0; i < count; ++i) {
++    if (imagedata.size() - pos < 2 * sizeof(uint32_t)) {
++      break;
++    }
++    uint32_t id;
++    base::byte_span_from_ref(id).copy_from(imagedata.subspan(pos, sizeof(id)));
++    pos += sizeof(id);
++    uint32_t len;
++    base::byte_span_from_ref(len).copy_from(
++        imagedata.subspan(pos, sizeof(len)));
++    pos += sizeof(len);
++    if (imagedata.size() - pos < len) {
++      break;
++    }
++    result.push_back({id, imagedata.subspan(pos, len)});
++    pos += len;
++  }
++  return result;
++}
++
++std::vector<uint8_t> BuildImageData(base::span<const ImageDataEntry> entries) {
++  std::vector<uint8_t> result;
++  auto append = [&result](base::span<const uint8_t> bytes) {
++    result.insert(result.end(), bytes.begin(), bytes.end());
++  };
++  const uint32_t count = static_cast<uint32_t>(entries.size());
++  append(base::byte_span_from_ref(count));
++  for (const ImageDataEntry& entry : entries) {
++    append(base::byte_span_from_ref(entry.id));
++    const uint32_t len = static_cast<uint32_t>(entry.bytes.size());
++    append(base::byte_span_from_ref(len));
++    append(entry.bytes);
++  }
++  return result;
++}
++
 +}  // namespace cc
 diff --git a/cc/paint/paint_op_capture_serializer.h b/cc/paint/paint_op_capture_serializer.h
 new file mode 100644
-index 0000000000000..9271644535cc5
+index 0000000000000..b94dfc0fa702f
 --- /dev/null
 +++ b/cc/paint/paint_op_capture_serializer.h
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,154 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -370,6 +419,7 @@ index 0000000000000..9271644535cc5
 +#include <vector>
 +
 +#include "base/containers/span.h"
++#include "base/memory/raw_span.h"
 +#include "cc/paint/paint_export.h"
 +#include "cc/paint/scroll_offset_map.h"
 +#include "third_party/skia/include/core/SkRefCnt.h"
@@ -473,6 +523,40 @@ index 0000000000000..9271644535cc5
 +    base::span<const uint8_t> paintops,
 +    base::span<const uint8_t> strikedata,
 +    TransferCacheDeserializeHelper* transfer_cache = nullptr);
++
++// One entry from an `imagedata` blob (see SerializedPaintOpBuffer's own
++// comment for the format): a transfer-cache id and the serialized
++// cc::ClientImageTransferCacheEntry bytes for it. `bytes` is a view into
++// whatever buffer was passed to ParseImageData() -- it does not own the
++// data and must not outlive it.
++struct CC_PAINT_EXPORT ImageDataEntry {
++  uint32_t id;
++  // raw_span, not span: Chromium's clang plugin requires it for a span
++  // stored as a class/struct member (the same "no bare pointer-like field"
++  // rule raw_ptr<T> enforces for plain pointers) -- confirmed by actually
++  // hitting the chromium-rawptr build error. Implicitly converts to/from
++  // span<>, so call sites are unaffected.
++  base::raw_span<const uint8_t> bytes;
++};
++
++// Splits an `imagedata` blob into its individual per-image entries. Used
++// by every consumer of this format: AppSwapSessionRecordingWriter (to
++// content-hash and dedup each image separately),
++// AppSwapPlaybackService's PlaybackTransferCacheDeserializeHelper (to
++// resolve each id to its entry bytes), and (paired with BuildImageData())
++// AppSwapSessionRecordingReader (to reassemble a flat blob after
++// resolving each entry's content hash back to bytes from the on-disk blob
++// store). Returns an empty vector if `imagedata` is malformed or empty --
++// this format is only ever produced by this checkout's own capture code,
++// so a malformed blob indicates a real bug, not something to recover from
++// gracefully.
++CC_PAINT_EXPORT std::vector<ImageDataEntry> ParseImageData(
++    base::span<const uint8_t> imagedata);
++
++// The inverse of ParseImageData(): reassembles a flat `imagedata` blob
++// from a list of entries.
++CC_PAINT_EXPORT std::vector<uint8_t> BuildImageData(
++    base::span<const ImageDataEntry> entries);
 +
 +}  // namespace cc
 +

@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/app_swap/app_swap_recordings_scanner.cc b/chrome/browser/app_swap/app_swap_recordings_scanner.cc
 new file mode 100644
-index 0000000000000..e577572aae2dc
+index 0000000000000..846527521dc96
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_recordings_scanner.cc
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,142 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -19,6 +19,7 @@ index 0000000000000..e577572aae2dc
 +#include "base/task/thread_pool.h"
 +#include "base/unguessable_token.h"
 +#include "base/values.h"
++#include "chrome/browser/app_swap/app_swap_session_recording_paths.h"
 +
 +namespace {
 +
@@ -66,6 +67,14 @@ index 0000000000000..e577572aae2dc
 +        segment = segments.Next()) {
 +      ++info.segment_count;
 +      info.total_bytes += segments.GetInfo().GetSize();
++    }
++
++    // blobs.dat now holds the bulk of a recording's real content (see
++    // AppSwapSessionRecordingWriter's own header comment) -- segment files
++    // alone would badly undercount the size shown on the listing page.
++    if (std::optional<int64_t> blobs_size = base::GetFileSize(
++            GetAppSwapRecordingBlobsPath(session_dir))) {
++      info.total_bytes += *blobs_size;
 +    }
 +
 +    results.push_back(std::move(info));
@@ -220,10 +229,10 @@ index 0000000000000..95fae4147c76b
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RECORDINGS_SCANNER_H_
 diff --git a/chrome/browser/app_swap/app_swap_session_recording_paths.cc b/chrome/browser/app_swap/app_swap_session_recording_paths.cc
 new file mode 100644
-index 0000000000000..f639f3cc15462
+index 0000000000000..7d0f47a8ab41d
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_session_recording_paths.cc
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,36 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -238,6 +247,8 @@ index 0000000000000..f639f3cc15462
 +    FILE_PATH_LITERAL("AppSwap/Recordings");
 +constexpr base::FilePath::CharType kNavigationsFileName[] =
 +    FILE_PATH_LITERAL("navigations.jsonl");
++constexpr base::FilePath::CharType kBlobsFileName[] =
++    FILE_PATH_LITERAL("blobs.dat");
 +}  // namespace
 +
 +base::FilePath GetAppSwapRecordingsDir(Profile* profile) {
@@ -254,12 +265,16 @@ index 0000000000000..f639f3cc15462
 +    const base::FilePath& session_dir) {
 +  return session_dir.Append(kNavigationsFileName);
 +}
++
++base::FilePath GetAppSwapRecordingBlobsPath(const base::FilePath& session_dir) {
++  return session_dir.Append(kBlobsFileName);
++}
 diff --git a/chrome/browser/app_swap/app_swap_session_recording_paths.h b/chrome/browser/app_swap/app_swap_session_recording_paths.h
 new file mode 100644
-index 0000000000000..380dea4b4b762
+index 0000000000000..d61d3a85b000c
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_session_recording_paths.h
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,37 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -289,6 +304,12 @@ index 0000000000000..380dea4b4b762
 +// AppSwapSessionRecordingWriter::WriteNavigation() for the format.
 +base::FilePath GetAppSwapRecordingNavigationsPath(
 +    const base::FilePath& session_dir);
++
++// One session's content-addressed blob store (blobs.dat) -- see
++// AppSwapSessionRecordingWriter::WriteBlobIfNew() for the format. Holds
++// the actual paintops/strikedata/image bytes segment records now only
++// reference by hash, deduplicated across the whole session.
++base::FilePath GetAppSwapRecordingBlobsPath(const base::FilePath& session_dir);
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_PATHS_H_
 diff --git a/chrome/browser/resources/app_swap_recordings/BUILD.gn b/chrome/browser/resources/app_swap_recordings/BUILD.gn
