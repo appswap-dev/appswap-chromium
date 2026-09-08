@@ -1,0 +1,647 @@
+diff --git a/cc/paint/BUILD.gn b/cc/paint/BUILD.gn
+index f4628a9e40c2e..0985032b9d36b 100644
+--- a/cc/paint/BUILD.gn
++++ b/cc/paint/BUILD.gn
+@@ -60,6 +60,8 @@ cc_component("paint") {
+     "paint_op.h",
+     "paint_op_buffer.cc",
+     "paint_op_buffer.h",
++    "paint_op_capture_serializer.cc",
++    "paint_op_capture_serializer.h",
+     "paint_op_buffer_iterator.cc",
+     "paint_op_buffer_iterator.h",
+     "paint_op_buffer_serializer.cc",
+@@ -212,3 +214,23 @@ fuzzer_test("paint_op_reader_security_constrainted_fuzzer") {
+ 
+   deps = [ "//cc/paint" ]
+ }
++
++# AppSwap: standalone spike tool (not a unit test, not a fuzzer -- a real
++# main() you run twice, once per --mode, from the command line) for
++# session-recording feasibility research. See the tool's own file comment
++# for what it's actually testing and why.
++executable("paintop_disk_roundtrip_tool") {
++  testonly = true
++  sources = [ "paintop_disk_roundtrip_tool.cc" ]
++
++  deps = [
++    "//base",
++    "//cc:test_support",
++    "//cc/paint",
++    "//ui/gfx",
++    "//ui/gfx/codec",
++    "//ui/gfx/geometry",
++    "//ui/gl",
++    "//ui/gl/init",
++  ]
++}
+diff --git a/cc/paint/paintop_disk_roundtrip_tool.cc b/cc/paint/paintop_disk_roundtrip_tool.cc
+new file mode 100644
+index 0000000000000..ebaa2b3f92493
+--- /dev/null
++++ b/cc/paint/paintop_disk_roundtrip_tool.cc
+@@ -0,0 +1,604 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Standalone spike tool -- NOT a unit test -- for AppSwap's session-
++// recording feasibility research. Answers one question: can a
++// cc::PaintOpBuffer be serialized, written to disk, read back in a
++// SEPARATE process invocation, and deserialized/replayed correctly? See
++// the "PaintOp-based session recording" design notes this tool was built
++// from for the full context.
++//
++// This tool tests TWO THINGS SEPARATELY, on purpose, after an actual build
++// + run surfaced a real architectural fact that isn't a round-trip bug:
++//
++//  1. SHAPES (rect/clip/save-restore/nested DrawRecordOp): full pixel
++//     round trip on a plain raster SkCanvas. Rendered once before
++//     serialization (--reference_png) and once after a disk round trip in
++//     a separate process (--output_png); --mode=diff expects these
++//     pixel-identical. Deliberately kept on the cheap raster path even
++//     after Phase 2 added real GPU rendering below -- there's nothing new
++//     to prove here, and switching it to Ganesh would risk introducing
++//     GPU-vs-CPU antialiasing differences that could break this exact
++//     match for no reason.
++//
++//  2. TEXT (DrawTextBlobOp -> DrawSlugOp on the wire): rendered for real,
++//     via a genuine Ganesh GPU-backed SkSurface (see
++//     RenderBitmapWithGanesh()) -- `sktext::gpu::Slug`/DrawSlugOp playback
++//     is implemented ONLY by Ganesh/Graphite GPU-backed SkDevices
++//     (third_party/skia/src/gpu/ganesh/Device.cpp,
++//     .../graphite/Device.cpp); the base SkDevice::drawSlug is a hard
++//     SK_ABORT (third_party/skia/src/core/SkDevice.cpp:486-488), confirmed
++//     by actually hitting it originally: a plain SkCanvas over a raster
++//     SkBitmap (exactly what OOP-R's GPU-process side never uses -- it
++//     always has a real Ganesh/Graphite context) cannot render a
++//     deserialized slug at all. Phase 2 closed that gap instead of working
++//     around it. Also still checked structurally first (strike data
++//     non-empty, deserialized op count/type as expected -- see
++//     RunRead()) as a cheap sanity check before spending effort rendering.
++//
++// Usage -- run as SEPARATE process invocations, in order:
++//
++//   paintop_disk_roundtrip_tool --mode=write \
++//       --paintops=ops.bin --strikedata=strike.bin --reference_png=ref.png \
++//       --text_paintops=text_ops.bin --text_strikedata=text_strike.bin
++//
++//   paintop_disk_roundtrip_tool --mode=read \
++//       --paintops=ops.bin --strikedata=strike.bin --output_png=replay.png \
++//       --text_paintops=text_ops.bin --text_strikedata=text_strike.bin \
++//       --text_output_png=text_replay.png
++//
++//   paintop_disk_roundtrip_tool --mode=diff --a=ref.png --b=replay.png
++//
++// AppSwap Phase 1 adds one more mode, for verifying real captures rather
++// than this tool's own hand-built buffers -- see RunReadCapture() below:
++//
++//   paintop_disk_roundtrip_tool --mode=read_capture \
++//       --paintops=layer_0.paintops --strikedata=layer_0.strikedata \
++//       --output_png=layer_0.png --width=<layer width> --height=<layer height>
++//
++// A real captured layer routinely mixes text with everything else in ONE
++// buffer (unlike this tool's own deliberately-separated shapes/text
++// buffers) -- Phase 2's RenderBitmapWithGanesh() handles that fine, since
++// it renders the WHOLE buffer for real rather than needing to skip
++// anything.
++//
++// A zero exit code from --mode=diff means the two PNGs are pixel-identical.
++// --mode=read prints PASS/FAIL for the text structural check, then renders
++// it regardless (see RenderBitmapWithGanesh()'s own comment for why a
++// separate GPU-backed render path is needed at all).
++//
++// AppSwap Phase 2: RenderBitmapWithGanesh() needs a real, working GL
++// implementation on this machine. Pass
++// --use-gl=angle --use-angle=swiftshader on this tool's OWN command line
++// (base::CommandLine::Init() below picks up whatever's passed to argv) for
++// headless/software rendering instead of relying on whatever GPU driver
++// happens to be installed.
++//
++// Deliberately excludes DrawImage/transfer-cache-backed ops for this first
++// spike: image resources need their own cross-process persistence story
++// (the transfer cache), which is a separate concern from the text/
++// SkStrikeServer risk this tool exists to test in isolation.
++//
++// Getting DrawTextBlob to actually survive serialization at all is not
++// guessed at here. It's copied from a real, existing, working pattern in
++// this checkout: cc/paint/paint_op_buffer_unittest.cc's
++// PaintOpSerializationTest.ConvertToDrawSlugWhenSerializationAndRasterization
++// test (play the buffer back on an analysis canvas first, then
++// writeStrikeData()/readStrikeData(), *then* serialize). Note that
++// Chromium's own generic parameterized serialization smoke test
++// explicitly skips kDrawTextBlob/kDrawSlug due to an open bug
++// (crbug.com/40223786) -- that bug is about the generic test harness not
++// accommodating text's two-phase requirement, not evidence the mechanism
++// itself is broken (the dedicated test above exercises it and expects it
++// to work), but it's exactly why this tool checks the deserialized
++// structure itself rather than just trusting the dedicated test's own
++// same-process, same-run version of this -- that part (a real disk/
++// process boundary) genuinely hasn't been verified anywhere in this
++// codebase before.
++
++#include <cstdio>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/at_exit.h"
++#include "base/command_line.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "cc/paint/paint_op_buffer.h"
++#include "cc/paint/paint_op_buffer_iterator.h"
++#include "cc/paint/paint_op_buffer_serializer.h"
++#include "cc/paint/paint_op_writer.h"
++#include "cc/paint/paint_record.h"
++#include "cc/test/test_options_provider.h"
++#include "skia/ext/font_utils.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "third_party/skia/include/core/SkCanvas.h"
++#include "third_party/skia/include/core/SkFont.h"
++#include "third_party/skia/include/core/SkImageInfo.h"
++#include "third_party/skia/include/core/SkSurface.h"
++#include "third_party/skia/include/core/SkTextBlob.h"
++#include "third_party/skia/include/gpu/GpuTypes.h"
++#include "third_party/skia/include/gpu/ganesh/GrDirectContext.h"
++#include "third_party/skia/include/gpu/ganesh/SkSurfaceGanesh.h"
++#include "third_party/skia/include/gpu/ganesh/gl/GrGLDirectContext.h"
++#include "third_party/skia/include/gpu/ganesh/gl/GrGLInterface.h"
++#include "ui/gfx/codec/png_codec.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/gl/gl_context.h"
++#include "ui/gl/gl_surface.h"
++#include "ui/gl/gl_version_info.h"
++#include "ui/gl/gpu_preference.h"
++#include "ui/gl/init/create_gr_gl_interface.h"
++#include "ui/gl/init/gl_factory.h"
++
++namespace {
++
++constexpr int kWidth = 400;
++constexpr int kHeight = 300;
++
++// Shapes, save/restore/clip, and a nested record (to exercise
++// DrawRecordOp flattening during serialization) -- everything in this
++// buffer is renderable by a plain raster SkCanvas, so this is the buffer
++// used for the full pixel round-trip check.
++cc::PaintOpBuffer BuildShapesBuffer() {
++  cc::PaintOpBuffer nested;
++  cc::PaintFlags nested_flags;
++  nested_flags.setColor(SkColors::kBlue);
++  nested.push<cc::DrawRectOp>(SkRect::MakeXYWH(20, 20, 60, 40), nested_flags);
++
++  cc::PaintOpBuffer buffer;
++  cc::PaintFlags rect_flags;
++  rect_flags.setColor(SkColors::kRed);
++  buffer.push<cc::SaveOp>();
++  buffer.push<cc::ClipRectOp>(SkRect::MakeXYWH(0, 0, kWidth, kHeight),
++                              SkClipOp::kIntersect, /*antialias=*/false);
++  buffer.push<cc::DrawRectOp>(SkRect::MakeXYWH(10, 10, 100, 80), rect_flags);
++  buffer.push<cc::TranslateOp>(120.0f, 0.0f);
++  // PaintRecord has no public constructor from a PaintOpBuffer -- the real
++  // API for this is PaintOpBuffer::ReleaseAsRecord().
++  buffer.push<cc::DrawRecordOp>(nested.ReleaseAsRecord());
++  buffer.push<cc::RestoreOp>();
++  return buffer;
++}
++
++// The op this spike exists to test. Kept in its own buffer, checked
++// structurally rather than rendered -- see the file comment for why.
++cc::PaintOpBuffer BuildTextBuffer() {
++  cc::PaintOpBuffer buffer;
++  cc::PaintFlags text_flags;
++  text_flags.setColor(SkColors::kBlack);
++  SkFont font(skia::DefaultTypeface(), 24);
++  sk_sp<SkTextBlob> blob =
++      SkTextBlob::MakeFromString("AppSwap paint-op spike", font);
++  buffer.push<cc::DrawTextBlobOp>(blob, 20.0f, 150.0f, text_flags);
++  return buffer;
++}
++
++// Serializes `buffer` (running it through the analysis-canvas + strike
++// data dance first) and writes both the serialized ops and the strike
++// data out to `paintops_path`/`strikedata_path`. Returns false on any
++// failure.
++bool SerializeAndWrite(cc::PaintOpBuffer& buffer,
++                       const base::FilePath& paintops_path,
++                       const base::FilePath& strikedata_path) {
++  cc::TestOptionsProvider options_provider;
++
++  // The text-specific dance, copied from
++  // ConvertToDrawSlugWhenSerializationAndRasterization: play the buffer
++  // back on an analysis canvas so any DrawTextBlobOp populates its slug
++  // data, then pull that out of the strike server as bytes we can
++  // persist. Harmless no-op for a buffer with no text ops.
++  auto analysis_canvas = options_provider.strike_server()->makeAnalysisCanvas(
++      kWidth, kHeight, {}, nullptr, true);
++  cc::PlaybackParams analysis_params(nullptr,
++                                     analysis_canvas->getLocalToDevice());
++  analysis_params.is_analyzing = true;
++  buffer.Playback(analysis_canvas.get(), analysis_params);
++
++  std::vector<uint8_t> strike_data;
++  options_provider.strike_server()->writeStrikeData(&strike_data);
++  if (!base::WriteFile(strikedata_path, strike_data)) {
++    fprintf(stderr, "Failed to write strike data\n");
++    return false;
++  }
++  fprintf(stdout, "  strike data: %zu byte(s)\n", strike_data.size());
++
++  base::AlignedHeapArray<uint8_t> memory =
++      cc::PaintOpWriter::AllocateAlignedBuffer(1024 * 1024);
++  cc::SimpleBufferSerializer serializer(memory.as_span(),
++                                        options_provider.serialize_options());
++  serializer.Serialize(buffer);
++  if (!serializer.valid() || serializer.written() == 0) {
++    fprintf(stderr, "Serialization failed (valid=%d written=%zu)\n",
++           serializer.valid(), serializer.written());
++    return false;
++  }
++  if (!base::WriteFile(paintops_path,
++                       memory.as_span().first(serializer.written()))) {
++    fprintf(stderr, "Failed to write paint ops\n");
++    return false;
++  }
++  fprintf(stdout, "  paint ops: %zu byte(s)\n", serializer.written());
++  return true;
++}
++
++// Reads back and deserializes what SerializeAndWrite() wrote, using a
++// FRESH TestOptionsProvider -- deliberately not the same object, or even
++// the same process, that did the writing. Returns null on any failure.
++sk_sp<cc::PaintOpBuffer> ReadAndDeserialize(
++    const base::FilePath& paintops_path,
++    const base::FilePath& strikedata_path) {
++  std::optional<std::vector<uint8_t>> strike_data =
++      base::ReadFileToBytes(strikedata_path);
++  std::optional<std::vector<uint8_t>> paint_ops =
++      base::ReadFileToBytes(paintops_path);
++  if (!strike_data || !paint_ops) {
++    fprintf(stderr, "Failed to read input file(s)\n");
++    return nullptr;
++  }
++
++  cc::TestOptionsProvider options_provider;
++  if (!strike_data->empty()) {
++    if (!options_provider.strike_client()->readStrikeData(
++            strike_data->data(), strike_data->size())) {
++      fprintf(stderr, "readStrikeData() rejected the persisted strike data\n");
++      return nullptr;
++    }
++  }
++
++  // MakeFromMemory() takes base::span<const volatile uint8_t> specifically
++  // (matching the mojo/IPC-facing Deserialize() it shares code with).
++  // Constructed straight from the vector (deduced size) rather than a raw
++  // pointer+size pair, since Chromium's -Wunsafe-buffer-usage hardening
++  // rejects the latter as unverifiable; the implicit
++  // span<uint8_t> -> span<const volatile uint8_t> qualification
++  // conversion below is well-formed C++.
++  sk_sp<cc::PaintOpBuffer> deserialized = cc::PaintOpBuffer::MakeFromMemory(
++      base::span(*paint_ops), options_provider.deserialize_options());
++  if (!deserialized) {
++    fprintf(stderr, "MakeFromMemory() failed to deserialize\n");
++  }
++  return deserialized;
++}
++
++SkBitmap RenderBitmap(const cc::PaintOpBuffer& buffer) {
++  SkBitmap bitmap;
++  bitmap.allocN32Pixels(kWidth, kHeight);
++  bitmap.eraseColor(SK_ColorWHITE);
++  SkCanvas canvas(bitmap);
++  buffer.Playback(&canvas);
++  return bitmap;
++}
++
++// AppSwap Phase 2: renders `buffer` on a REAL Ganesh GPU-backed SkSurface,
++// so DrawSlugOp (text's wire form) actually renders instead of being
++// skipped -- SkDevice::drawSlug has zero software fallback (see file
++// comment above); only Ganesh/Graphite SkDevices implement it. Mirrors the
++// same lightweight sequence the real GPU process uses to stand up Ganesh
++// (gpu::SharedContextState::InitializeGrContext, gpu/command_buffer/
++// service/shared_context_state.cc) via ui/gl/init -- production,
++// always-built code, not Skia's own test-only tools/ganesh/
++// GrContextFactory (not even linked into a normal Chromium build:
++// gated behind skia_enable_tools, which Chromium sets false) and not the
++// much heavier cc::PixelTest/viz::TestGpuServiceHolder GPU-process-
++// emulation infrastructure (real threads, mojo, a full GpuServiceImpl).
++//
++// Returns nullopt if any step of standing up the GPU context fails (e.g.
++// no usable GPU driver on this machine -- pass
++// --use-gl=angle --use-angle=swiftshader on this tool's own command line
++// for headless/software rendering instead). This is genuinely new,
++// unproven code -- nothing else in this tree hands a PaintOpBuffer
++// straight to Playback() on a bare Ganesh surface -- so failing loudly
++// here matters more than usual.
++std::optional<SkBitmap> RenderBitmapWithGanesh(const cc::PaintOpBuffer& buffer,
++                                               int width,
++                                               int height) {
++  gl::GLDisplay* display =
++      gl::init::InitializeGLOneOff(gl::GpuPreference::kDefault);
++  if (!display) {
++    fprintf(stderr, "InitializeGLOneOff() failed\n");
++    return std::nullopt;
++  }
++
++  scoped_refptr<gl::GLSurface> surface =
++      gl::init::CreateOffscreenGLSurface(display, gfx::Size(width, height));
++  if (!surface) {
++    fprintf(stderr, "CreateOffscreenGLSurface() failed\n");
++    return std::nullopt;
++  }
++
++  scoped_refptr<gl::GLContext> context = gl::init::CreateGLContext(
++      /*share_group=*/nullptr, surface.get(), gl::GLContextAttribs());
++  if (!context || !context->MakeCurrent(surface.get())) {
++    fprintf(stderr, "CreateGLContext()/MakeCurrent() failed\n");
++    return std::nullopt;
++  }
++
++  const gl::GLVersionInfo* version_info = context->GetVersionInfo();
++  if (!version_info) {
++    fprintf(stderr, "GetVersionInfo() failed\n");
++    return std::nullopt;
++  }
++  sk_sp<GrGLInterface> gl_interface =
++      gl::init::CreateGrGLInterface(*version_info);
++  if (!gl_interface) {
++    fprintf(stderr, "CreateGrGLInterface() failed\n");
++    return std::nullopt;
++  }
++
++  sk_sp<GrDirectContext> gr_context =
++      GrDirectContexts::MakeGL(std::move(gl_interface));
++  if (!gr_context) {
++    fprintf(stderr, "GrDirectContexts::MakeGL() failed\n");
++    return std::nullopt;
++  }
++
++  sk_sp<SkSurface> gpu_surface = SkSurfaces::RenderTarget(
++      gr_context.get(), skgpu::Budgeted::kNo,
++      SkImageInfo::MakeN32Premul(width, height));
++  if (!gpu_surface) {
++    fprintf(stderr, "SkSurfaces::RenderTarget() failed\n");
++    return std::nullopt;
++  }
++
++  gpu_surface->getCanvas()->clear(SK_ColorWHITE);
++  buffer.Playback(gpu_surface->getCanvas());
++
++  SkBitmap bitmap;
++  bitmap.allocN32Pixels(width, height);
++  if (!gpu_surface->readPixels(bitmap, 0, 0)) {
++    fprintf(stderr, "SkSurface::readPixels() failed\n");
++    return std::nullopt;
++  }
++  return bitmap;
++}
++
++bool SavePng(const SkBitmap& bitmap, const base::FilePath& path) {
++  std::optional<std::vector<uint8_t>> png =
++      gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
++  if (!png) {
++    fprintf(stderr, "PNG encode failed for %s\n",
++           path.AsUTF8Unsafe().c_str());
++    return false;
++  }
++  if (!base::WriteFile(path, *png)) {
++    fprintf(stderr, "Failed to write %s\n", path.AsUTF8Unsafe().c_str());
++    return false;
++  }
++  return true;
++}
++
++int RunWrite(const base::CommandLine& cmd) {
++  fprintf(stdout, "-- shapes buffer --\n");
++  cc::PaintOpBuffer shapes = BuildShapesBuffer();
++  // Ground truth: what the buffer looks like rendered directly, never
++  // touching serialization at all. --mode=diff compares --mode=read's
++  // output against this.
++  if (!SavePng(RenderBitmap(shapes), cmd.GetSwitchValuePath("reference_png"))) {
++    return 1;
++  }
++  if (!SerializeAndWrite(shapes, cmd.GetSwitchValuePath("paintops"),
++                         cmd.GetSwitchValuePath("strikedata"))) {
++    return 1;
++  }
++
++  fprintf(stdout, "-- text buffer --\n");
++  cc::PaintOpBuffer text = BuildTextBuffer();
++  if (!SerializeAndWrite(text, cmd.GetSwitchValuePath("text_paintops"),
++                         cmd.GetSwitchValuePath("text_strikedata"))) {
++    return 1;
++  }
++  return 0;
++}
++
++int RunRead(const base::CommandLine& cmd) {
++  fprintf(stdout, "-- shapes buffer (full pixel round trip) --\n");
++  sk_sp<cc::PaintOpBuffer> shapes = ReadAndDeserialize(
++      cmd.GetSwitchValuePath("paintops"), cmd.GetSwitchValuePath("strikedata"));
++  if (!shapes) {
++    return 1;
++  }
++  if (!SavePng(RenderBitmap(*shapes), cmd.GetSwitchValuePath("output_png"))) {
++    return 1;
++  }
++  fprintf(stdout, "  replayed %zu op(s), rendered ok\n", shapes->size());
++
++  fprintf(stdout, "-- text buffer --\n");
++  sk_sp<cc::PaintOpBuffer> text = ReadAndDeserialize(
++      cmd.GetSwitchValuePath("text_paintops"),
++      cmd.GetSwitchValuePath("text_strikedata"));
++  if (!text) {
++    return 1;
++  }
++  bool pass = text->size() == 1;
++  if (pass) {
++    const cc::PaintOp& op = *text->begin();
++    // The wire form of DrawTextBlobOp -- see the file comment.
++    pass = op.GetType() == cc::PaintOpType::kDrawSlug;
++    fprintf(stdout, "  op count: %zu, op type: %s\n", text->size(),
++           cc::PaintOpTypeToString(op.GetType()).c_str());
++  } else {
++    fprintf(stdout, "  op count: %zu (expected 1)\n", text->size());
++  }
++  fprintf(stdout, "  text structural check: %s\n", pass ? "PASS" : "FAIL");
++  if (!pass) {
++    return 1;
++  }
++
++  // AppSwap Phase 2: now actually rendered, via a real Ganesh GPU surface
++  // -- see RenderBitmapWithGanesh() for why a plain raster SkCanvas can't
++  // do this.
++  std::optional<SkBitmap> text_bitmap =
++      RenderBitmapWithGanesh(*text, kWidth, kHeight);
++  if (!text_bitmap) {
++    fprintf(stderr, "  Ganesh rendering failed\n");
++    return 1;
++  }
++  if (!SavePng(*text_bitmap, cmd.GetSwitchValuePath("text_output_png"))) {
++    return 1;
++  }
++  fprintf(stdout, "  rendered ok\n");
++  return 0;
++}
++
++// AppSwap Phase 1: verifies a PaintOpBuffer captured from a REAL live page
++// (via chrome.gpuBenchmarking.dumpPaintOpBuffer(), content/renderer/
++// gpu_benchmarking_extension.cc) rather than one of this tool's own
++// hand-built buffers. Reuses ReadAndDeserialize()/RenderBitmap()/SavePng()
++// unchanged -- the only thing that's new is accepting an arbitrary
++// paintops/strikedata/output_png path triple instead of the fixed
++// "shapes"/"text" pair --mode=read expects.
++int RunReadCapture(const base::CommandLine& cmd) {
++  base::FilePath paintops_path = cmd.GetSwitchValuePath("paintops");
++  sk_sp<cc::PaintOpBuffer> buffer =
++      ReadAndDeserialize(paintops_path, cmd.GetSwitchValuePath("strikedata"));
++  if (!buffer) {
++    return 1;
++  }
++
++  // Real captured layers have arbitrary dimensions, unlike Phase 0's fixed
++  // kWidth/kHeight synthetic buffers, and the .paintops/.strikedata bytes
++  // don't carry a layer's size themselves. PaintOpBufferDumper (gpu_
++  // benchmarking_extension.cc) writes each layer's real bounds alongside as
++  // layer_N.dims -- prefer that as the source of truth, falling back to
++  // Phase 0's constants (very unlikely to match a real layer) only if it's
++  // missing, e.g. for a hand-crafted paintops file with no sidecar.
++  // --width/--height, if given, take precedence over either.
++  int width = kWidth;
++  int height = kHeight;
++  std::string source = "default";
++  base::FilePath dims_path =
++      paintops_path.ReplaceExtension(FILE_PATH_LITERAL("dims"));
++  std::string dims_text;
++  if (base::ReadFileToString(dims_path, &dims_text)) {
++    std::vector<std::string> parts =
++        base::SplitString(dims_text, " \t\r\n", base::TRIM_WHITESPACE,
++                          base::SPLIT_WANT_NONEMPTY);
++    int dims_width, dims_height;
++    if (parts.size() == 2 && base::StringToInt(parts[0], &dims_width) &&
++        base::StringToInt(parts[1], &dims_height)) {
++      width = dims_width;
++      height = dims_height;
++      source = dims_path.AsUTF8Unsafe();
++    } else {
++      fprintf(stderr, "Warning: couldn't parse %s, ignoring\n",
++             dims_path.AsUTF8Unsafe().c_str());
++    }
++  }
++  if (cmd.HasSwitch("width")) {
++    if (!base::StringToInt(cmd.GetSwitchValueASCII("width"), &width)) {
++      fprintf(stderr, "Invalid --width\n");
++      return 1;
++    }
++    source = "--width/--height";
++  }
++  if (cmd.HasSwitch("height")) {
++    if (!base::StringToInt(cmd.GetSwitchValueASCII("height"), &height)) {
++      fprintf(stderr, "Invalid --height\n");
++      return 1;
++    }
++    source = "--width/--height";
++  }
++  fprintf(stdout, "using %dx%d (source: %s)\n", width, height,
++         source.c_str());
++
++  // AppSwap Phase 2: rendered for real via a Ganesh GPU surface, including
++  // any DrawSlugOp (text) the layer contains -- see
++  // RenderBitmapWithGanesh() for why that needs a real GPU-backed surface.
++  std::optional<SkBitmap> bitmap =
++      RenderBitmapWithGanesh(*buffer, width, height);
++  if (!bitmap) {
++    fprintf(stderr, "Ganesh rendering failed\n");
++    return 1;
++  }
++  if (!SavePng(*bitmap, cmd.GetSwitchValuePath("output_png"))) {
++    return 1;
++  }
++  fprintf(stdout, "replayed %zu op(s), rendered ok\n", buffer->size());
++  return 0;
++}
++
++int RunDiff(const base::CommandLine& cmd) {
++  std::optional<std::vector<uint8_t>> a_bytes =
++      base::ReadFileToBytes(cmd.GetSwitchValuePath("a"));
++  std::optional<std::vector<uint8_t>> b_bytes =
++      base::ReadFileToBytes(cmd.GetSwitchValuePath("b"));
++  if (!a_bytes || !b_bytes) {
++    fprintf(stderr, "Failed to read input PNG(s)\n");
++    return 1;
++  }
++  SkBitmap a = gfx::PNGCodec::Decode(base::span(*a_bytes));
++  SkBitmap b = gfx::PNGCodec::Decode(base::span(*b_bytes));
++  if (a.isNull() || b.isNull()) {
++    fprintf(stderr, "Failed to decode input PNG(s)\n");
++    return 1;
++  }
++  if (a.dimensions() != b.dimensions()) {
++    fprintf(stderr, "Dimension mismatch: %dx%d vs %dx%d\n", a.width(),
++           a.height(), b.width(), b.height());
++    return 1;
++  }
++  int64_t differing_pixels = 0;
++  for (int y = 0; y < a.height(); ++y) {
++    for (int x = 0; x < a.width(); ++x) {
++      if (a.getColor(x, y) != b.getColor(x, y)) {
++        ++differing_pixels;
++      }
++    }
++  }
++  const int64_t total_pixels = static_cast<int64_t>(a.width()) * a.height();
++  fprintf(stdout, "%lld / %lld pixel(s) differ (%.4f%%)\n",
++         static_cast<long long>(differing_pixels),
++         static_cast<long long>(total_pixels),
++         100.0 * differing_pixels / total_pixels);
++  return differing_pixels == 0 ? 0 : 1;
++}
++
++}  // namespace
++
++int main(int argc, char** argv) {
++  base::AtExitManager at_exit;
++  base::CommandLine::Init(argc, argv);
++  const base::CommandLine& cmd = *base::CommandLine::ForCurrentProcess();
++  std::string mode = cmd.GetSwitchValueASCII("mode");
++
++  if (mode == "write") {
++    return RunWrite(cmd);
++  }
++  if (mode == "read") {
++    return RunRead(cmd);
++  }
++  if (mode == "read_capture") {
++    return RunReadCapture(cmd);
++  }
++  if (mode == "diff") {
++    return RunDiff(cmd);
++  }
++
++  fprintf(stderr,
++         "Usage:\n"
++         "  paintop_disk_roundtrip_tool --mode=write --paintops=<path> "
++         "--strikedata=<path> --reference_png=<path> "
++         "--text_paintops=<path> --text_strikedata=<path>\n"
++         "  paintop_disk_roundtrip_tool --mode=read --paintops=<path> "
++         "--strikedata=<path> --output_png=<path> "
++         "--text_paintops=<path> --text_strikedata=<path> "
++         "--text_output_png=<path>\n"
++         "  paintop_disk_roundtrip_tool --mode=read_capture "
++         "--paintops=<layer_N.paintops> --strikedata=<layer_N.strikedata> "
++         "--output_png=<path> [--width=<px>] [--height=<px>]  (verifies "
++         "real-page captures from chrome.gpuBenchmarking.dumpPaintOpBuffer(); "
++         "size defaults to the layer_N.dims sidecar it writes, "
++         "--width/--height override it)\n"
++         "  paintop_disk_roundtrip_tool --mode=diff --a=<path> --b=<path>\n"
++         "All render modes accept a real GL implementation from the "
++         "environment, or e.g. --use-gl=angle --use-angle=swiftshader for "
++         "headless/software rendering.\n");
++  return 1;
++}

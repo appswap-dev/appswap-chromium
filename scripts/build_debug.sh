@@ -29,7 +29,7 @@ gn gen out/Default
 
 if [[ "$IS_WINDOWS" == "1" ]]; then
   echo "==> autoninja -C out/Default chrome mini_installer"
-  autoninja -C out/Default chrome mini_installer
+  autoninja -C out/Default chrome mini_installer paintop_disk_roundtrip_tool
 else
   echo "==> autoninja -C out/Default chrome"
   autoninja -j4 -C out/Default chrome

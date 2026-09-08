@@ -1,0 +1,1472 @@
+diff --git a/chrome/browser/app_swap/app_swap_recordings_scanner.cc b/chrome/browser/app_swap/app_swap_recordings_scanner.cc
+new file mode 100644
+index 0000000000000..e577572aae2dc
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_recordings_scanner.cc
+@@ -0,0 +1,133 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_recordings_scanner.h"
++
++#include <utility>
++
++#include "base/files/file_enumerator.h"
++#include "base/files/file_util.h"
++#include "base/json/json_reader.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
++#include "base/unguessable_token.h"
++#include "base/values.h"
++
++namespace {
++
++constexpr base::FilePath::CharType kManifestFileName[] =
++    FILE_PATH_LITERAL("manifest.json");
++constexpr base::FilePath::CharType kSegmentPattern[] =
++    FILE_PATH_LITERAL("segment_*.paintopseg");
++
++// Runs on the scanner's background sequence.
++std::vector<AppSwapRecordingsScanner::RecordingInfo> ScanBlocking(
++    base::FilePath recordings_dir) {
++  std::vector<AppSwapRecordingsScanner::RecordingInfo> results;
++
++  base::FileEnumerator session_dirs(recordings_dir, /*recursive=*/false,
++                                    base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath session_dir = session_dirs.Next(); !session_dir.empty();
++       session_dir = session_dirs.Next()) {
++    AppSwapRecordingsScanner::RecordingInfo info;
++    info.session_id = session_dir.BaseName().MaybeAsASCII();
++    if (info.session_id.empty()) {
++      continue;  // Not one of ours -- a real session id is always ASCII.
++    }
++
++    std::string manifest_json;
++    if (base::ReadFileToString(session_dir.Append(kManifestFileName),
++                               &manifest_json)) {
++      std::optional<base::DictValue> manifest = base::JSONReader::ReadDict(
++          manifest_json, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
++      if (manifest) {
++        const base::DictValue& dict = *manifest;
++        if (const std::string* url = dict.FindString("start_url")) {
++          info.start_url = *url;
++        }
++        if (std::optional<double> time_ms =
++                dict.FindDouble("start_time_ms")) {
++          info.start_time_ms = *time_ms;
++        }
++      }
++    }
++
++    base::FileEnumerator segments(session_dir, /*recursive=*/false,
++                                  base::FileEnumerator::FILES,
++                                  kSegmentPattern);
++    for (base::FilePath segment = segments.Next(); !segment.empty();
++        segment = segments.Next()) {
++      ++info.segment_count;
++      info.total_bytes += segments.GetInfo().GetSize();
++    }
++
++    results.push_back(std::move(info));
++  }
++
++  return results;
++}
++
++// Pure path computation shared by ResolveSessionDir() and DeleteBlocking()
++// below. AppSwapSessionRecordingWriter only ever names a session
++// directory after a freshly-generated base::UnguessableToken -- so
++// validate `session_id` (untrusted, from the renderer) actually parses
++// as one before treating it as a path component. This rejects path
++// separators, "..", and anything else that isn't that exact shape.
++// Returns an empty path if invalid.
++base::FilePath ResolveSessionDirImpl(const base::FilePath& recordings_dir,
++                                     const std::string& session_id) {
++  if (!base::UnguessableToken::DeserializeFromString(session_id)) {
++    return base::FilePath();
++  }
++  return recordings_dir.AppendASCII(session_id);
++}
++
++// Runs on the scanner's background sequence. Returns false (and deletes
++// nothing) if `session_id` isn't a real, currently-existing recording.
++bool DeleteBlocking(base::FilePath recordings_dir, std::string session_id) {
++  base::FilePath session_dir =
++      ResolveSessionDirImpl(recordings_dir, session_id);
++  if (session_dir.empty() || !base::DirectoryExists(session_dir)) {
++    return false;
++  }
++  return base::DeletePathRecursively(session_dir);
++}
++
++}  // namespace
++
++AppSwapRecordingsScanner::RecordingInfo::RecordingInfo() = default;
++AppSwapRecordingsScanner::RecordingInfo::RecordingInfo(const RecordingInfo&) =
++    default;
++AppSwapRecordingsScanner::RecordingInfo&
++AppSwapRecordingsScanner::RecordingInfo::operator=(const RecordingInfo&) =
++    default;
++AppSwapRecordingsScanner::RecordingInfo::~RecordingInfo() = default;
++
++AppSwapRecordingsScanner::AppSwapRecordingsScanner(
++    base::FilePath recordings_dir)
++    : recordings_dir_(std::move(recordings_dir)),
++      task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
++          {base::MayBlock(), base::TaskPriority::USER_VISIBLE})) {}
++
++AppSwapRecordingsScanner::~AppSwapRecordingsScanner() = default;
++
++void AppSwapRecordingsScanner::Scan(
++    base::OnceCallback<void(std::vector<RecordingInfo>)> callback) {
++  task_runner_->PostTaskAndReplyWithResult(
++      FROM_HERE, base::BindOnce(&ScanBlocking, recordings_dir_),
++      std::move(callback));
++}
++
++void AppSwapRecordingsScanner::Delete(
++    const std::string& session_id,
++    base::OnceCallback<void(bool)> callback) {
++  task_runner_->PostTaskAndReplyWithResult(
++      FROM_HERE, base::BindOnce(&DeleteBlocking, recordings_dir_, session_id),
++      std::move(callback));
++}
++
++base::FilePath AppSwapRecordingsScanner::ResolveSessionDir(
++    const std::string& session_id) const {
++  return ResolveSessionDirImpl(recordings_dir_, session_id);
++}
+diff --git a/chrome/browser/app_swap/app_swap_recordings_scanner.h b/chrome/browser/app_swap/app_swap_recordings_scanner.h
+new file mode 100644
+index 0000000000000..95fae4147c76b
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_recordings_scanner.h
+@@ -0,0 +1,75 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_RECORDINGS_SCANNER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_RECORDINGS_SCANNER_H_
++
++#include <cstdint>
++#include <string>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/functional/callback.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/task/sequenced_task_runner.h"
++
++// Lists and deletes AppSwap session recordings on disk (see
++// AppSwapSessionRecordingWriter, which writes the format this reads) for
++// appswap://recordings. All I/O runs on a dedicated SequencedTaskRunner,
++// mirroring AppSwapSessionRecordingWriter's own threading convention --
++// public methods post to it and reply via the given callback on the
++// calling sequence.
++class AppSwapRecordingsScanner {
++ public:
++  struct RecordingInfo {
++    RecordingInfo();
++    RecordingInfo(const RecordingInfo&);
++    RecordingInfo& operator=(const RecordingInfo&);
++    ~RecordingInfo();
++
++    // The directory name under the recordings dir -- a serialized
++    // base::UnguessableToken (see AppSwapSessionRecordingWriter). Passed
++    // back to Delete() to identify which recording to remove.
++    std::string session_id;
++    std::string start_url;
++    double start_time_ms = 0;
++    int segment_count = 0;
++    int64_t total_bytes = 0;
++  };
++
++  explicit AppSwapRecordingsScanner(base::FilePath recordings_dir);
++  ~AppSwapRecordingsScanner();
++
++  AppSwapRecordingsScanner(const AppSwapRecordingsScanner&) = delete;
++  AppSwapRecordingsScanner& operator=(const AppSwapRecordingsScanner&) =
++      delete;
++
++  // Lists every recording under the recordings dir. `callback` runs on
++  // the calling sequence once the scan completes.
++  void Scan(base::OnceCallback<void(std::vector<RecordingInfo>)> callback);
++
++  // Deletes the recording identified by `session_id`. `session_id` comes
++  // from the renderer over Mojo and is NOT trusted -- this validates it
++  // parses as a real base::UnguessableToken (the only shape
++  // AppSwapSessionRecordingWriter ever generates) before touching the
++  // filesystem, rather than blindly appending it to a path. An invalid
++  // `session_id` fails closed: `callback` runs with false, nothing is
++  // deleted. `callback` runs on the calling sequence.
++  void Delete(const std::string& session_id,
++              base::OnceCallback<void(bool)> callback);
++
++  // Pure path computation, no I/O -- safe to call on any sequence,
++  // including the UI thread (needed for platform_util::ShowItemInFolder(),
++  // which must run there). Same validation as Delete(): returns an empty
++  // path if `session_id` doesn't parse as a real
++  // base::UnguessableToken, without checking whether the directory
++  // actually still exists on disk.
++  base::FilePath ResolveSessionDir(const std::string& session_id) const;
++
++ private:
++  const base::FilePath recordings_dir_;
++  const scoped_refptr<base::SequencedTaskRunner> task_runner_;
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RECORDINGS_SCANNER_H_
+diff --git a/chrome/browser/app_swap/app_swap_session_recording_paths.cc b/chrome/browser/app_swap/app_swap_session_recording_paths.cc
+new file mode 100644
+index 0000000000000..f639f3cc15462
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_session_recording_paths.cc
+@@ -0,0 +1,30 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_session_recording_paths.h"
++
++#include "base/strings/stringprintf.h"
++#include "chrome/browser/profiles/profile.h"
++
++namespace {
++constexpr base::FilePath::CharType kRecordingsDirName[] =
++    FILE_PATH_LITERAL("AppSwap/Recordings");
++constexpr base::FilePath::CharType kNavigationsFileName[] =
++    FILE_PATH_LITERAL("navigations.jsonl");
++}  // namespace
++
++base::FilePath GetAppSwapRecordingsDir(Profile* profile) {
++  return profile->GetPath().Append(kRecordingsDirName);
++}
++
++base::FilePath GetAppSwapRecordingSegmentPath(const base::FilePath& session_dir,
++                                              int segment_index) {
++  return session_dir.AppendASCII(
++      base::StringPrintf("segment_%04d.paintopseg", segment_index));
++}
++
++base::FilePath GetAppSwapRecordingNavigationsPath(
++    const base::FilePath& session_dir) {
++  return session_dir.Append(kNavigationsFileName);
++}
+diff --git a/chrome/browser/app_swap/app_swap_session_recording_paths.h b/chrome/browser/app_swap/app_swap_session_recording_paths.h
+new file mode 100644
+index 0000000000000..380dea4b4b762
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_session_recording_paths.h
+@@ -0,0 +1,31 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_PATHS_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_PATHS_H_
++
++#include "base/files/file_path.h"
++
++class Profile;
++
++// The single source of truth for where AppSwap session recordings live on
++// disk -- <profile_path>/AppSwap/Recordings. Shared by
++// AppSwapSessionRecordingWriter (which writes here) and
++// AppSwapRecordingsScanner (which lists this directory for
++// appswap://recordings) so the two can't drift apart on the path.
++base::FilePath GetAppSwapRecordingsDir(Profile* profile);
++
++// One session's segment file naming convention (segment_0000.paintopseg,
++// segment_0001.paintopseg, ...) -- shared by AppSwapSessionRecordingWriter
++// (which creates them) and AppSwapSessionRecordingReader (which reads them
++// back for playback) so the two can't drift apart on the naming either.
++base::FilePath GetAppSwapRecordingSegmentPath(const base::FilePath& session_dir,
++                                              int segment_index);
++
++// One session's navigation-log file (navigations.jsonl) -- see
++// AppSwapSessionRecordingWriter::WriteNavigation() for the format.
++base::FilePath GetAppSwapRecordingNavigationsPath(
++    const base::FilePath& session_dir);
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_PATHS_H_
+diff --git a/chrome/browser/resources/app_swap_recordings/BUILD.gn b/chrome/browser/resources/app_swap_recordings/BUILD.gn
+new file mode 100644
+index 0000000000000..d64f580606d31
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_recordings/BUILD.gn
+@@ -0,0 +1,44 @@
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//ui/webui/resources/tools/build_webui.gni")
++
++assert(!is_android)
++
++build_webui("build") {
++  grd_prefix = "app_swap_recordings"
++
++  static_files = [ "app_swap_recordings.html" ]
++
++  ts_files = [
++    "app.html.ts",
++    "app.ts",
++    "browser_proxy.ts",
++    "player.html.ts",
++    "player.ts",
++  ]
++
++  css_files = [
++    "app.css",
++    "player.css",
++  ]
++
++  mojo_files_deps = [
++    "//chrome/browser/ui/webui/app_swap_recordings:mojo_bindings_ts__generator",
++    "//chrome/services/app_swap_playback/public/mojom:bitmap_mojom_ts__generator",
++  ]
++  mojo_files = [
++    "$root_gen_dir/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings.mojom-webui.ts",
++    "$root_gen_dir/chrome/services/app_swap_playback/public/mojom/app_swap_playback_bitmap.mojom-webui.ts",
++  ]
++
++  ts_deps = [
++    "//third_party/lit/v3_0:build_ts",
++    "//ui/webui/resources/cr_elements:build_ts",
++    "//ui/webui/resources/js:build_ts",
++    "//ui/webui/resources/mojo:build_ts",
++  ]
++
++  webui_context_type = "trusted"
++}
+diff --git a/chrome/browser/resources/app_swap_recordings/app.css b/chrome/browser/resources/app_swap_recordings/app.css
+new file mode 100644
+index 0000000000000..346f368574920
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_recordings/app.css
+@@ -0,0 +1,69 @@
++/* Copyright 2026 The AppSwap Authors
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++/* #css_wrapper_metadata_start
++ * #type=style-lit
++ * #scheme=relative
++ * #css_wrapper_metadata_end */
++
++:host {
++  background: var(--color-sys-surface, white);
++  box-sizing: border-box;
++  color: var(--color-sys-on-surface, black);
++  display: block;
++  font-family: inherit;
++  min-height: 100vh;
++  padding: 16px 24px;
++  width: 100%;
++}
++
++h1 {
++  font-size: 20px;
++  margin: 0 0 12px;
++}
++
++.hint {
++  color: var(--cr-secondary-text-color, #5f6368);
++  font-size: 0.9em;
++}
++
++.list {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
++
++.recording {
++  align-items: center;
++  border: 1px solid var(--cr-separator-color, #e0e0e0);
++  border-radius: 8px;
++  display: flex;
++  justify-content: space-between;
++  padding: 10px 14px;
++}
++
++.main {
++  min-width: 0;
++  overflow: hidden;
++}
++
++.url {
++  font-weight: 500;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.meta {
++  color: var(--cr-secondary-text-color, #5f6368);
++  font-size: 0.85em;
++  margin-top: 2px;
++}
++
++.actions {
++  display: flex;
++  flex-shrink: 0;
++  gap: 8px;
++  margin-inline-start: 12px;
++}
+diff --git a/chrome/browser/resources/app_swap_recordings/app.html.ts b/chrome/browser/resources/app_swap_recordings/app.html.ts
+new file mode 100644
+index 0000000000000..68bd609980450
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_recordings/app.html.ts
+@@ -0,0 +1,45 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {html} from 'chrome://resources/lit/v3_0/lit.rollup.js';
++
++import type {AppSwapRecordingsAppElement} from './app.js';
++
++export function getHtml(this: AppSwapRecordingsAppElement) {
++  return this.playingSessionId_ !== null ? html`
++    <app-swap-recordings-player .sessionId="${this.playingSessionId_}"
++        @back="${this.onPlayerBack_}">
++    </app-swap-recordings-player>
++  ` : html`
++    <h1>Recordings</h1>
++    ${this.recordings_.length === 0 ? html`
++      <p class="hint">No recordings yet -- press the record button in the
++        toolbar on a tab to start one.</p>
++    ` : html`
++      <div class="list">
++        ${this.recordings_.map(recording => html`
++          <div class="recording">
++            <div class="main">
++              <div class="url">${recording.startUrl}</div>
++              <div class="meta">
++                ${this.formatTime_(recording.startTimeMs)} --
++                ${recording.segmentCount} segment${
++                    recording.segmentCount === 1 ? '' : 's'},
++                ${this.formatSize_(recording.totalBytes)}
++              </div>
++            </div>
++            <div class="actions">
++              <button data-id="${recording.sessionId}"
++                  @click="${this.onPlayClick_}">Play</button>
++              <button data-id="${recording.sessionId}"
++                  @click="${this.onOpenFolderClick_}">Open folder</button>
++              <button data-id="${recording.sessionId}"
++                  @click="${this.onDeleteClick_}">Delete</button>
++            </div>
++          </div>
++        `)}
++      </div>
++    `}
++  `;
++}
+diff --git a/chrome/browser/resources/app_swap_recordings/app.ts b/chrome/browser/resources/app_swap_recordings/app.ts
+new file mode 100644
+index 0000000000000..d47a3a6edde3a
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_recordings/app.ts
+@@ -0,0 +1,90 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
++
++import {getCss} from './app.css.js';
++import {getHtml} from './app.html.js';
++import type {BrowserProxy} from './browser_proxy.js';
++import {BrowserProxyImpl} from './browser_proxy.js';
++import type {RecordingInfo} from './app_swap_recordings.mojom-webui.js';
++// Side-effect import: defines <app-swap-recordings-player>, used by
++// app.html.ts below.
++import './player.js';
++
++export class AppSwapRecordingsAppElement extends CrLitElement {
++  static get is() {
++    return 'app-swap-recordings-app';
++  }
++
++  static override get styles() {
++    return getCss();
++  }
++
++  override render() {
++    return getHtml.bind(this)();
++  }
++
++  static override get properties() {
++    return {
++      recordings_: {type: Array},
++      playingSessionId_: {type: String},
++    };
++  }
++
++  protected accessor recordings_: RecordingInfo[] = [];
++  protected accessor playingSessionId_: string|null = null;
++
++  private apiProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
++
++  override connectedCallback() {
++    super.connectedCallback();
++    this.refresh_();
++  }
++
++  private async refresh_() {
++    const {recordings} = await this.apiProxy_.handler.getRecordings();
++    // Newest first.
++    this.recordings_ =
++        recordings.slice().sort((a, b) => b.startTimeMs - a.startTimeMs);
++  }
++
++  protected formatTime_(startTimeMs: number): string {
++    return new Date(startTimeMs).toLocaleString();
++  }
++
++  protected formatSize_(totalBytes: bigint): string {
++    const mb = Number(totalBytes) / (1024 * 1024);
++    return mb >= 0.1 ? `${mb.toFixed(1)} MB` :
++                       `${Math.ceil(Number(totalBytes) / 1024)} KB`;
++  }
++
++  protected onOpenFolderClick_(e: Event) {
++    const id = (e.currentTarget as HTMLElement).dataset['id']!;
++    this.apiProxy_.handler.openRecordingFolder(id);
++  }
++
++  protected onPlayClick_(e: Event) {
++    this.playingSessionId_ = (e.currentTarget as HTMLElement).dataset['id']!;
++  }
++
++  protected onPlayerBack_() {
++    this.playingSessionId_ = null;
++  }
++
++  protected async onDeleteClick_(e: Event) {
++    const id = (e.currentTarget as HTMLElement).dataset['id']!;
++    await this.apiProxy_.handler.deleteRecording(id);
++    await this.refresh_();
++  }
++}
++
++declare global {
++  interface HTMLElementTagNameMap {
++    'app-swap-recordings-app': AppSwapRecordingsAppElement;
++  }
++}
++
++customElements.define(
++    AppSwapRecordingsAppElement.is, AppSwapRecordingsAppElement);
+diff --git a/chrome/browser/resources/app_swap_recordings/app_swap_recordings.html b/chrome/browser/resources/app_swap_recordings/app_swap_recordings.html
+new file mode 100644
+index 0000000000000..a004073b0a2fd
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_recordings/app_swap_recordings.html
+@@ -0,0 +1,20 @@
++<!doctype html>
++<html dir="$i18n{textdirection}" lang="$i18n{language}">
++<head>
++  <meta charset="utf-8">
++  <title>Recordings</title>
++  <link rel="stylesheet" href="chrome://theme/colors.css?sets=ui,chrome">
++  <link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
++  <style>
++    html,
++    body {
++      margin: 0;
++      height: 100%;
++    }
++  </style>
++</head>
++<body>
++  <app-swap-recordings-app></app-swap-recordings-app>
++  <script type="module" src="app.js"></script>
++</body>
++</html>
+diff --git a/chrome/browser/resources/app_swap_recordings/browser_proxy.ts b/chrome/browser/resources/app_swap_recordings/browser_proxy.ts
+new file mode 100644
+index 0000000000000..ca039583c27cc
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_recordings/browser_proxy.ts
+@@ -0,0 +1,28 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {PageHandlerFactory, PageHandlerRemote} from './app_swap_recordings.mojom-webui.js';
++
++export interface BrowserProxy {
++  handler: PageHandlerRemote;
++}
++
++export class BrowserProxyImpl implements BrowserProxy {
++  handler: PageHandlerRemote = new PageHandlerRemote();
++
++  constructor() {
++    const factory = PageHandlerFactory.getRemote();
++    factory.createPageHandler(this.handler.$.bindNewPipeAndPassReceiver());
++  }
++
++  static getInstance(): BrowserProxy {
++    return instance || (instance = new BrowserProxyImpl());
++  }
++
++  static setInstance(obj: BrowserProxy) {
++    instance = obj;
++  }
++}
++
++let instance: BrowserProxy|null = null;
+diff --git a/chrome/browser/resources/app_swap_recordings/player.css b/chrome/browser/resources/app_swap_recordings/player.css
+new file mode 100644
+index 0000000000000..fabcbfcdf2038
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_recordings/player.css
+@@ -0,0 +1,80 @@
++/* Copyright 2026 The AppSwap Authors
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++/* #css_wrapper_metadata_start
++ * #type=style-lit
++ * #scheme=relative
++ * #css_wrapper_metadata_end */
++
++:host {
++  background: var(--color-sys-surface, white);
++  box-sizing: border-box;
++  color: var(--color-sys-on-surface, black);
++  display: flex;
++  flex-direction: column;
++  font-family: inherit;
++  gap: 12px;
++  min-height: 100vh;
++  padding: 16px 24px;
++  width: 100%;
++}
++
++.header {
++  align-items: center;
++  display: flex;
++  gap: 16px;
++}
++
++.nav-info {
++  display: flex;
++  gap: 8px;
++  min-width: 0;
++  overflow: hidden;
++}
++
++.url {
++  font-weight: 500;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.package {
++  color: var(--cr-secondary-text-color, #5f6368);
++  font-size: 0.85em;
++}
++
++.canvas-wrap {
++  align-items: center;
++  background: #202124;
++  border-radius: 8px;
++  display: flex;
++  justify-content: center;
++  overflow: auto;
++  padding: 8px;
++}
++
++canvas {
++  background: white;
++  display: block;
++  height: auto;
++  max-width: 100%;
++}
++
++.controls {
++  align-items: center;
++  display: flex;
++  gap: 12px;
++}
++
++.controls input[type='range'] {
++  flex: 1;
++}
++
++.timestamp {
++  color: var(--cr-secondary-text-color, #5f6368);
++  font-size: 0.85em;
++  font-variant-numeric: tabular-nums;
++  min-width: 5.5em;
++}
+diff --git a/chrome/browser/resources/app_swap_recordings/player.html.ts b/chrome/browser/resources/app_swap_recordings/player.html.ts
+new file mode 100644
+index 0000000000000..9cbe1d4ff1df7
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_recordings/player.html.ts
+@@ -0,0 +1,37 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {html} from 'chrome://resources/lit/v3_0/lit.rollup.js';
++
++import type {AppSwapRecordingsPlayerElement} from './player.js';
++
++export function getHtml(this: AppSwapRecordingsPlayerElement) {
++  return html`
++    <div class="header">
++      <button @click="${this.onBackClick_}">&larr; Back</button>
++      <div class="nav-info">
++        ${this.currentUrl_ ? html`
++          <span class="url">${this.currentUrl_}</span>
++          ${this.currentPackage_ ? html`
++            <span class="package">${this.currentPackage_}</span>
++          ` : ''}
++        ` : ''}
++      </div>
++    </div>
++    <div class="canvas-wrap">
++      <canvas></canvas>
++    </div>
++    <div class="controls">
++      <button @click="${this.onPlayPauseClick_}"
++          ?disabled="${this.frameCount_ === 0}">
++        ${this.playing_ ? 'Pause' : 'Play'}
++      </button>
++      <input type="range" min="0"
++          max="${Math.max(0, this.frameCount_ - 1)}"
++          .value="${String(this.frameOrdinal_)}"
++          @input="${this.onScrubInput_}">
++      <span class="timestamp">${this.formatTimestamp_()}</span>
++    </div>
++  `;
++}
+diff --git a/chrome/browser/resources/app_swap_recordings/player.ts b/chrome/browser/resources/app_swap_recordings/player.ts
+new file mode 100644
+index 0000000000000..95a6a8ab22361
+--- /dev/null
++++ b/chrome/browser/resources/app_swap_recordings/player.ts
+@@ -0,0 +1,204 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {assert} from 'chrome://resources/js/assert.js';
++import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
++
++import {getCss} from './player.css.js';
++import {getHtml} from './player.html.js';
++import type {BrowserProxy} from './browser_proxy.js';
++import {BrowserProxyImpl} from './browser_proxy.js';
++import type {NavigationEvent} from './app_swap_recordings.mojom-webui.js';
++
++// Continuous playback of one recording, with a scrub bar. Frames are
++// composited server-side (AppSwapPlaybackService, a separate child
++// process -- see app_swap_playback.mojom's own design note) and shipped
++// here as raw RGBA pixels rather than an encoded image: everything here is
++// process-local, so there's no network to economize bytes for, and
++// skipping a codec round trip matters for how smooth autoplay can feel.
++// Painted via ImageBitmapRenderingContext.transferFromImageBitmap() -- the
++// web platform's fast path for streaming raw bitmap frames into a canvas,
++// avoiding both an <img> decode pipeline and a full CPU-side
++// putImageData() redraw on every tick.
++export class AppSwapRecordingsPlayerElement extends CrLitElement {
++  static get is() {
++    return 'app-swap-recordings-player';
++  }
++
++  static override get styles() {
++    return getCss();
++  }
++
++  override render() {
++    return getHtml.bind(this)();
++  }
++
++  static override get properties() {
++    return {
++      sessionId: {type: String},
++      frameCount_: {type: Number},
++      frameOrdinal_: {type: Number},
++      playing_: {type: Boolean},
++      currentUrl_: {type: String},
++      currentPackage_: {type: String},
++    };
++  }
++
++  accessor sessionId: string = '';
++
++  protected accessor frameCount_: number = 0;
++  protected accessor frameOrdinal_: number = 0;
++  protected accessor playing_: boolean = false;
++  protected accessor currentUrl_: string = '';
++  protected accessor currentPackage_: string = '';
++
++  private apiProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
++  private frameTimestampsMs_: number[] = [];
++  private navigations_: NavigationEvent[] = [];
++  // Bumped on every disconnect/pause so a stale autoplay loop started
++  // before that point notices and stops instead of racing a newer one.
++  private playToken_: number = 0;
++  private lastCanvasSize_: {width: number, height: number}|null = null;
++
++  override async connectedCallback() {
++    super.connectedCallback();
++    const {success, frameCount, frameTimestampsMs, navigations} =
++        await this.apiProxy_.handler.openRecording(this.sessionId);
++    if (!success || frameCount === 0) {
++      return;
++    }
++    this.frameCount_ = frameCount;
++    this.frameTimestampsMs_ = frameTimestampsMs;
++    this.navigations_ = navigations;
++    await this.showFrame_(0);
++  }
++
++  override disconnectedCallback() {
++    super.disconnectedCallback();
++    this.playing_ = false;
++    this.playToken_++;
++    this.apiProxy_.handler.closeRecording();
++  }
++
++  private updateCurrentNavigation_() {
++    const t = this.frameTimestampsMs_[this.frameOrdinal_] ?? 0;
++    let match: NavigationEvent|null = null;
++    for (const navigation of this.navigations_) {
++      if (navigation.timeMs <= t) {
++        match = navigation;
++      } else {
++        break;
++      }
++    }
++    this.currentUrl_ = match ? match.url : '';
++    this.currentPackage_ = (match && match.packageName) ?
++        `${match.packageName}@${match.version}` :
++        '';
++  }
++
++  private async showFrame_(ordinal: number) {
++    this.frameOrdinal_ = ordinal;
++    this.updateCurrentNavigation_();
++
++    const {bitmap} = await this.apiProxy_.handler.getFrame(ordinal);
++    if (!bitmap) {
++      return;
++    }
++
++    const canvas = this.shadowRoot.querySelector('canvas')!;
++    const size = bitmap.size;
++    if (!this.lastCanvasSize_ || this.lastCanvasSize_.width !== size.width ||
++        this.lastCanvasSize_.height !== size.height) {
++      canvas.width = size.width;
++      canvas.height = size.height;
++      this.lastCanvasSize_ = {width: size.width, height: size.height};
++    }
++
++    // BigBuffer is a tagged union on the TS side (bytes | sharedMemory |
++    // invalidBuffer), not a plain struct with a `.bytes` array -- a large
++    // payload (a full frame easily is) gets sent via shared memory instead
++    // of inlined, confirmed by hitting "Failed to construct 'ImageData':
++    // The input data has zero elements" when this only handled `.bytes`.
++    // Mirrors chrome/browser/resources/lens/overlay/
++    // screenshot_bitmap_browser_proxy.ts's own handling of an incoming
++    // BigBuffer, the only other place in this codebase that receives one.
++    const rgbaPixels = bitmap.rgbaPixels;
++    let bytes: Uint8Array;
++    if (Array.isArray(rgbaPixels.bytes)) {
++      bytes = new Uint8Array(rgbaPixels.bytes);
++    } else {
++      assert(rgbaPixels.sharedMemory);
++      const {buffer, result} = rgbaPixels.sharedMemory.bufferHandle.mapBuffer(
++          0, rgbaPixels.sharedMemory.size);
++      assert(result === Mojo.RESULT_OK);
++      bytes = new Uint8Array(buffer);
++    }
++    const imageData =
++        new ImageData(new Uint8ClampedArray(bytes), size.width, size.height);
++    const frameBitmap = await createImageBitmap(imageData);
++    canvas.getContext('bitmaprenderer')!.transferFromImageBitmap(frameBitmap);
++  }
++
++  protected onScrubInput_(e: Event) {
++    this.playing_ = false;
++    this.playToken_++;
++    const ordinal = Number((e.target as HTMLInputElement).value);
++    this.showFrame_(ordinal);
++  }
++
++  protected async onPlayPauseClick_() {
++    if (this.playing_) {
++      this.playing_ = false;
++      this.playToken_++;
++      return;
++    }
++
++    this.playing_ = true;
++    const token = ++this.playToken_;
++    while (this.playToken_ === token &&
++           this.frameOrdinal_ < this.frameCount_ - 1) {
++      const next = this.frameOrdinal_ + 1;
++      // Paces itself off the REAL recorded gaps between frames rather than
++      // a fixed frame rate, so playback speed tracks how the page actually
++      // behaved. Clamped to a small minimum so near-duplicate timestamps
++      // (two layers captured in the same commit) can't spin the loop.
++      const delay = Math.max(
++          16,
++          this.frameTimestampsMs_[next]! -
++              this.frameTimestampsMs_[this.frameOrdinal_]!);
++      await new Promise(resolve => setTimeout(resolve, delay));
++      if (this.playToken_ !== token) {
++        return;
++      }
++      await this.showFrame_(next);
++    }
++    if (this.playToken_ === token) {
++      this.playing_ = false;
++    }
++  }
++
++  protected onBackClick_() {
++    this.fire('back');
++  }
++
++  protected formatTimestamp_(): string {
++    const start = this.frameTimestampsMs_[0] ?? 0;
++    const elapsed = (this.frameTimestampsMs_[this.frameOrdinal_] ?? 0) - start;
++    const totalSeconds = Math.floor(elapsed / 1000);
++    const minutes = Math.floor(totalSeconds / 60);
++    const seconds = totalSeconds % 60;
++    const millis = Math.floor(elapsed % 1000);
++    return `${minutes}:${String(seconds).padStart(2, '0')}.${
++        String(millis).padStart(3, '0')}`;
++  }
++}
++
++declare global {
++  interface HTMLElementTagNameMap {
++    'app-swap-recordings-player': AppSwapRecordingsPlayerElement;
++  }
++}
++
++customElements.define(
++    AppSwapRecordingsPlayerElement.is, AppSwapRecordingsPlayerElement);
+diff --git a/chrome/browser/ui/webui/app_swap_recordings/BUILD.gn b/chrome/browser/ui/webui/app_swap_recordings/BUILD.gn
+new file mode 100644
+index 0000000000000..59ccaf4717a12
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_recordings/BUILD.gn
+@@ -0,0 +1,37 @@
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//mojo/public/tools/bindings/mojom.gni")
++
++assert(!is_android)
++
++mojom("mojo_bindings") {
++  sources = [ "app_swap_recordings.mojom" ]
++  webui_module_path = "/"
++
++  public_deps = [ "//chrome/services/app_swap_playback/public/mojom:bitmap_mojom" ]
++}
++
++source_set("app_swap_recordings") {
++  sources = [
++    "app_swap_recordings_page_handler.cc",
++    "app_swap_recordings_page_handler.h",
++    "app_swap_recordings_ui.cc",
++    "app_swap_recordings_ui.h",
++  ]
++
++  deps = [
++    ":mojo_bindings",
++    "//base",
++    "//chrome/browser/app_swap",
++    "//chrome/browser:browser_process",
++    "//chrome/browser/profiles",
++    "//chrome/browser/profiles:profile",
++    "//chrome/browser/resources/app_swap_recordings:resources",
++    "//chrome/services/app_swap_playback/public/mojom",
++    "//content/public/browser",
++    "//mojo/public/cpp/bindings",
++    "//ui/webui",
++  ]
++}
+diff --git a/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings.mojom b/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings.mojom
+new file mode 100644
+index 0000000000000..f26555996fca3
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings.mojom
+@@ -0,0 +1,67 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++module app_swap_recordings.mojom;
++
++import "chrome/services/app_swap_playback/public/mojom/app_swap_playback_bitmap.mojom";
++
++// Mirrors AppSwapRecordingsScanner::RecordingInfo
++// (chrome/browser/app_swap/app_swap_recordings_scanner.h).
++struct RecordingInfo {
++  string session_id;
++  string start_url;
++  double start_time_ms;
++  uint32 segment_count;
++  uint64 total_bytes;
++};
++
++// Mirrors AppSwapSessionRecordingReader::NavigationEvent
++// (chrome/browser/app_swap/app_swap_session_recording_reader.h) -- one
++// entry from a recording's navigations.jsonl. `package_name`/`version` are
++// both empty for a plain, non-AppSwap-routed page.
++struct NavigationEvent {
++  double time_ms;
++  string url;
++  string package_name;
++  string version;
++};
++
++interface PageHandlerFactory {
++  CreatePageHandler(pending_receiver<PageHandler> handler);
++};
++
++// Every method resolves against the Profile this page was opened in --
++// AppSwapRecordingsPageHandler scopes everything to that profile's own
++// <profile_path>/AppSwap/Recordings directory.
++interface PageHandler {
++  GetRecordings() => (array<RecordingInfo> recordings);
++  // Returns false if `session_id` doesn't identify a real, currently
++  // existing recording -- see AppSwapRecordingsScanner::Delete()'s own
++  // comment for why this is validated rather than trusted.
++  DeleteRecording(string session_id) => (bool success);
++  // Reveals the recording's directory in the OS file manager. No-op if
++  // `session_id` doesn't identify a real recording.
++  OpenRecordingFolder(string session_id);
++
++  // Opens `session_id` for playback: indexes its captured frames (see
++  // AppSwapSessionRecordingReader::Index()) and launches the playback
++  // renderer service used by subsequent GetFrame() calls. `success` is
++  // false if `session_id` doesn't identify a real recording. Replaces any
++  // previously-open recording -- only one is open at a time.
++  OpenRecording(string session_id) => (
++      bool success,
++      uint32 frame_count,
++      array<double> frame_timestamps_ms,
++      array<NavigationEvent> navigations);
++  // Renders and returns the frame at `frame_ordinal` (an index into the
++  // frame_timestamps_ms OpenRecording() returned) for the currently-open
++  // recording. Null `bitmap` on any failure (out of range, no recording
++  // open, or the render itself failing).
++  GetFrame(uint32 frame_ordinal) =>
++      (app_swap_playback.mojom.FrameBitmap? bitmap);
++  // Releases the currently-open recording's reader and playback service,
++  // if any -- lets the playback service's child process exit instead of
++  // lingering. Safe to call even if nothing is open.
++  CloseRecording();
++};
+diff --git a/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_page_handler.cc b/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_page_handler.cc
+new file mode 100644
+index 0000000000000..60f58a4d2a705
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_page_handler.cc
+@@ -0,0 +1,157 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_page_handler.h"
++
++#include <utility>
++
++#include "base/files/file_path.h"
++#include "base/functional/bind.h"
++#include "chrome/browser/app_swap/app_swap_session_recording_paths.h"
++#include "chrome/browser/platform_util.h"
++#include "chrome/browser/profiles/profile.h"
++// FrameBitmap lives in a separate mojom file/target from PlaybackRenderer
++// (see app_swap_playback_bitmap.mojom's own comment for why) -- the header
++// this file includes only forward-declares it, but GetFrame() below
++// constructs a real FrameBitmapPtr value (Run(nullptr)), which needs the
++// complete type.
++#include "chrome/services/app_swap_playback/public/mojom/app_swap_playback_bitmap.mojom.h"
++#include "content/public/browser/service_process_host.h"
++
++AppSwapRecordingsPageHandler::AppSwapRecordingsPageHandler(
++    mojo::PendingReceiver<app_swap_recordings::mojom::PageHandler> handler,
++    Profile* profile)
++    : profile_(profile),
++      scanner_(GetAppSwapRecordingsDir(profile)),
++      receiver_(this, std::move(handler)) {}
++
++AppSwapRecordingsPageHandler::~AppSwapRecordingsPageHandler() = default;
++
++void AppSwapRecordingsPageHandler::GetRecordings(
++    GetRecordingsCallback callback) {
++  scanner_.Scan(base::BindOnce(&AppSwapRecordingsPageHandler::OnScanned,
++                               weak_factory_.GetWeakPtr(),
++                               std::move(callback)));
++}
++
++void AppSwapRecordingsPageHandler::DeleteRecording(
++    const std::string& session_id,
++    DeleteRecordingCallback callback) {
++  scanner_.Delete(session_id, std::move(callback));
++}
++
++void AppSwapRecordingsPageHandler::OpenRecordingFolder(
++    const std::string& session_id) {
++  base::FilePath session_dir = scanner_.ResolveSessionDir(session_id);
++  if (session_dir.empty()) {
++    return;
++  }
++  platform_util::ShowItemInFolder(profile_, session_dir);
++}
++
++void AppSwapRecordingsPageHandler::OnScanned(
++    GetRecordingsCallback callback,
++    std::vector<AppSwapRecordingsScanner::RecordingInfo> infos) {
++  std::vector<app_swap_recordings::mojom::RecordingInfoPtr> result;
++  result.reserve(infos.size());
++  for (const auto& info : infos) {
++    auto mojo_info = app_swap_recordings::mojom::RecordingInfo::New();
++    mojo_info->session_id = info.session_id;
++    mojo_info->start_url = info.start_url;
++    mojo_info->start_time_ms = info.start_time_ms;
++    mojo_info->segment_count = static_cast<uint32_t>(info.segment_count);
++    mojo_info->total_bytes = static_cast<uint64_t>(info.total_bytes);
++    result.push_back(std::move(mojo_info));
++  }
++  std::move(callback).Run(std::move(result));
++}
++
++app_swap_playback::mojom::PlaybackRenderer&
++AppSwapRecordingsPageHandler::GetPlaybackService() {
++  if (!playback_service_) {
++    content::ServiceProcessHost::Launch<
++        app_swap_playback::mojom::PlaybackRenderer>(
++        playback_service_.BindNewPipeAndPassReceiver(),
++        content::ServiceProcessHost::Options()
++            .WithDisplayName("AppSwap Playback Renderer")
++            .Pass());
++    // NOT reset_on_disconnect(): that alone would leave active_reader_
++    // holding a dangling pointer into the just-reset Remote (see its own
++    // comment). set_disconnect_handler() lets OnPlaybackServiceDisconnected
++    // reset both together.
++    playback_service_.set_disconnect_handler(
++        base::BindOnce(&AppSwapRecordingsPageHandler::OnPlaybackServiceDisconnected,
++                       weak_factory_.GetWeakPtr()));
++  }
++  return *playback_service_.get();
++}
++
++void AppSwapRecordingsPageHandler::OnPlaybackServiceDisconnected() {
++  active_reader_.reset();
++  playback_service_.reset();
++}
++
++void AppSwapRecordingsPageHandler::OpenRecording(
++    const std::string& session_id,
++    OpenRecordingCallback callback) {
++  // ResolveSessionDir() is pure path computation (no I/O -- see its own
++  // comment), safe to call directly on the UI thread. Whether the
++  // directory actually exists is checked by AppSwapSessionRecordingReader::
++  // BuildIndex() on its own background sequence instead of here: this
++  // method runs on the UI thread (dispatched from the mojo receiver), and
++  // base::DirectoryExists() is a blocking filesystem call -- calling it
++  // here directly used to crash with "DCHECK failed:
++  // !tls_blocking_disallowed", confirmed by actually hitting it.
++  base::FilePath session_dir = scanner_.ResolveSessionDir(session_id);
++  if (session_dir.empty()) {
++    std::move(callback).Run(false, 0, {}, {});
++    return;
++  }
++  active_reader_ = std::make_unique<AppSwapSessionRecordingReader>(
++      session_dir, &GetPlaybackService());
++  active_reader_->Index(base::BindOnce(
++      &AppSwapRecordingsPageHandler::OnIndexed, weak_factory_.GetWeakPtr(),
++      std::move(callback)));
++}
++
++void AppSwapRecordingsPageHandler::OnIndexed(
++    OpenRecordingCallback callback,
++    bool success,
++    std::vector<int64_t> frame_timestamps_ms,
++    std::vector<AppSwapSessionRecordingReader::NavigationEvent>
++        navigations) {
++  std::vector<double> timestamps_ms(frame_timestamps_ms.begin(),
++                                    frame_timestamps_ms.end());
++
++  std::vector<app_swap_recordings::mojom::NavigationEventPtr>
++      mojo_navigations;
++  mojo_navigations.reserve(navigations.size());
++  for (const auto& navigation : navigations) {
++    auto entry = app_swap_recordings::mojom::NavigationEvent::New();
++    entry->time_ms = static_cast<double>(navigation.time_ms);
++    entry->url = navigation.url;
++    entry->package_name = navigation.package_name;
++    entry->version = navigation.version;
++    mojo_navigations.push_back(std::move(entry));
++  }
++
++  std::move(callback).Run(success,
++                          static_cast<uint32_t>(timestamps_ms.size()),
++                          std::move(timestamps_ms),
++                          std::move(mojo_navigations));
++}
++
++void AppSwapRecordingsPageHandler::GetFrame(uint32_t frame_ordinal,
++                                            GetFrameCallback callback) {
++  if (!active_reader_) {
++    std::move(callback).Run(nullptr);
++    return;
++  }
++  active_reader_->RenderFrame(frame_ordinal, std::move(callback));
++}
++
++void AppSwapRecordingsPageHandler::CloseRecording() {
++  active_reader_.reset();
++  playback_service_.reset();
++}
+diff --git a/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_page_handler.h b/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_page_handler.h
+new file mode 100644
+index 0000000000000..354b3c2ba4ab5
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_page_handler.h
+@@ -0,0 +1,96 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_APP_SWAP_RECORDINGS_APP_SWAP_RECORDINGS_PAGE_HANDLER_H_
++#define CHROME_BROWSER_UI_WEBUI_APP_SWAP_RECORDINGS_APP_SWAP_RECORDINGS_PAGE_HANDLER_H_
++
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/app_swap/app_swap_recordings_scanner.h"
++#include "chrome/browser/app_swap/app_swap_session_recording_reader.h"
++#include "chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings.mojom.h"
++#include "chrome/services/app_swap_playback/public/mojom/app_swap_playback.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++#include "mojo/public/cpp/bindings/remote.h"
++
++class Profile;
++
++// Implements the appswap://recordings page's PageHandler. `scanner_` is
++// scoped to `profile`'s own recordings directory (GetAppSwapRecordingsDir)
++// for the handler's lifetime.
++class AppSwapRecordingsPageHandler
++    : public app_swap_recordings::mojom::PageHandler {
++ public:
++  AppSwapRecordingsPageHandler(
++      mojo::PendingReceiver<app_swap_recordings::mojom::PageHandler> handler,
++      Profile* profile);
++  AppSwapRecordingsPageHandler(const AppSwapRecordingsPageHandler&) = delete;
++  AppSwapRecordingsPageHandler& operator=(
++      const AppSwapRecordingsPageHandler&) = delete;
++  ~AppSwapRecordingsPageHandler() override;
++
++  // app_swap_recordings::mojom::PageHandler:
++  void GetRecordings(GetRecordingsCallback callback) override;
++  void DeleteRecording(const std::string& session_id,
++                       DeleteRecordingCallback callback) override;
++  void OpenRecordingFolder(const std::string& session_id) override;
++  void OpenRecording(const std::string& session_id,
++                     OpenRecordingCallback callback) override;
++  void GetFrame(uint32_t frame_ordinal, GetFrameCallback callback) override;
++  void CloseRecording() override;
++
++ private:
++  void OnScanned(GetRecordingsCallback callback,
++                std::vector<AppSwapRecordingsScanner::RecordingInfo> infos);
++  void OnIndexed(OpenRecordingCallback callback,
++                bool success,
++                std::vector<int64_t> frame_timestamps_ms,
++                std::vector<AppSwapSessionRecordingReader::NavigationEvent>
++                    navigations);
++
++  // Lazily launches the playback renderer service (a separate child
++  // process -- see app_swap_playback.mojom's own design note for why) the
++  // first time a recording is opened; reused for every GetFrame() call
++  // until CloseRecording() tears it down. Mirrors PageHandler::GetService()
++  // in chrome/browser/ui/webui/on_device_internals/
++  // on_device_internals_page_handler.cc, the closest existing precedent
++  // for launching a ServiceProcessHost service lazily from a WebUI page
++  // handler.
++  app_swap_playback::mojom::PlaybackRenderer& GetPlaybackService();
++
++  // The playback service can die mid-session (e.g. running out of memory
++  // rendering a frame with many large images -- confirmed by actually
++  // hitting this on an image-heavy page). Tears down active_reader_ too:
++  // it holds a raw pointer to *playback_service_'s underlying interface
++  // (see GetPlaybackService()), which becomes dangling once
++  // playback_service_ resets itself, so it must not outlive it. The next
++  // GetFrame() call on a now-null active_reader_ just fails cleanly
++  // instead of calling through a dangling pointer; the WebUI has to
++  // OpenRecording() again to resume (which relaunches the service).
++  void OnPlaybackServiceDisconnected();
++
++  const raw_ptr<Profile> profile_;
++  AppSwapRecordingsScanner scanner_;
++  mojo::Receiver<app_swap_recordings::mojom::PageHandler> receiver_;
++
++  // Declared before active_reader_ so it's destroyed AFTER it (member
++  // destruction runs in reverse declaration order) -- active_reader_ holds
++  // a raw pointer to *playback_service_'s underlying interface (see
++  // GetPlaybackService()) and must never outlive it. CloseRecording()
++  // resets the two in the same relative order explicitly, for the same
++  // reason.
++  mojo::Remote<app_swap_playback::mojom::PlaybackRenderer> playback_service_;
++  // Only one recording is ever open at a time -- OpenRecording() replaces
++  // whatever was open before.
++  std::unique_ptr<AppSwapSessionRecordingReader> active_reader_;
++
++  base::WeakPtrFactory<AppSwapRecordingsPageHandler> weak_factory_{this};
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_RECORDINGS_APP_SWAP_RECORDINGS_PAGE_HANDLER_H_
+diff --git a/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_ui.cc b/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_ui.cc
+new file mode 100644
+index 0000000000000..d3e2920491733
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_ui.cc
+@@ -0,0 +1,52 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_ui.h"
++
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_page_handler.h"
++#include "chrome/grit/app_swap_recordings_resources.h"
++#include "chrome/grit/app_swap_recordings_resources_map.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++#include "content/public/common/url_constants.h"
++#include "ui/webui/webui_util.h"
++
++AppSwapRecordingsUIConfig::AppSwapRecordingsUIConfig()
++    : DefaultWebUIConfig(content::kChromeUIScheme, "appswap-recordings") {}
++
++AppSwapRecordingsUI::AppSwapRecordingsUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  Profile* profile = Profile::FromWebUI(web_ui);
++  content::WebUIDataSource* source =
++      content::WebUIDataSource::CreateAndAdd(profile, "appswap-recordings");
++  webui::SetupWebUIDataSource(
++      source, kAppSwapRecordingsResources,
++      IDR_APP_SWAP_RECORDINGS_APP_SWAP_RECORDINGS_HTML);
++}
++
++AppSwapRecordingsUI::~AppSwapRecordingsUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(AppSwapRecordingsUI)
++
++void AppSwapRecordingsUI::WebUIRenderFrameCreated(
++    content::RenderFrameHost* rfh) {
++  rfh->EnableMojoJsBindings(nullptr);
++}
++
++void AppSwapRecordingsUI::BindInterface(
++    mojo::PendingReceiver<app_swap_recordings::mojom::PageHandlerFactory>
++        receiver) {
++  page_factory_receiver_.reset();
++  page_factory_receiver_.Bind(std::move(receiver));
++}
++
++void AppSwapRecordingsUI::CreatePageHandler(
++    mojo::PendingReceiver<app_swap_recordings::mojom::PageHandler> handler) {
++  page_handler_ = std::make_unique<AppSwapRecordingsPageHandler>(
++      std::move(handler), Profile::FromWebUI(web_ui()));
++}
+diff --git a/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_ui.h b/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_ui.h
+new file mode 100644
+index 0000000000000..d0defb904c68e
+--- /dev/null
++++ b/chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_ui.h
+@@ -0,0 +1,63 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_APP_SWAP_RECORDINGS_APP_SWAP_RECORDINGS_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_APP_SWAP_RECORDINGS_APP_SWAP_RECORDINGS_UI_H_
++
++#include <memory>
++
++#include "chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings.mojom.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++
++class AppSwapRecordingsPageHandler;
++class AppSwapRecordingsUI;
++
++namespace content {
++class RenderFrameHost;
++}  // namespace content
++
++class AppSwapRecordingsUIConfig
++    : public content::DefaultWebUIConfig<AppSwapRecordingsUI> {
++ public:
++  AppSwapRecordingsUIConfig();
++};
++
++// appswap://recordings (chrome://appswap-recordings under the hood): lists
++// every AppSwap session recording captured for this Profile (see
++// AppSwapSessionRecordingTabHelper for how a recording is made). Listing
++// only -- no playback yet, see the "appswap://recordings" plan's own
++// scope note.
++class AppSwapRecordingsUI
++    : public content::WebUIController,
++      public app_swap_recordings::mojom::PageHandlerFactory {
++ public:
++  explicit AppSwapRecordingsUI(content::WebUI* web_ui);
++  AppSwapRecordingsUI(const AppSwapRecordingsUI&) = delete;
++  AppSwapRecordingsUI& operator=(const AppSwapRecordingsUI&) = delete;
++  ~AppSwapRecordingsUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<app_swap_recordings::mojom::PageHandlerFactory>
++          receiver);
++
++ private:
++  // content::WebUIController:
++  void WebUIRenderFrameCreated(content::RenderFrameHost* rfh) override;
++
++  // app_swap_recordings::mojom::PageHandlerFactory:
++  void CreatePageHandler(
++      mojo::PendingReceiver<app_swap_recordings::mojom::PageHandler> handler)
++      override;
++
++  std::unique_ptr<AppSwapRecordingsPageHandler> page_handler_;
++  mojo::Receiver<app_swap_recordings::mojom::PageHandlerFactory>
++      page_factory_receiver_{this};
++
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_RECORDINGS_APP_SWAP_RECORDINGS_UI_H_

@@ -1,0 +1,669 @@
+diff --git a/cc/layers/layer.cc b/cc/layers/layer.cc
+index eb8abf71147da..ba97f3c4c84b1 100644
+--- a/cc/layers/layer.cc
++++ b/cc/layers/layer.cc
+@@ -263,6 +263,11 @@ sk_sp<const SkPicture> Layer::GetPicture() const {
+   return nullptr;
+ }
+ 
++scoped_refptr<DisplayItemList> Layer::CapturePaintOpDisplayListForTesting()
++    const {
++  return nullptr;
++}
++
+ void Layer::SetParent(Layer* layer, RemovalReason reason) {
+   DCHECK(!layer || !layer->HasAncestor(this));
+   DCHECK(reason == RemovalReason::kNormal || !layer);
+diff --git a/cc/layers/layer.h b/cc/layers/layer.h
+index 014cd2c5d986b..c6bcceea50d3b 100644
+--- a/cc/layers/layer.h
++++ b/cc/layers/layer.h
+@@ -16,6 +16,7 @@
+ #include "base/auto_reset.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/ref_counted.h"
++#include "base/memory/scoped_refptr.h"
+ #include "cc/base/protected_sequence_synchronizer.h"
+ #include "cc/base/region.h"
+ #include "cc/cc_export.h"
+@@ -46,6 +47,7 @@ class CopyOutputRequest;
+ 
+ namespace cc {
+ 
++class DisplayItemList;
+ class LayerImpl;
+ class LayerTreeHost;
+ class LayerTreeHostCommon;
+@@ -732,6 +734,16 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
+   // display.
+   virtual sk_sp<const SkPicture> GetPicture() const;
+ 
++  // AppSwap: like GetPicture(), but returns the layer's freshly-painted
++  // cc::DisplayItemList directly instead of re-recording it into an
++  // SkPicture -- so callers can get at the real cc::PaintOpBuffer
++  // (DisplayItemList::paint_op_buffer()) for paint-op capture/serialization
++  // research. Only PictureLayer (the only layer type with real paint
++  // content) overrides this; other layer types return null, same as
++  // GetPicture().
++  virtual scoped_refptr<DisplayItemList> CapturePaintOpDisplayListForTesting()
++      const;
++
+   virtual bool IsSolidColorLayerForTesting() const;
+ 
+   const LayerDebugInfo* debug_info() const { return debug_info_.Read(*this); }
+diff --git a/cc/layers/picture_layer.cc b/cc/layers/picture_layer.cc
+index 9537cc5e0e302..d1ee792a7cfdd 100644
+--- a/cc/layers/picture_layer.cc
++++ b/cc/layers/picture_layer.cc
+@@ -171,6 +171,13 @@ sk_sp<const SkPicture> PictureLayer::GetPicture() const {
+   return recorder.finishRecordingAsPicture();
+ }
+ 
++scoped_refptr<DisplayItemList>
++PictureLayer::CapturePaintOpDisplayListForTesting() const {
++  if (!draws_content() || bounds().IsEmpty())
++    return nullptr;
++  return client_->PaintContentsToDisplayList();
++}
++
+ void PictureLayer::ClearClient() {
+   client_ = nullptr;
+   UpdateDrawsContent();
+diff --git a/cc/layers/picture_layer.h b/cc/layers/picture_layer.h
+index 5299b3b337263..43ba4e99541ed 100644
+--- a/cc/layers/picture_layer.h
++++ b/cc/layers/picture_layer.h
+@@ -40,6 +40,8 @@ class CC_EXPORT PictureLayer : public Layer {
+   void SetNeedsDisplayRect(const gfx::Rect& layer_rect) override;
+   bool RequiresSetNeedsDisplayOnHdrHeadroomChange() const override;
+   sk_sp<const SkPicture> GetPicture() const override;
++  scoped_refptr<DisplayItemList> CapturePaintOpDisplayListForTesting()
++      const override;
+   bool Update() override;
+   void RunMicroBenchmark(MicroBenchmark* benchmark) override;
+   void CaptureContent(const gfx::Rect& rect,
+diff --git a/cc/paint/paint_op_capture_serializer.cc b/cc/paint/paint_op_capture_serializer.cc
+new file mode 100644
+index 0000000000000..bcfdd23b83c62
+--- /dev/null
++++ b/cc/paint/paint_op_capture_serializer.cc
+@@ -0,0 +1,264 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "cc/paint/paint_op_capture_serializer.h"
++
++#include <set>
++#include <utility>
++
++#include <memory>
++
++#include "cc/paint/decoded_draw_image.h"
++#include "cc/paint/draw_image.h"
++#include "cc/paint/image_provider.h"
++#include "cc/paint/image_transfer_cache_entry.h"
++#include "cc/paint/paint_cache.h"
++#include "cc/paint/paint_image.h"
++#include "cc/paint/paint_op_buffer.h"
++#include "cc/paint/paint_op_buffer_serializer.h"
++#include "cc/paint/paint_op_writer.h"
++#include "cc/paint/skottie_serialization_history.h"
++#include "cc/paint/transfer_cache_deserialize_helper.h"
++#include "cc/paint/transfer_cache_serialize_helper.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "third_party/skia/include/core/SkImage.h"
++#include "third_party/skia/include/core/SkPixmap.h"
++#include "third_party/skia/include/private/chromium/SkChromeRemoteGlyphCache.h"
++
++namespace cc {
++
++namespace {
++
++// A minimal SkStrikeServer::DiscardableHandleManager for a short-lived,
++// single-use SkStrikeServer. Each capture call does exactly one
++// Serialize() pass and then throws the server away, so there is nothing
++// to evict and no real discardable-memory bookkeeping is needed: every
++// handle simply stays valid for the server's whole (brief) lifetime.
++class SingleUseDiscardableHandleManager
++    : public SkStrikeServer::DiscardableHandleManager {
++ public:
++  SkDiscardableHandleId createHandle() override { return next_id_++; }
++  bool lockHandle(SkDiscardableHandleId) override { return true; }
++  bool isHandleDeleted(SkDiscardableHandleId) override { return false; }
++
++ private:
++  SkDiscardableHandleId next_id_ = 1;
++};
++
++// A real, production ImageProvider: decodes each image via
++// PaintImage::GetSwSkImage() and packages it as a
++// ClientImageTransferCacheEntry, collecting the serialized entry bytes
++// for SerializePaintOpBufferForCapture() to fold into the returned
++// SerializedPaintOpBuffer's `imagedata` blob afterwards (see this file's
++// header comment for that format and its disclosed limitations). Mirrors
++// TestOptionsProvider::GetRasterContent()'s shape (cc/test/
++// test_options_provider.cc) but with real pixel content instead of a
++// zero-filled placeholder bitmap, and without that class's testonly
++// direct-cache-access helpers (LockEntryDirect/CreateEntryDirect) --
++// those don't exist on the production TransferCacheSerializeHelper base,
++// and aren't needed here anyway since PaintOpWriter::WriteImage() only
++// ever reads an already-assigned transfer_cache_entry_id() off the
++// DecodedDrawImage this class returns; it never calls back into a
++// TransferCacheSerializeHelper for images itself (confirmed: unlike the
++// Skottie/record-shader case, which does drive PaintOpWriter's own
++// LockEntry()/CreateEntry() calls inline).
++class RealImageProvider : public ImageProvider {
++ public:
++  ScopedResult GetRasterContent(const DrawImage& draw_image) override {
++    // A lazy/generator-backed or otherwise unresolvable image degrades to
++    // the same "no image" outcome NullImageProvider always produced --
++    // graceful, not a crash (see PaintOpWriter::WriteImage()).
++    sk_sp<SkImage> sk_image = draw_image.paint_image().GetSwSkImage();
++    if (!sk_image) {
++      return ScopedResult();
++    }
++
++    SkBitmap bitmap;
++    if (!bitmap.tryAllocN32Pixels(sk_image->width(), sk_image->height())) {
++      return ScopedResult();
++    }
++    // nullptr GrDirectContext is correct here: GetSwSkImage() guarantees a
++    // CPU/raster-backed image, so no GPU readback is involved.
++    if (!sk_image->readPixels(/*context=*/nullptr, bitmap.pixmap(), 0, 0)) {
++      return ScopedResult();
++    }
++
++    SkPixmap pixmap = bitmap.pixmap();
++    ClientImageTransferCacheEntry::Image image(&pixmap);
++    ClientImageTransferCacheEntry entry(image, /*needs_mips=*/false);
++    uint32_t size = entry.SerializedSize();
++    std::vector<uint8_t> data(size);
++    if (!entry.Serialize(base::span(data))) {
++      return ScopedResult();
++    }
++
++    uint32_t id = entry.Id();
++    entries_.emplace_back(id, std::move(data));
++
++    return ScopedResult(DecodedDrawImage(
++        id, /*dark_mode_color_filter=*/nullptr, SkSize::MakeEmpty(),
++        draw_image.scale(), draw_image.filter_quality(),
++        /*needs_mips=*/false, /*is_budgeted=*/true));
++  }
++
++  // Flattens every entry collected so far into this file's header-
++  // documented [count][id,len,bytes]* format, and clears the collection
++  // (this provider is single-use per SerializePaintOpBufferForCapture()
++  // call, so there's nothing left to take a second time).
++  std::vector<uint8_t> TakeImageData() {
++    std::vector<uint8_t> result;
++    const uint32_t count = static_cast<uint32_t>(entries_.size());
++    AppendBytes(result, base::byte_span_from_ref(count));
++    for (auto& [id, data] : entries_) {
++      AppendBytes(result, base::byte_span_from_ref(id));
++      const uint32_t len = static_cast<uint32_t>(data.size());
++      AppendBytes(result, base::byte_span_from_ref(len));
++      AppendBytes(result, base::span(data));
++    }
++    entries_.clear();
++    return result;
++  }
++
++ private:
++  static void AppendBytes(std::vector<uint8_t>& out,
++                          base::span<const uint8_t> bytes) {
++    out.insert(out.end(), bytes.begin(), bytes.end());
++  }
++
++  std::vector<std::pair<uint32_t, std::vector<uint8_t>>> entries_;
++};
++
++// A minimal TransferCacheSerializeHelper. Unlike the real raster
++// command-buffer path (gpu::RasterImplementation), a capture via this
++// helper is a single disposable serialize pass, not a persistent cache
++// shared across frames -- so every entry is always freshly created and
++// inlined directly into the buffer PaintOpWriter provides, never treated
++// as already cached on some remote side.
++class InliningTransferCacheSerializeHelper
++    : public TransferCacheSerializeHelper {
++ protected:
++  bool LockEntryInternal(const EntryKey&) override { return false; }
++  uint32_t CreateEntryInternal(const ClientTransferCacheEntry& entry,
++                               base::span<uint8_t> memory) override {
++    uint32_t size = entry.SerializedSize();
++    if (memory.size() < size || !entry.Serialize(memory.first(size))) {
++      return 0u;
++    }
++    return size;
++  }
++  void FlushEntriesInternal(std::set<EntryKey>) override {}
++};
++
++// A transfer-cache stand-in for the read side, matching
++// InliningTransferCacheSerializeHelper's own "always fresh, nothing is
++// ever really cached" behavior above. Every lookup misses -- which every
++// transfer-cache-backed PaintOp already handles gracefully, since a real
++// entry can legitimately be absent there too (a failed image upload not
++// yet resolving a record shader, ...) -- and CreateLocalEntry() just
++// drops what it's given rather than storing it, since this deserializer
++// exists for one single, disposable PaintOpBuffer::MakeFromMemory() call,
++// not a persistent cache serving many buffers over time.
++class NullTransferCacheDeserializeHelper : public TransferCacheDeserializeHelper {
++ public:
++  void CreateLocalEntry(uint32_t,
++                        std::unique_ptr<ServiceTransferCacheEntry>) override {
++  }
++
++ private:
++  ServiceTransferCacheEntry* GetEntryInternal(TransferCacheEntryType,
++                                              uint32_t) override {
++    return nullptr;
++  }
++};
++
++// A minimal SkStrikeClient::DiscardableHandleManager for a short-lived,
++// single-use SkStrikeClient -- the read-side mirror of
++// SingleUseDiscardableHandleManager above. One deserialize call reads all
++// the strike data it will ever read in one readStrikeData() call, so
++// there's nothing to actually track deletion of.
++class SingleUseStrikeClientDiscardableHandleManager
++    : public SkStrikeClient::DiscardableHandleManager {
++ public:
++  bool deleteHandle(SkDiscardableHandleId) override { return true; }
++  void notifyCacheMiss(SkStrikeClient::CacheMissType, int) override {}
++};
++
++}  // namespace
++
++SerializedPaintOpBuffer::SerializedPaintOpBuffer() = default;
++SerializedPaintOpBuffer::SerializedPaintOpBuffer(SerializedPaintOpBuffer&&) =
++    default;
++SerializedPaintOpBuffer& SerializedPaintOpBuffer::operator=(
++    SerializedPaintOpBuffer&&) = default;
++SerializedPaintOpBuffer::~SerializedPaintOpBuffer() = default;
++
++std::optional<SerializedPaintOpBuffer> SerializePaintOpBufferForCapture(
++    const PaintOpBuffer& buffer,
++    const ScrollOffsetMap* raster_inducing_scroll_offsets,
++    size_t max_size) {
++  SingleUseDiscardableHandleManager handle_manager;
++  SkStrikeServer strike_server(&handle_manager);
++  RealImageProvider image_provider;
++  InliningTransferCacheSerializeHelper transfer_cache;
++  ClientPaintCache paint_cache(4 * 1024 * 1024);
++  SkottieSerializationHistory skottie_history;
++
++  PaintOp::SerializeOptions options(
++      &image_provider, &transfer_cache, &paint_cache, &strike_server,
++      /*color_space=*/nullptr, &skottie_history,
++      /*can_use_lcd_text=*/true,
++      /*context_supports_distance_field_text=*/true,
++      /*max_texture_size=*/1024, raster_inducing_scroll_offsets);
++
++  // Matches real production ordering (gpu::RasterImplementation::
++  // RasterCHROMIUM(), gpu/command_buffer/client/raster_implementation.cc):
++  // PaintOpBufferSerializer::Serialize() runs its OWN internal
++  // analysis-canvas pass over the buffer -- that's what actually
++  // populates strike_server with any text ops' glyph data. So Serialize()
++  // first, then pull the strike data out -- no separate manual
++  // analysis-canvas pass needed.
++  base::AlignedHeapArray<uint8_t> memory =
++      PaintOpWriter::AllocateAlignedBuffer(max_size);
++  SimpleBufferSerializer serializer(memory.as_span(), options);
++  serializer.Serialize(buffer);
++  if (!serializer.valid()) {
++    return std::nullopt;
++  }
++
++  SerializedPaintOpBuffer result;
++  base::span<const uint8_t> written =
++      memory.as_span().first(serializer.written());
++  result.paintops.assign(written.begin(), written.end());
++  strike_server.writeStrikeData(&result.strikedata);
++  result.imagedata = image_provider.TakeImageData();
++  return result;
++}
++
++sk_sp<PaintOpBuffer> DeserializePaintOpBufferForPlayback(
++    base::span<const uint8_t> paintops,
++    base::span<const uint8_t> strikedata,
++    TransferCacheDeserializeHelper* transfer_cache) {
++  sk_sp<SingleUseStrikeClientDiscardableHandleManager> discardable_manager =
++      sk_make_sp<SingleUseStrikeClientDiscardableHandleManager>();
++  SkStrikeClient strike_client(discardable_manager);
++  if (!strikedata.empty() &&
++      !strike_client.readStrikeData(strikedata.data(), strikedata.size())) {
++    return nullptr;
++  }
++
++  NullTransferCacheDeserializeHelper null_transfer_cache;
++  ServicePaintCache paint_cache;
++  std::vector<uint8_t> scratch_buffer;
++  PaintOpBuffer::DeserializeOptions options{
++      .transfer_cache = transfer_cache ? transfer_cache : &null_transfer_cache,
++      .paint_cache = &paint_cache,
++      .strike_client = &strike_client,
++      .scratch_buffer = scratch_buffer,
++      .is_privileged = false,
++  };
++
++  return PaintOpBuffer::MakeFromMemory(paintops, options);
++}
++
++}  // namespace cc
+diff --git a/cc/paint/paint_op_capture_serializer.h b/cc/paint/paint_op_capture_serializer.h
+new file mode 100644
+index 0000000000000..9271644535cc5
+--- /dev/null
++++ b/cc/paint/paint_op_capture_serializer.h
+@@ -0,0 +1,119 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CC_PAINT_PAINT_OP_CAPTURE_SERIALIZER_H_
++#define CC_PAINT_PAINT_OP_CAPTURE_SERIALIZER_H_
++
++#include <cstdint>
++#include <optional>
++#include <vector>
++
++#include "base/containers/span.h"
++#include "cc/paint/paint_export.h"
++#include "cc/paint/scroll_offset_map.h"
++#include "third_party/skia/include/core/SkRefCnt.h"
++
++namespace cc {
++
++class PaintOpBuffer;
++class TransferCacheDeserializeHelper;
++
++// The result of SerializePaintOpBufferForCapture(): the serialized paint
++// ops, plus whatever glyph ("strike") data the buffer's text ops produced
++// as a side channel -- both need to be persisted (to disk, over IPC,
++// wherever) together, the same file-pair convention this checkout's
++// AppSwap paint-op capture work has used since its first spike
++// (cc/paint/paintop_disk_roundtrip_tool.cc). `imagedata` is a third such
++// side channel, added for real image support: a hand-rolled
++// [uint32 count][repeated: uint32 id, uint32 len, len bytes] blob of
++// serialized cc::ClientImageTransferCacheEntry bytes, one per DrawImageOp
++// captured in `paintops` -- see SerializePaintOpBufferForCapture()'s own
++// comment for why this needs its own side channel rather than being
++// inlined into `paintops` the way production's real image path would
++// normally do it.
++struct CC_PAINT_EXPORT SerializedPaintOpBuffer {
++  SerializedPaintOpBuffer();
++  SerializedPaintOpBuffer(SerializedPaintOpBuffer&&);
++  SerializedPaintOpBuffer& operator=(SerializedPaintOpBuffer&&);
++  SerializedPaintOpBuffer(const SerializedPaintOpBuffer&) = delete;
++  SerializedPaintOpBuffer& operator=(const SerializedPaintOpBuffer&) = delete;
++  ~SerializedPaintOpBuffer();
++
++  std::vector<uint8_t> paintops;
++  std::vector<uint8_t> strikedata;
++  std::vector<uint8_t> imagedata;
++};
++
++// Serializes `buffer` for later disk/IPC persistence, using a fresh,
++// short-lived, single-use SkStrikeServer plus no-op image/transfer-cache
++// helpers -- suitable for PRODUCTION (non-test) capture call sites that
++// can't depend on cc:test_support's TestOptionsProvider (testonly).
++// Shared by every AppSwap paint-op capture path in this checkout (the
++// debug chrome.gpuBenchmarking.dumpPaintOpBuffer() path in
++// content/renderer/gpu_benchmarking_extension.cc, and the continuous
++// per-frame recording path) so the serialization sequence itself -- which
++// took real, hard-won debugging to get right (see that file's own
++// comments) -- exists in exactly one place.
++//
++// DrawImageOp content DOES round-trip: each image is decoded via
++// PaintImage::GetSwSkImage(), wrapped in a cc::ClientImageTransferCacheEntry,
++// and stashed in the returned SerializedPaintOpBuffer's `imagedata` blob
++// (production's own real image path always references a transfer-cache
++// entry rather than inlining pixels into the op stream itself -- see
++// cc/paint/paint_op_writer.cc's WriteImage() and the DCHECK guarding
++// against a raw SkImage there). No dedup (the same image appearing
++// multiple times in one buffer is captured once per occurrence), no
++// YUV/gainmap/HDR images, no mips -- a real, disclosed first-pass
++// limitation, not a silent one.
++//
++// `raster_inducing_scroll_offsets`, if `buffer` contains a
++// kDrawScrollingContents op (a scrollable subtree -- confirmed via a real
++// crash, see cc/paint/paint_op_buffer_serializer.cc:287's
++// CHECK(params.raster_inducing_scroll_offsets)), MUST be non-null and
++// contain a real entry for every ElementId the op references, or
++// serialization will crash (a CHECK failure, then an out-of-range map
++// access). cc/paint deliberately doesn't depend on cc/trees (nothing else
++// under cc/paint/ does either), so this helper can't build that map
++// itself from a cc::ScrollTree -- the caller (which already has one, via
++// its LayerTreeHost) must build it, e.g.:
++//   for (auto& [element_id, _] : display_list.raster_inducing_scrolls())
++//     offsets[element_id] = scroll_tree.current_scroll_offset(element_id);
++// A buffer known not to contain any scrolling content can safely pass
++// nullptr.
++//
++// Returns nullopt if serialization fails (e.g. `buffer`'s serialized form
++// doesn't fit in `max_size`).
++CC_PAINT_EXPORT std::optional<SerializedPaintOpBuffer>
++SerializePaintOpBufferForCapture(
++    const PaintOpBuffer& buffer,
++    const ScrollOffsetMap* raster_inducing_scroll_offsets = nullptr,
++    size_t max_size = 4 * 1024 * 1024);
++
++// The read-side counterpart to SerializePaintOpBufferForCapture(): rebuilds
++// a PaintOpBuffer from what that function produced, using a fresh,
++// short-lived, single-use SkStrikeClient plus a minimal paint-cache
++// stand-in -- suitable for PRODUCTION (non-test) playback call sites that
++// can't depend on cc:test_support's TestOptionsProvider (testonly), same
++// reasoning as the serialize side above. `paintops`/`strikedata` must be
++// exactly what one SerializePaintOpBufferForCapture() call produced (its
++// outputs kept together) -- mixing strike data from one buffer with
++// paintops from another will fail to resolve any text in the latter.
++//
++// `transfer_cache`, if non-null, is used to resolve any transfer-cache-
++// backed content (currently: images) instead of the default stand-in that
++// always reports "entry not found" -- which every transfer-cache-backed op
++// already handles gracefully as a documented case (a failed image upload,
++// a not-yet-cached record shader, ...), so passing null here isn't a
++// crash risk, just a caller that doesn't need images to actually render
++// (e.g. no live GrDirectContext available to it -- see
++// cc::ServiceImageTransferCacheEntry::Deserialize()'s own requirement).
++// Returns nullptr on any deserialization failure.
++CC_PAINT_EXPORT sk_sp<PaintOpBuffer> DeserializePaintOpBufferForPlayback(
++    base::span<const uint8_t> paintops,
++    base::span<const uint8_t> strikedata,
++    TransferCacheDeserializeHelper* transfer_cache = nullptr);
++
++}  // namespace cc
++
++#endif  // CC_PAINT_PAINT_OP_CAPTURE_SERIALIZER_H_
+diff --git a/content/renderer/gpu_benchmarking_extension.cc b/content/renderer/gpu_benchmarking_extension.cc
+index c3f3b5e90496e..0235b523b1135 100644
+--- a/content/renderer/gpu_benchmarking_extension.cc
++++ b/content/renderer/gpu_benchmarking_extension.cc
+@@ -7,6 +7,7 @@
+ #include <stddef.h>
+ 
+ #include <memory>
++#include <optional>
+ #include <string>
+ #include <string_view>
+ #include <tuple>
+@@ -15,18 +16,23 @@
+ 
+ #include "base/base64.h"
+ #include "base/command_line.h"
++#include "base/containers/span.h"
+ #include "base/debug/profiler.h"
+ #include "base/files/file_path.h"
+ #include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
++#include "base/logging.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_split.h"
+ #include "build/build_config.h"
+ #include "cc/layers/layer.h"
++#include "cc/paint/display_item_list.h"
++#include "cc/paint/paint_op_capture_serializer.h"
+ #include "cc/paint/skia_paint_canvas.h"
+ #include "cc/trees/layer_tree_host.h"
++#include "cc/trees/property_tree.h"
+ #include "content/common/input/actions_parser.h"
+ #include "content/common/input/input_injector.mojom.h"
+ #include "content/common/input/synthetic_gesture_params.h"
+@@ -72,6 +78,7 @@
+ #include "third_party/skia/include/encode/SkPngRustEncoder.h"
+ #include "ui/events/base_event_utils.h"
+ #include "ui/gfx/ca_layer_result.h"
++#include "ui/gfx/geometry/size.h"
+ #include "ui/gfx/geometry/size_f.h"
+ #include "v8/include/cppgc/allocation.h"
+ #include "v8/include/v8-context.h"
+@@ -205,6 +212,90 @@ class SkPictureSerializer {
+   int layer_id_;
+ };
+ 
++// AppSwap: session-recording feasibility research. See the design notes
++// this was built from (PaintOp-based session recording) for full context.
++//
++// Dumps each layer's real cc::PaintOpBuffer to disk. Modeled on
++// SkPictureSerializer just above -- same per-layer directory-dump shape
++// and the same --no-sandbox requirement (renderer file I/O is normally
++// sandbox-blocked, crbug.com/139640) -- but pulls the layer's
++// DisplayItemList's own PaintOpBuffer directly
++// (Layer::CapturePaintOpDisplayListForTesting(), which PictureLayer
++// implements via ContentLayerClient::PaintContentsToDisplayList())
++// instead of re-recording into an SkPicture.
++class PaintOpBufferDumper {
++ public:
++  explicit PaintOpBufferDumper(const base::FilePath& dirpath)
++      : dirpath_(dirpath), layer_id_(0) {}
++
++  void Serialize(const cc::Layer* root_layer) {
++    const cc::ScrollTree& scroll_tree =
++        root_layer->layer_tree_host()->property_trees()->scroll_tree();
++    for (auto* layer : *root_layer->layer_tree_host()) {
++      scoped_refptr<cc::DisplayItemList> display_list =
++          layer->CapturePaintOpDisplayListForTesting();
++      if (!display_list) {
++        continue;
++      }
++      SerializeLayer(*display_list, scroll_tree, layer->bounds(),
++                    layer_id_++);
++    }
++  }
++
++ private:
++  void SerializeLayer(const cc::DisplayItemList& display_list,
++                      const cc::ScrollTree& scroll_tree,
++                      const gfx::Size& bounds,
++                      int layer_id) {
++    // A real captured page can have scrollable subtrees (kDrawScrollingContents
++    // ops) whose offsets MUST be supplied at serialize time -- confirmed by
++    // an actual crash (cc/paint/paint_op_buffer_serializer.cc:287) when
++    // this was omitted. See SerializePaintOpBufferForCapture()'s own
++    // comment for why cc/paint can't build this map itself.
++    cc::ScrollOffsetMap raster_inducing_scroll_offsets;
++    for (auto& [element_id, unused] : display_list.raster_inducing_scrolls()) {
++      raster_inducing_scroll_offsets[element_id] =
++          scroll_tree.current_scroll_offset(element_id);
++    }
++
++    std::optional<cc::SerializedPaintOpBuffer> serialized =
++        cc::SerializePaintOpBufferForCapture(display_list.paint_op_buffer(),
++                                             &raster_inducing_scroll_offsets);
++    if (!serialized) {
++      DLOG(ERROR) << "AppSwap: PaintOpBuffer serialization failed for layer "
++                 << layer_id;
++      return;
++    }
++
++    WriteLayerFile(layer_id, "paintops", base::span(serialized->paintops));
++    WriteLayerFile(layer_id, "strikedata",
++                  base::span(serialized->strikedata));
++
++    // The .paintops bytes don't carry the layer's pixel dimensions, and
++    // there's no other source of truth for them once this leaves the
++    // browser -- write them alongside so paintop_disk_roundtrip_tool's
++    // --mode=read_capture can size its render target correctly without
++    // the caller having to separately measure/guess the layer's size.
++    std::string dims = base::NumberToString(bounds.width()) + " " +
++                       base::NumberToString(bounds.height()) + "\n";
++    WriteLayerFile(layer_id, "dims", base::as_byte_span(dims));
++  }
++
++  void WriteLayerFile(int layer_id,
++                      std::string_view suffix,
++                      base::span<const uint8_t> data) {
++    std::string filename =
++        "layer_" + base::NumberToString(layer_id) + "." + std::string(suffix);
++    base::FilePath path = dirpath_.AppendASCII(filename);
++    if (!base::WriteFile(path, data)) {
++      DLOG(ERROR) << "AppSwap: failed to write " << path;
++    }
++  }
++
++  base::FilePath dirpath_;
++  int layer_id_;
++};
++
+ template <typename T>
+ bool GetArg(gin::Arguments* args, T* value) {
+   if (!args->GetNext(value)) {
+@@ -645,6 +736,7 @@ gin::ObjectTemplateBuilder GpuBenchmarking::GetObjectTemplateBuilder(
+       .SetMethod("setRasterizeOnlyVisibleContent",
+                  &GpuBenchmarking::SetRasterizeOnlyVisibleContent)
+       .SetMethod("printToSkPicture", &GpuBenchmarking::PrintToSkPicture)
++      .SetMethod("dumpPaintOpBuffer", &GpuBenchmarking::DumpPaintOpBuffer)
+       .SetMethod("printPagesToSkPictures",
+                  &GpuBenchmarking::PrintPagesToSkPictures)
+       .SetMethod("printPagesToXPS", &GpuBenchmarking::PrintPagesToXPS)
+@@ -780,6 +872,29 @@ void GpuBenchmarking::PrintToSkPicture(v8::Isolate* isolate,
+   serializer.Serialize(root_layer);
+ }
+ 
++void GpuBenchmarking::DumpPaintOpBuffer(v8::Isolate* isolate,
++                                        const std::string& dirname) {
++  GpuBenchmarkingContext context(render_frame_.get());
++
++  const cc::Layer* root_layer = context.layer_tree_host()->root_layer();
++  if (!root_layer)
++    return;
++
++  base::FilePath dirpath = base::FilePath::FromUTF8Unsafe(dirname);
++  if (!base::CreateDirectory(dirpath) || !base::PathIsWritable(dirpath)) {
++    std::string msg("Path is not writable: ");
++    msg.append(dirpath.MaybeAsASCII());
++    isolate->ThrowException(v8::Exception::Error(
++        v8::String::NewFromUtf8(isolate, msg.c_str(),
++                                v8::NewStringType::kNormal, msg.length())
++            .ToLocalChecked()));
++    return;
++  }
++
++  PaintOpBufferDumper dumper(dirpath);
++  dumper.Serialize(root_layer);
++}
++
+ bool GpuBenchmarking::GestureSourceTypeSupported(int gesture_source_type) {
+   if (gesture_source_type < 0 ||
+       gesture_source_type >
+diff --git a/content/renderer/gpu_benchmarking_extension.h b/content/renderer/gpu_benchmarking_extension.h
+index efacc6b6790c7..688096c43335f 100644
+--- a/content/renderer/gpu_benchmarking_extension.h
++++ b/content/renderer/gpu_benchmarking_extension.h
+@@ -49,6 +49,12 @@ class GpuBenchmarking : public gin::Wrappable<GpuBenchmarking> {
+   void SetNeedsDisplayOnAllLayers();
+   void SetRasterizeOnlyVisibleContent();
+   void PrintToSkPicture(v8::Isolate* isolate, const std::string& dirname);
++  // AppSwap: session-recording feasibility research -- dumps each layer's
++  // real cc::PaintOpBuffer (serialized, plus any SkStrikeServer glyph
++  // data) to <dirname>/layer_N.paintops / .strikedata. Capture-to-disk
++  // only, no replay. See PrintToSkPicture just above for the identical
++  // --enable-gpu-benchmarking gating and --no-sandbox requirement.
++  void DumpPaintOpBuffer(v8::Isolate* isolate, const std::string& dirname);
+   void PrintPagesToSkPictures(v8::Isolate* isolate,
+                               const std::string& filename);
+   void PrintPagesToXPS(v8::Isolate* isolate, const std::string& filename);

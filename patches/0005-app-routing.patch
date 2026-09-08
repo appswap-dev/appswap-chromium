@@ -12,10 +12,10 @@ index 2a3958f78ddb6..4e6f3b49ffa24 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..ff5a0d28e24eb
+index 0000000000000..d6f27011ff4e5
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,103 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -50,8 +50,18 @@ index 0000000000000..ff5a0d28e24eb
 +    "app_swap_route_group_service.h",
 +    "app_swap_route_group_service_factory.cc",
 +    "app_swap_route_group_service_factory.h",
++    "app_swap_recordings_scanner.cc",
++    "app_swap_recordings_scanner.h",
 +    "app_swap_route_matcher.cc",
 +    "app_swap_route_matcher.h",
++    "app_swap_session_recording_paths.cc",
++    "app_swap_session_recording_paths.h",
++    "app_swap_session_recording_reader.cc",
++    "app_swap_session_recording_reader.h",
++    "app_swap_session_recording_tab_helper.cc",
++    "app_swap_session_recording_tab_helper.h",
++    "app_swap_session_recording_writer.cc",
++    "app_swap_session_recording_writer.h",
 +    "app_swap_source.h",
 +    "app_swap_update_available_tab_helper.cc",
 +    "app_swap_update_available_tab_helper.h",
@@ -67,6 +77,7 @@ index 0000000000000..ff5a0d28e24eb
 +
 +  deps = [
 +    "//base",
++    "//cc/paint",
 +    "//chrome/app/theme:theme_resources",
 +    "//chrome/browser:browser_process",
 +    "//chrome/browser/net",
@@ -74,6 +85,7 @@ index 0000000000000..ff5a0d28e24eb
 +    "//chrome/browser/sessions",
 +    "//chrome/browser/ui/browser_window",
 +    "//chrome/browser/ui/tabs",
++    "//chrome/services/app_swap_playback/public/mojom",
 +    "//components/keyed_service/core",
 +    "//components/prefs",
 +    "//components/sessions",
@@ -2639,7 +2651,7 @@ index dde051181fa13..9ac8b4e37ba27 100644
  
  void ChromeContentBrowserClient::AddExtraPart(
 diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
-index 17a9289e00ac8..de8b852c459c4 100644
+index 17a9289e00ac8..fc76c9beb72f8 100644
 --- a/chrome/browser/ui/webui/BUILD.gn
 +++ b/chrome/browser/ui/webui/BUILD.gn
 @@ -53,6 +53,7 @@ source_set("configs") {
@@ -2650,33 +2662,36 @@ index 17a9289e00ac8..de8b852c459c4 100644
      "//chrome/browser/actor/ui:actor_overlay",
      "//chrome/browser/contextual_tasks:ui",
      "//chrome/browser/glic",
-@@ -114,6 +115,8 @@ source_set("configs") {
+@@ -114,6 +115,9 @@ source_set("configs") {
        "//chrome/browser/actor/ui:actor_overlay_web_view",
        "//chrome/browser/ui/webui/access_code_cast",
        "//chrome/browser/ui/webui/app_service_internals",
 +      "//chrome/browser/ui/webui/app_swap_projects",
++      "//chrome/browser/ui/webui/app_swap_recordings",
 +      "//chrome/browser/ui/webui/app_swap_version_picker",
        "//chrome/browser/ui/webui/autofill_ml_internals",
        "//chrome/browser/ui/webui/color_pipeline_internals",
        "//chrome/browser/ui/webui/history",
 diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-index 7a947c092bfaf..01b55b0253cea 100644
+index 7a947c092bfaf..84f07e3babdec 100644
 --- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-@@ -13,6 +13,8 @@
+@@ -13,6 +13,9 @@
  #include "chrome/browser/optimization_guide/optimization_guide_internals_ui.h"
  #include "chrome/browser/ui/webui/about/about_ui.h"
  #include "chrome/browser/ui/webui/accessibility/accessibility_ui.h"
 +#include "chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.h"
++#include "chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings_ui.h"
 +#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h"
  #include "chrome/browser/ui/webui/actor_internals/actor_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/autofill_internals_ui.h"
  #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/password_manager_internals_ui.h"
-@@ -252,6 +254,8 @@ void RegisterChromeWebUIConfigs() {
+@@ -252,6 +255,9 @@ void RegisterChromeWebUIConfigs() {
  
    auto& map = content::WebUIConfigMap::GetInstance();
    map.AddWebUIConfig(std::make_unique<AccessibilityUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapProjectsUIConfig>());
++  map.AddWebUIConfig(std::make_unique<AppSwapRecordingsUIConfig>());
 +  map.AddWebUIConfig(std::make_unique<AppSwapVersionPickerUIConfig>());
    map.AddWebUIConfig(std::make_unique<AutofillInternalsUIConfig>());
    map.AddWebUIConfig(std::make_unique<BluetoothInternalsUIConfig>());

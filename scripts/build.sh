@@ -29,7 +29,7 @@ gn gen out/Release
 
 if [[ "$IS_WINDOWS" == "1" ]]; then
   echo "==> autoninja -C out/Release chrome mini_installer"
-  autoninja -C out/Release chrome mini_installer
+  autoninja -C out/Release chrome mini_installer paintop_disk_roundtrip_tool
 else
   echo "==> autoninja -C out/Release chrome"
   autoninja -j4 -C out/Release chrome

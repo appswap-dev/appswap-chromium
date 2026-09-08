@@ -1,0 +1,1069 @@
+diff --git a/chrome/browser/app_swap/app_swap_session_recording_reader.cc b/chrome/browser/app_swap/app_swap_session_recording_reader.cc
+new file mode 100644
+index 0000000000000..3a1b5f3de0139
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_session_recording_reader.cc
+@@ -0,0 +1,368 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_session_recording_reader.h"
++
++#include <array>
++#include <map>
++#include <optional>
++#include <string_view>
++#include <utility>
++
++#include "base/files/file.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/strings/string_split.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
++#include "base/values.h"
++#include "chrome/browser/app_swap/app_swap_session_recording_paths.h"
++// FrameBitmap lives in a separate mojom file/target from PlaybackRenderer
++// (see app_swap_playback_bitmap.mojom's own comment for why) -- the header
++// this file includes only forward-declares it, but OnFrameLayersRead()
++// below constructs a real FrameBitmapPtr value (Run(nullptr)), which needs
++// the complete type.
++#include "chrome/services/app_swap_playback/public/mojom/app_swap_playback_bitmap.mojom.h"
++#include "mojo/public/cpp/bindings/callback_helpers.h"
++#include "ui/gfx/geometry/rect_f.h"
++#include "ui/gfx/geometry/size_conversions.h"
++#include "ui/gfx/geometry/transform.h"
++
++namespace {
++
++// One layer record, fully parsed -- the read-side mirror of
++// AppSwapSessionRecordingWriter::BackgroundWriter::WriteFrame()'s record
++// layout (see that function's own comment for the field-by-field format).
++struct ParsedRecord {
++  uint32_t frame_index = 0;
++  int32_t layer_id = 0;
++  int64_t capture_time_ms = 0;
++  uint32_t width = 0;
++  uint32_t height = 0;
++  gfx::Transform transform;
++  std::vector<uint8_t> paintops;
++  std::vector<uint8_t> strikedata;
++  std::vector<uint8_t> imagedata;
++};
++
++std::optional<ParsedRecord> ParseRecordAt(base::File& file, int64_t offset) {
++  uint32_t record_len;
++  if (!file.ReadAndCheck(offset, base::byte_span_from_ref(record_len))) {
++    return std::nullopt;
++  }
++  int64_t pos = offset + sizeof(record_len);
++
++  ParsedRecord result;
++  uint32_t layer_id_u32;
++  std::array<double, 16> transform_col_major;
++  uint32_t paintops_len;
++  uint32_t strikedata_len;
++
++  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(result.frame_index))) {
++    return std::nullopt;
++  }
++  pos += sizeof(result.frame_index);
++
++  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(layer_id_u32))) {
++    return std::nullopt;
++  }
++  pos += sizeof(layer_id_u32);
++  result.layer_id = static_cast<int32_t>(layer_id_u32);
++
++  if (!file.ReadAndCheck(pos,
++                        base::byte_span_from_ref(result.capture_time_ms))) {
++    return std::nullopt;
++  }
++  pos += sizeof(result.capture_time_ms);
++
++  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(result.width))) {
++    return std::nullopt;
++  }
++  pos += sizeof(result.width);
++
++  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(result.height))) {
++    return std::nullopt;
++  }
++  pos += sizeof(result.height);
++
++  if (!file.ReadAndCheck(
++          pos, base::as_writable_byte_span(base::allow_nonunique_obj,
++                                          transform_col_major))) {
++    return std::nullopt;
++  }
++  pos += sizeof(transform_col_major);
++  result.transform = gfx::Transform::ColMajor(base::span(transform_col_major));
++
++  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(paintops_len))) {
++    return std::nullopt;
++  }
++  pos += sizeof(paintops_len);
++  result.paintops.resize(paintops_len);
++  if (!file.ReadAndCheck(pos, base::span(result.paintops))) {
++    return std::nullopt;
++  }
++  pos += paintops_len;
++
++  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(strikedata_len))) {
++    return std::nullopt;
++  }
++  pos += sizeof(strikedata_len);
++  result.strikedata.resize(strikedata_len);
++  if (!file.ReadAndCheck(pos, base::span(result.strikedata))) {
++    return std::nullopt;
++  }
++  pos += strikedata_len;
++
++  uint32_t imagedata_len;
++  if (!file.ReadAndCheck(pos, base::byte_span_from_ref(imagedata_len))) {
++    return std::nullopt;
++  }
++  pos += sizeof(imagedata_len);
++  result.imagedata.resize(imagedata_len);
++  if (!file.ReadAndCheck(pos, base::span(result.imagedata))) {
++    return std::nullopt;
++  }
++
++  return result;
++}
++
++std::vector<AppSwapSessionRecordingReader::NavigationEvent>
++ParseNavigationsFile(const base::FilePath& path) {
++  std::vector<AppSwapSessionRecordingReader::NavigationEvent> result;
++  std::string contents;
++  if (!base::ReadFileToString(path, &contents)) {
++    return result;
++  }
++  for (std::string_view line : base::SplitStringPiece(
++           contents, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    std::optional<base::DictValue> entry = base::JSONReader::ReadDict(
++        line, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
++    if (!entry) {
++      continue;
++    }
++    AppSwapSessionRecordingReader::NavigationEvent event;
++    if (std::optional<double> time_ms = entry->FindDouble("time_ms")) {
++      event.time_ms = static_cast<int64_t>(*time_ms);
++    }
++    if (const std::string* url = entry->FindString("url")) {
++      event.url = *url;
++    }
++    if (const std::string* package_name = entry->FindString("package_name")) {
++      event.package_name = *package_name;
++    }
++    if (const std::string* version = entry->FindString("version")) {
++      event.version = *version;
++    }
++    result.push_back(std::move(event));
++  }
++  return result;
++}
++
++}  // namespace
++
++AppSwapSessionRecordingReader::IndexResult::IndexResult() = default;
++AppSwapSessionRecordingReader::IndexResult::IndexResult(IndexResult&&) =
++    default;
++AppSwapSessionRecordingReader::IndexResult&
++AppSwapSessionRecordingReader::IndexResult::operator=(IndexResult&&) =
++    default;
++AppSwapSessionRecordingReader::IndexResult::~IndexResult() = default;
++
++AppSwapSessionRecordingReader::ReadFrameResult::ReadFrameResult() = default;
++AppSwapSessionRecordingReader::ReadFrameResult::ReadFrameResult(
++    ReadFrameResult&&) = default;
++AppSwapSessionRecordingReader::ReadFrameResult&
++AppSwapSessionRecordingReader::ReadFrameResult::operator=(ReadFrameResult&&) =
++    default;
++AppSwapSessionRecordingReader::ReadFrameResult::~ReadFrameResult() = default;
++
++AppSwapSessionRecordingReader::AppSwapSessionRecordingReader(
++    const base::FilePath& session_dir,
++    app_swap_playback::mojom::PlaybackRenderer* playback_service)
++    : session_dir_(session_dir),
++      playback_service_(playback_service),
++      task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
++          {base::MayBlock(), base::TaskPriority::USER_VISIBLE})) {}
++
++AppSwapSessionRecordingReader::~AppSwapSessionRecordingReader() = default;
++
++// static
++AppSwapSessionRecordingReader::IndexResult
++AppSwapSessionRecordingReader::BuildIndex(const base::FilePath& session_dir) {
++  IndexResult result;
++  if (!base::DirectoryExists(session_dir)) {
++    result.success = false;
++    return result;
++  }
++
++  // Ordered by frame_index -- see paint_op_recording.mojom's OnPaintOpFrame
++  // comment: it's a simple counter incremented once per commit, shared by
++  // every layer of that commit, never reset for the lifetime of one
++  // recording (so it's unique and monotonic within this one session even
++  // though it may not start at 0).
++  std::map<uint32_t, IndexedFrame> frames_by_index;
++
++  for (int segment_index = 0;; ++segment_index) {
++    base::FilePath segment_path =
++        GetAppSwapRecordingSegmentPath(session_dir, segment_index);
++    if (!base::PathExists(segment_path)) {
++      break;
++    }
++    base::File file(segment_path,
++                    base::File::FLAG_OPEN | base::File::FLAG_READ);
++    if (!file.IsValid()) {
++      break;
++    }
++
++    int64_t file_length = file.GetLength();
++    int64_t offset = 0;
++    while (offset < file_length) {
++      // Indexing only ever reads this fixed 16-byte header -- frame_index
++      // and capture_time_ms -- never the paintops/strikedata payload, so
++      // Index() stays cheap (offsets, not payloads) even for a long
++      // recording. record_len is what lets this skip straight to the next
++      // record without decoding anything in between.
++      uint32_t record_len;
++      if (!file.ReadAndCheck(offset, base::byte_span_from_ref(record_len))) {
++        break;
++      }
++      int64_t header_offset = offset + sizeof(record_len);
++      uint32_t frame_index;
++      uint32_t layer_id_unused;
++      int64_t capture_time_ms;
++      if (!file.ReadAndCheck(header_offset,
++                            base::byte_span_from_ref(frame_index)) ||
++          !file.ReadAndCheck(header_offset + sizeof(frame_index),
++                            base::byte_span_from_ref(layer_id_unused)) ||
++          !file.ReadAndCheck(
++              header_offset + sizeof(frame_index) + sizeof(layer_id_unused),
++              base::byte_span_from_ref(capture_time_ms))) {
++        break;
++      }
++
++      IndexedFrame& frame = frames_by_index[frame_index];
++      if (frame.layers.empty()) {
++        frame.capture_time_ms = capture_time_ms;
++      }
++      frame.layers.push_back({segment_index, offset});
++
++      offset += static_cast<int64_t>(sizeof(record_len)) + record_len;
++    }
++  }
++
++  result.frames.reserve(frames_by_index.size());
++  for (auto& entry : frames_by_index) {
++    result.frames.push_back(std::move(entry.second));
++  }
++  result.navigations =
++      ParseNavigationsFile(GetAppSwapRecordingNavigationsPath(session_dir));
++  result.success = true;
++  return result;
++}
++
++void AppSwapSessionRecordingReader::Index(IndexCallback callback) {
++  task_runner_->PostTaskAndReplyWithResult(
++      FROM_HERE, base::BindOnce(&BuildIndex, session_dir_),
++      base::BindOnce(&AppSwapSessionRecordingReader::OnIndexed,
++                     weak_factory_.GetWeakPtr(), std::move(callback)));
++}
++
++void AppSwapSessionRecordingReader::OnIndexed(IndexCallback callback,
++                                              IndexResult result) {
++  bool success = result.success;
++  std::vector<NavigationEvent> navigations = std::move(result.navigations);
++  frames_ = std::move(result.frames);
++
++  std::vector<int64_t> frame_timestamps_ms;
++  frame_timestamps_ms.reserve(frames_.size());
++  for (const IndexedFrame& frame : frames_) {
++    frame_timestamps_ms.push_back(frame.capture_time_ms);
++  }
++  std::move(callback).Run(success, std::move(frame_timestamps_ms),
++                          std::move(navigations));
++}
++
++// static
++AppSwapSessionRecordingReader::ReadFrameResult
++AppSwapSessionRecordingReader::ReadFrameLayers(
++    const base::FilePath& session_dir,
++    IndexedFrame frame) {
++  ReadFrameResult result;
++  gfx::RectF bounds;
++
++  int cached_segment_index = -1;
++  base::File cached_file;
++
++  for (const LayerRecordLocation& location : frame.layers) {
++    if (location.segment_index != cached_segment_index) {
++      cached_file = base::File(
++          GetAppSwapRecordingSegmentPath(session_dir, location.segment_index),
++          base::File::FLAG_OPEN | base::File::FLAG_READ);
++      cached_segment_index = location.segment_index;
++    }
++    if (!cached_file.IsValid()) {
++      continue;
++    }
++
++    std::optional<ParsedRecord> parsed =
++        ParseRecordAt(cached_file, location.record_offset);
++    if (!parsed) {
++      continue;
++    }
++
++    bounds.Union(parsed->transform.MapRect(
++        gfx::RectF(0, 0, parsed->width, parsed->height)));
++
++    auto layer_frame = app_swap_playback::mojom::LayerFrame::New();
++    layer_frame->paintops = std::move(parsed->paintops);
++    layer_frame->strikedata = std::move(parsed->strikedata);
++    layer_frame->imagedata = std::move(parsed->imagedata);
++    layer_frame->width = parsed->width;
++    layer_frame->height = parsed->height;
++    layer_frame->transform = parsed->transform;
++    result.layers.push_back(std::move(layer_frame));
++  }
++
++  // Ignores a non-zero bounds origin (a disclosed simplification -- see
++  // this reader's own header comment and the player plan's "Disclosed
++  // simplifications" section): real captured pages start their root layer
++  // at the origin, so this only matters for exotic content.
++  result.viewport_size = gfx::ToCeiledSize(bounds.size());
++  return result;
++}
++
++void AppSwapSessionRecordingReader::RenderFrame(uint32_t frame_ordinal,
++                                                RenderFrameCallback callback) {
++  if (frame_ordinal >= frames_.size()) {
++    std::move(callback).Run(nullptr);
++    return;
++  }
++  task_runner_->PostTaskAndReplyWithResult(
++      FROM_HERE,
++      base::BindOnce(&ReadFrameLayers, session_dir_, frames_[frame_ordinal]),
++      base::BindOnce(&AppSwapSessionRecordingReader::OnFrameLayersRead,
++                     weak_factory_.GetWeakPtr(), std::move(callback)));
++}
++
++void AppSwapSessionRecordingReader::OnFrameLayersRead(
++    RenderFrameCallback callback,
++    ReadFrameResult result) {
++  if (result.layers.empty()) {
++    std::move(callback).Run(nullptr);
++    return;
++  }
++  // The playback service is a separate child process and can die mid-
++  // request (e.g. running out of memory rendering a frame with many large
++  // images) -- when its end of the pipe drops, mojo destroys this pending
++  // response callback without running it, which is a DCHECK/fatal
++  // ("response callback was destroyed without first either being run or
++  // its corresponding binding being closed"), confirmed by actually
++  // hitting it. Wrapping ensures a dying service fails this one frame
++  // (null bitmap) instead of crashing the browser process.
++  playback_service_->RenderFrame(
++      std::move(result.layers), result.viewport_size,
++      mojo::WrapCallbackWithDefaultInvokeIfNotRun(std::move(callback),
++                                                  nullptr));
++}
+diff --git a/chrome/browser/app_swap/app_swap_session_recording_reader.h b/chrome/browser/app_swap/app_swap_session_recording_reader.h
+new file mode 100644
+index 0000000000000..f7c74dd5be550
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_session_recording_reader.h
+@@ -0,0 +1,135 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_READER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_READER_H_
++
++#include <cstdint>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/functional/callback.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/task/sequenced_task_runner.h"
++#include "chrome/services/app_swap_playback/public/mojom/app_swap_playback.mojom.h"
++#include "ui/gfx/geometry/size.h"
++
++// Reads back one session recording written by AppSwapSessionRecordingWriter
++// for playback: builds a lightweight index of where each captured commit's
++// layer records live on disk (Index()), then re-reads and renders one
++// commit at a time on demand (RenderFrame()) -- so scrubbing through a long
++// recording never requires decoding every frame before the one actually
++// being displayed.
++//
++// All disk I/O runs on a dedicated SequencedTaskRunner (mirroring
++// AppSwapSessionRecordingWriter's own threading convention). `this` must
++// outlive every in-flight callback; both Index() and RenderFrame() are
++// safe to call only while a previous call of the same method isn't still
++// pending (the intended caller, AppSwapRecordingsPageHandler, only ever
++// has one recording open and one frame request in flight at a time).
++class AppSwapSessionRecordingReader {
++ public:
++  // One entry from navigations.jsonl (see AppSwapSessionRecordingWriter::
++  // WriteNavigation()) -- `package_name`/`version` are both empty for a
++  // plain, non-AppSwap-routed page.
++  struct NavigationEvent {
++    int64_t time_ms = 0;
++    std::string url;
++    std::string package_name;
++    std::string version;
++  };
++
++  // `playback_service` must outlive this reader (and every callback it's
++  // given) -- owned by whoever constructs this reader, typically
++  // AppSwapRecordingsPageHandler's lazily-launched
++  // mojo::Remote<PlaybackRenderer>.
++  AppSwapSessionRecordingReader(
++      const base::FilePath& session_dir,
++      app_swap_playback::mojom::PlaybackRenderer* playback_service);
++  ~AppSwapSessionRecordingReader();
++
++  AppSwapSessionRecordingReader(const AppSwapSessionRecordingReader&) =
++      delete;
++  AppSwapSessionRecordingReader& operator=(
++      const AppSwapSessionRecordingReader&) = delete;
++
++  // Scans every segment file once and builds the in-memory frame index.
++  // `success` is false if the session directory couldn't be read at all;
++  // an otherwise-empty recording (e.g. stopped immediately) is still a
++  // successful, zero-frame Index().
++  using IndexCallback =
++      base::OnceCallback<void(bool success,
++                              std::vector<int64_t> frame_timestamps_ms,
++                              std::vector<NavigationEvent> navigations)>;
++  void Index(IndexCallback callback);
++
++  // Renders the frame at `frame_ordinal` (an index into the
++  // frame_timestamps_ms Index() returned) and returns the composited
++  // bitmap, or null on any failure (out-of-range ordinal, a disk read
++  // error, or the playback service itself failing to render). Must be
++  // called only after Index() has completed successfully.
++  using RenderFrameCallback =
++      base::OnceCallback<void(app_swap_playback::mojom::FrameBitmapPtr)>;
++  void RenderFrame(uint32_t frame_ordinal, RenderFrameCallback callback);
++
++ private:
++  // Where one layer's full record lives in one segment file -- enough to
++  // re-read and fully parse it later without re-scanning from the start.
++  struct LayerRecordLocation {
++    int segment_index = 0;
++    int64_t record_offset = 0;  // offset of the record's own length prefix
++  };
++
++  struct IndexedFrame {
++    int64_t capture_time_ms = 0;
++    std::vector<LayerRecordLocation> layers;  // already in draw order
++  };
++
++  struct IndexResult {
++    IndexResult();
++    IndexResult(IndexResult&&);
++    IndexResult& operator=(IndexResult&&);
++    ~IndexResult();
++
++    bool success = false;
++    std::vector<IndexedFrame> frames;  // sorted by frame_index
++    std::vector<NavigationEvent> navigations;
++  };
++
++  // Runs on task_runner_.
++  static IndexResult BuildIndex(const base::FilePath& session_dir);
++  void OnIndexed(IndexCallback callback, IndexResult result);
++
++  // Runs on task_runner_. Reads and fully parses every layer record for
++  // one frame, computing that frame's composite viewport size (the union
++  // bounding box of each layer's transformed bounds) along the way.
++  struct ReadFrameResult {
++    ReadFrameResult();
++    ReadFrameResult(ReadFrameResult&&);
++    ReadFrameResult& operator=(ReadFrameResult&&);
++    ~ReadFrameResult();
++
++    std::vector<app_swap_playback::mojom::LayerFramePtr> layers;
++    gfx::Size viewport_size;
++  };
++  static ReadFrameResult ReadFrameLayers(const base::FilePath& session_dir,
++                                        IndexedFrame frame);
++  void OnFrameLayersRead(RenderFrameCallback callback,
++                        ReadFrameResult result);
++
++  base::FilePath session_dir_;
++  raw_ptr<app_swap_playback::mojom::PlaybackRenderer> playback_service_;
++  scoped_refptr<base::SequencedTaskRunner> task_runner_;
++
++  // Populated once Index() completes; empty (and unused) before that.
++  std::vector<IndexedFrame> frames_;
++
++  base::WeakPtrFactory<AppSwapSessionRecordingReader> weak_factory_{this};
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_READER_H_
+diff --git a/chrome/services/app_swap_playback/BUILD.gn b/chrome/services/app_swap_playback/BUILD.gn
+new file mode 100644
+index 0000000000000..1ee39868f2b22
+--- /dev/null
++++ b/chrome/services/app_swap_playback/BUILD.gn
+@@ -0,0 +1,29 @@
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++source_set("lib") {
++  sources = [
++    "app_swap_playback_service.cc",
++    "app_swap_playback_service.h",
++  ]
++
++  configs += [ "//build/config/compiler:wexit_time_destructors" ]
++
++  public_deps = [
++    "//base",
++    "//cc/paint",
++    "//chrome/services/app_swap_playback/public/mojom",
++    "//mojo/public/cpp/base",
++    "//mojo/public/cpp/bindings",
++    "//skia",
++
++    # NOT just "//ui/gfx/geometry" (that label resolves to the ":geometry"
++    # target, which does NOT include transform.h/skia_conversions.h --
++    # those live in the separate ":geometry_skia" target in the same
++    # BUILD.gn, see ui/gfx/geometry/BUILD.gn).
++    "//ui/gfx/geometry:geometry_skia",
++    "//ui/gl",
++    "//ui/gl/init",
++  ]
++}
+diff --git a/chrome/services/app_swap_playback/app_swap_playback_service.cc b/chrome/services/app_swap_playback/app_swap_playback_service.cc
+new file mode 100644
+index 0000000000000..fbd1227663ae3
+--- /dev/null
++++ b/chrome/services/app_swap_playback/app_swap_playback_service.cc
+@@ -0,0 +1,241 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/services/app_swap_playback/app_swap_playback_service.h"
++
++#include <utility>
++
++#include <map>
++#include <memory>
++
++#include "base/compiler_specific.h"
++#include "base/containers/span.h"
++#include "cc/paint/image_transfer_cache_entry.h"
++#include "cc/paint/paint_op_buffer.h"
++#include "cc/paint/paint_op_capture_serializer.h"
++#include "cc/paint/transfer_cache_deserialize_helper.h"
++#include "cc/paint/transfer_cache_entry.h"
++#include "chrome/services/app_swap_playback/public/mojom/app_swap_playback_bitmap.mojom.h"
++#include "mojo/public/cpp/base/big_buffer.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "third_party/skia/include/core/SkCanvas.h"
++#include "third_party/skia/include/core/SkImageInfo.h"
++#include "third_party/skia/include/core/SkSurface.h"
++#include "third_party/skia/include/gpu/GpuTypes.h"
++#include "third_party/skia/include/gpu/ganesh/SkSurfaceGanesh.h"
++#include "third_party/skia/include/gpu/ganesh/gl/GrGLDirectContext.h"
++#include "third_party/skia/include/gpu/ganesh/gl/GrGLInterface.h"
++#include "ui/gfx/geometry/skia_conversions.h"
++#include "ui/gl/gl_context.h"
++#include "ui/gl/gl_surface.h"
++#include "ui/gl/gl_version_info.h"
++#include "ui/gl/gpu_preference.h"
++#include "ui/gl/init/create_gr_gl_interface.h"
++#include "ui/gl/init/gl_factory.h"
++
++namespace {
++
++// Parses one layer's `imagedata` blob (see cc/paint/
++// paint_op_capture_serializer.h's SerializedPaintOpBuffer comment for the
++// [count][id,len,bytes]* format RealImageProvider produces at capture
++// time) and serves the resulting cc::ServiceImageTransferCacheEntry
++// instances back out through the TransferCacheDeserializeHelper interface
++// PaintOpReader expects. Constructed fresh per layer, matching this whole
++// pipeline's "one buffer, one deserialize pass, nothing persisted across
++// calls" convention (same as NullTransferCacheDeserializeHelper in
++// cc/paint/paint_op_capture_serializer.cc, which this replaces here).
++// Deserialize() needs a live GrDirectContext -- this service is the only
++// point downstream of capture that has one.
++class PlaybackTransferCacheDeserializeHelper
++    : public cc::TransferCacheDeserializeHelper {
++ public:
++  PlaybackTransferCacheDeserializeHelper(base::span<const uint8_t> imagedata,
++                                         GrDirectContext* gr_context) {
++    size_t pos = 0;
++    if (imagedata.size() < sizeof(uint32_t)) {
++      return;
++    }
++    uint32_t count;
++    base::byte_span_from_ref(count).copy_from(
++        imagedata.subspan(pos, sizeof(count)));
++    pos += sizeof(count);
++
++    for (uint32_t i = 0; i < count; ++i) {
++      if (imagedata.size() - pos < 2 * sizeof(uint32_t)) {
++        break;
++      }
++      uint32_t id;
++      base::byte_span_from_ref(id).copy_from(
++          imagedata.subspan(pos, sizeof(id)));
++      pos += sizeof(id);
++      uint32_t len;
++      base::byte_span_from_ref(len).copy_from(
++          imagedata.subspan(pos, sizeof(len)));
++      pos += sizeof(len);
++      if (imagedata.size() - pos < len) {
++        break;
++      }
++      base::span<const uint8_t> entry_bytes = imagedata.subspan(pos, len);
++      pos += len;
++
++      auto entry = std::make_unique<cc::ServiceImageTransferCacheEntry>();
++      if (entry->Deserialize(gr_context, /*graphite_recorder=*/nullptr,
++                             entry_bytes)) {
++        entries_[id] = std::move(entry);
++      }
++    }
++  }
++
++  // cc::TransferCacheDeserializeHelper:
++  void CreateLocalEntry(
++      uint32_t id,
++      std::unique_ptr<cc::ServiceTransferCacheEntry> entry) override {
++    entries_[id] = std::move(entry);
++  }
++
++ private:
++  cc::ServiceTransferCacheEntry* GetEntryInternal(
++      cc::TransferCacheEntryType type,
++      uint32_t id) override {
++    auto it = entries_.find(id);
++    if (it == entries_.end() || it->second->Type() != type) {
++      return nullptr;
++    }
++    return it->second.get();
++  }
++
++  std::map<uint32_t, std::unique_ptr<cc::ServiceTransferCacheEntry>>
++      entries_;
++};
++
++}  // namespace
++
++AppSwapPlaybackService::AppSwapPlaybackService(
++    mojo::PendingReceiver<app_swap_playback::mojom::PlaybackRenderer>
++        receiver)
++    : receiver_(this, std::move(receiver)) {}
++
++AppSwapPlaybackService::~AppSwapPlaybackService() = default;
++
++bool AppSwapPlaybackService::EnsureGaneshInitialized() {
++  if (gr_context_) {
++    return true;
++  }
++  if (ganesh_init_failed_) {
++    return false;
++  }
++
++  // Mirrors cc/paint/paintop_disk_roundtrip_tool.cc's
++  // RenderBitmapWithGanesh() -- see this class's header comment for why
++  // this is safe here (a fresh, dedicated process per launch) even though
++  // InitializeGLOneOff() is a one-shot-per-process operation elsewhere.
++  // The offscreen surface here is a fixed 1x1 dummy just to satisfy
++  // context creation -- actual rendering always happens on a separate,
++  // per-RenderFrame() SkSurface sized to that frame's own viewport.
++  gl::GLDisplay* display =
++      gl::init::InitializeGLOneOff(gl::GpuPreference::kDefault);
++  if (!display) {
++    ganesh_init_failed_ = true;
++    return false;
++  }
++
++  gl_surface_ = gl::init::CreateOffscreenGLSurface(display, gfx::Size(1, 1));
++  if (!gl_surface_) {
++    ganesh_init_failed_ = true;
++    return false;
++  }
++
++  gl_context_ = gl::init::CreateGLContext(
++      /*share_group=*/nullptr, gl_surface_.get(), gl::GLContextAttribs());
++  if (!gl_context_ || !gl_context_->MakeCurrent(gl_surface_.get())) {
++    ganesh_init_failed_ = true;
++    return false;
++  }
++
++  const gl::GLVersionInfo* version_info = gl_context_->GetVersionInfo();
++  if (!version_info) {
++    ganesh_init_failed_ = true;
++    return false;
++  }
++  sk_sp<GrGLInterface> gl_interface =
++      gl::init::CreateGrGLInterface(*version_info);
++  if (!gl_interface) {
++    ganesh_init_failed_ = true;
++    return false;
++  }
++
++  gr_context_ = GrDirectContexts::MakeGL(std::move(gl_interface));
++  if (!gr_context_) {
++    ganesh_init_failed_ = true;
++    return false;
++  }
++  return true;
++}
++
++void AppSwapPlaybackService::RenderFrame(
++    std::vector<app_swap_playback::mojom::LayerFramePtr> layers,
++    const gfx::Size& viewport_size,
++    RenderFrameCallback callback) {
++  if (viewport_size.IsEmpty() || !EnsureGaneshInitialized()) {
++    std::move(callback).Run(nullptr);
++    return;
++  }
++
++  sk_sp<SkSurface> surface = SkSurfaces::RenderTarget(
++      gr_context_.get(), skgpu::Budgeted::kNo,
++      SkImageInfo::MakeN32Premul(viewport_size.width(),
++                                 viewport_size.height()));
++  if (!surface) {
++    std::move(callback).Run(nullptr);
++    return;
++  }
++
++  // Flat painter's-algorithm composite: each layer is already in draw
++  // order (see paint_op_recording.mojom's OnPaintOpFrame comment), so
++  // simply playing them back in array order, each positioned by its own
++  // transform, reproduces correct position and stacking -- see
++  // app_swap_playback.mojom's own comment for the known limitation this
++  // doesn't handle (no per-layer clip against siblings, no effect-tree
++  // opacity/blend modes).
++  SkCanvas* canvas = surface->getCanvas();
++  canvas->clear(SK_ColorWHITE);
++  for (const auto& layer : layers) {
++    PlaybackTransferCacheDeserializeHelper transfer_cache_helper(
++        base::span(layer->imagedata), gr_context_.get());
++    sk_sp<cc::PaintOpBuffer> buffer = cc::DeserializePaintOpBufferForPlayback(
++        base::span(layer->paintops), base::span(layer->strikedata),
++        &transfer_cache_helper);
++    if (!buffer) {
++      continue;
++    }
++    canvas->save();
++    canvas->concat(gfx::TransformToSkM44(layer->transform));
++    buffer->Playback(canvas);
++    canvas->restore();
++  }
++
++  // Read back directly as RGBA8/unpremultiplied -- Skia converts during
++  // readPixels() -- so the bytes land in exactly the layout the web
++  // platform's ImageData constructor expects, with no manual
++  // channel-swizzling step on the WebUI side.
++  SkBitmap bitmap;
++  bitmap.allocPixels(SkImageInfo::Make(
++      viewport_size.width(), viewport_size.height(), kRGBA_8888_SkColorType,
++      kUnpremul_SkAlphaType));
++  if (!surface->readPixels(bitmap, 0, 0)) {
++    std::move(callback).Run(nullptr);
++    return;
++  }
++
++  auto result = app_swap_playback::mojom::FrameBitmap::New();
++  result->rgba_pixels = mojo_base::BigBuffer(
++      // SAFETY: `bitmap` was just allocated above with
++      // allocPixels(SkImageInfo::Make(viewport_size...)) and readPixels()
++      // into it succeeded, so getPixels() is a valid pointer to at least
++      // computeByteSize() bytes.
++      UNSAFE_BUFFERS(base::span(static_cast<const uint8_t*>(bitmap.getPixels()),
++                                bitmap.computeByteSize())));
++  result->size = viewport_size;
++  std::move(callback).Run(std::move(result));
++}
+diff --git a/chrome/services/app_swap_playback/app_swap_playback_service.h b/chrome/services/app_swap_playback/app_swap_playback_service.h
+new file mode 100644
+index 0000000000000..53ab379ca3578
+--- /dev/null
++++ b/chrome/services/app_swap_playback/app_swap_playback_service.h
+@@ -0,0 +1,65 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_SERVICES_APP_SWAP_PLAYBACK_APP_SWAP_PLAYBACK_SERVICE_H_
++#define CHROME_SERVICES_APP_SWAP_PLAYBACK_APP_SWAP_PLAYBACK_SERVICE_H_
++
++#include <vector>
++
++#include "base/memory/scoped_refptr.h"
++#include "chrome/services/app_swap_playback/public/mojom/app_swap_playback.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++#include "third_party/skia/include/core/SkRefCnt.h"
++#include "third_party/skia/include/gpu/ganesh/GrDirectContext.h"
++#include "ui/gfx/geometry/size.h"
++
++namespace gl {
++class GLContext;
++class GLSurface;
++}  // namespace gl
++
++// AppSwap session recording playback (see app_swap_playback.mojom's own
++// design note for the full "why a separate process" reasoning). Lives in
++// its own child process, launched fresh on demand -- so
++// gl::init::InitializeGLOneOff()'s one-shot-per-process constraint is
++// satisfied naturally, and EnsureGaneshInitialized() only ever runs it
++// once per instance of this class (once per launch).
++class AppSwapPlaybackService : public app_swap_playback::mojom::PlaybackRenderer {
++ public:
++  explicit AppSwapPlaybackService(
++      mojo::PendingReceiver<app_swap_playback::mojom::PlaybackRenderer>
++          receiver);
++
++  AppSwapPlaybackService(const AppSwapPlaybackService&) = delete;
++  AppSwapPlaybackService& operator=(const AppSwapPlaybackService&) = delete;
++
++  ~AppSwapPlaybackService() override;
++
++ private:
++  // app_swap_playback::mojom::PlaybackRenderer:
++  void RenderFrame(std::vector<app_swap_playback::mojom::LayerFramePtr> layers,
++                   const gfx::Size& viewport_size,
++                   RenderFrameCallback callback) override;
++
++  // Stands up a GL/Ganesh context the first time it's called; a cheap
++  // no-op (returns the cached result) on every call after the first. See
++  // cc/paint/paintop_disk_roundtrip_tool.cc's RenderBitmapWithGanesh() --
++  // this mirrors that sequence, minus the per-call offscreen surface
++  // (this keeps one GrDirectContext alive across many RenderFrame() calls
++  // instead of tearing GL down and back up every time; the actual render
++  // target is a fresh SkSurface sized to each frame's own viewport,
++  // created per call in RenderFrame() itself since viewport size can
++  // change between calls -- e.g. the recorded window was resized).
++  bool EnsureGaneshInitialized();
++
++  scoped_refptr<gl::GLSurface> gl_surface_;
++  scoped_refptr<gl::GLContext> gl_context_;
++  sk_sp<GrDirectContext> gr_context_;
++  bool ganesh_init_failed_ = false;
++
++  mojo::Receiver<app_swap_playback::mojom::PlaybackRenderer> receiver_;
++};
++
++#endif  // CHROME_SERVICES_APP_SWAP_PLAYBACK_APP_SWAP_PLAYBACK_SERVICE_H_
+diff --git a/chrome/services/app_swap_playback/public/mojom/BUILD.gn b/chrome/services/app_swap_playback/public/mojom/BUILD.gn
+new file mode 100644
+index 0000000000000..d3adbb5704bd3
+--- /dev/null
++++ b/chrome/services/app_swap_playback/public/mojom/BUILD.gn
+@@ -0,0 +1,47 @@
++# Copyright 2026 The AppSwap Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//mojo/public/tools/bindings/mojom.gni")
++
++# Native-only (browser <-> the playback service child process): the
++# PlaybackRenderer interface and LayerFrame, which uses gfx.mojom.Transform.
++# Deliberately NOT webui_module_path -- that type has no WebUI/TS bindings
++# configured, and the WebUI side never touches LayerFrame/PlaybackRenderer
++# directly anyway (only FrameBitmap, in the separate :bitmap_mojom target
++# below). See app_swap_playback_bitmap.mojom's own comment for the full
++# reasoning -- confirmed by actually hitting the TS generator's
++# "No WebUI bindings found for dependency ... transform.mojom" failure when
++# this was all one target.
++mojom("mojom") {
++  sources = [ "app_swap_playback.mojom" ]
++
++  # This interface only ever crosses between two native processes (the
++  # browser's page handler/reader and the playback service) -- nothing here
++  # is consumed from JS/TS (only :bitmap_mojom's FrameBitmap is). Without
++  # this, mojom.gni's auto-generated legacy-JS group for this target tries
++  # to depend on ":bitmap_mojom_js", which doesn't exist because
++  # :bitmap_mojom's webui_module_path skips legacy JS generation entirely --
++  # confirmed by hitting exactly that "Unresolved dependencies" error.
++  cpp_only = true
++
++  public_deps = [
++    ":bitmap_mojom",
++    "//sandbox/policy/mojom",
++    "//ui/gfx/geometry/mojom",
++    "//ui/gfx/mojom",
++  ]
++}
++
++# WebUI-facing: just FrameBitmap, imported by
++# chrome/browser/ui/webui/app_swap_recordings/app_swap_recordings.mojom.
++mojom("bitmap_mojom") {
++  sources = [ "app_swap_playback_bitmap.mojom" ]
++
++  webui_module_path = "/"
++
++  public_deps = [
++    "//mojo/public/mojom/base",
++    "//ui/gfx/geometry/mojom",
++  ]
++}
+diff --git a/chrome/services/app_swap_playback/public/mojom/app_swap_playback.mojom b/chrome/services/app_swap_playback/public/mojom/app_swap_playback.mojom
+new file mode 100644
+index 0000000000000..5c844c3239229
+--- /dev/null
++++ b/chrome/services/app_swap_playback/public/mojom/app_swap_playback.mojom
+@@ -0,0 +1,56 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++module app_swap_playback.mojom;
++
++import "chrome/services/app_swap_playback/public/mojom/app_swap_playback_bitmap.mojom";
++import "sandbox/policy/mojom/sandbox.mojom";
++import "ui/gfx/geometry/mojom/geometry.mojom";
++import "ui/gfx/mojom/transform.mojom";
++
++// One layer's captured content for a single commit -- see
++// cc/paint/paint_op_capture_serializer.h for what `paintops`/`strikedata`/
++// `imagedata` contain (the output of SerializePaintOpBufferForCapture()).
++// Native-only (browser <-> this service) -- see
++// app_swap_playback_bitmap.mojom's own comment for why FrameBitmap had to
++// move out to a separate file/target.
++struct LayerFrame {
++  array<uint8> paintops;
++  array<uint8> strikedata;
++  array<uint8> imagedata;
++  uint32 width;
++  uint32 height;
++  gfx.mojom.Transform transform;
++};
++
++// AppSwap session recording playback: renders one captured commit's worth
++// of layers back into a single composited bitmap. Runs in its own,
++// separate child process (launched on demand via
++// content::ServiceProcessHost::Launch<PlaybackRenderer>()) rather than the
++// browser or the real GPU process, because rendering needs a real Ganesh
++// (GPU) canvas -- captured text round-trips as DrawSlugOp, which only
++// Ganesh/Graphite SkDevices implement -- and standing up a Ganesh context
++// via gl::init::InitializeGLOneOff() is a one-shot-per-process operation
++// that can't be repeated inside a process that's already initialized GL
++// for some other purpose. See cc/paint/paintop_disk_roundtrip_tool.cc's
++// RenderBitmapWithGanesh(), which already proves this exact technique in a
++// standalone tool; this service reuses that sequence almost verbatim,
++// satisfying its one-shot constraint naturally since this is always a
++// fresh process per launch.
++//
++// [ServiceSandbox=kNoSandbox] is a disclosed first-pass simplification --
++// full browser-equivalent rights, not a dedicated GPU-equivalent sandbox
++// (see e.g. sandbox.mojom.Sandbox.kOnDeviceModelExecution /
++// kWebNNModelCompilation for what that would look like). Defining a new
++// sandbox type means touching per-platform policy files, real hardening
++// follow-up work that isn't needed to get a working player.
++[ServiceSandbox=sandbox.mojom.Sandbox.kNoSandbox]
++interface PlaybackRenderer {
++  // Composites `layers` (already in draw order) onto one
++  // `viewport_size`-sized canvas, each positioned by its own `transform`,
++  // and returns the result. Returns a null `bitmap` if rendering fails
++  // (e.g. no usable GPU on this machine, or a malformed layer).
++  RenderFrame(array<LayerFrame> layers, gfx.mojom.Size viewport_size)
++      => (FrameBitmap? bitmap);
++};
+diff --git a/chrome/services/app_swap_playback/public/mojom/app_swap_playback_bitmap.mojom b/chrome/services/app_swap_playback/public/mojom/app_swap_playback_bitmap.mojom
+new file mode 100644
+index 0000000000000..15aec75e41f17
+--- /dev/null
++++ b/chrome/services/app_swap_playback/public/mojom/app_swap_playback_bitmap.mojom
+@@ -0,0 +1,34 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++module app_swap_playback.mojom;
++
++import "mojo/public/mojom/base/big_buffer.mojom";
++import "ui/gfx/geometry/mojom/geometry.mojom";
++
++// Deliberately its own mojom file/target (see app_swap_playback.mojom for
++// the interface this feeds into) so it alone can have `webui_module_path`
++// set: appswap://recordings' own mojom (app_swap_recordings.mojom) needs
++// TS bindings for this struct, but NOT for app_swap_playback.mojom's
++// LayerFrame/PlaybackRenderer, which are purely native-C++-to-C++ (the
++// browser's page handler and reader talking to the playback service child
++// process) and use gfx.mojom.Transform -- a type with no WebUI/TS bindings
++// configured. Putting FrameBitmap in the same webui_module_path target as
++// LayerFrame fails the TS generator outright ("No WebUI bindings found for
++// dependency ... ui/gfx/mojom/transform.mojom"), confirmed by hitting it.
++//
++// A composited frame, ready to display. Raw pixels rather than an encoded
++// image on purpose: both ends of this trip are process-local (WebUI
++// renderer <-> browser <-> the playback service, all on the same
++// machine), so there's no network to economize bytes for, and lossless
++// compression would be real CPU cost paid twice (encode in the service,
++// decode in the WebUI) for no benefit -- exactly the cost that would cap
++// how smooth continuous autoplay can feel.
++struct FrameBitmap {
++  // Tightly packed, RGBA8, unpremultiplied -- exactly the byte layout the
++  // web platform's ImageData constructor expects, so the WebUI side can
++  // hand this straight to `new ImageData(...)` with no conversion step.
++  mojo_base.mojom.BigBuffer rgba_pixels;
++  gfx.mojom.Size size;
++};
+diff --git a/chrome/utility/BUILD.gn b/chrome/utility/BUILD.gn
+index 500cbc7ed8e76..d6c1f40257891 100644
+--- a/chrome/utility/BUILD.gn
++++ b/chrome/utility/BUILD.gn
+@@ -37,6 +37,7 @@ static_library("utility") {
+     "//chrome:strings",
+     "//chrome/common",
+     "//chrome/common:mojo_bindings",
++    "//chrome/services/app_swap_playback:lib",
+     "//chrome/services/speech/buildflags",
+     "//components/heap_profiling/in_process",
+     "//components/metrics:child_call_stack_profile_builder",
+diff --git a/chrome/utility/services.cc b/chrome/utility/services.cc
+index 22b15ea3a1f49..e180452a6bea6 100644
+--- a/chrome/utility/services.cc
++++ b/chrome/utility/services.cc
+@@ -8,6 +8,8 @@
+ #include <utility>
+ 
+ #include "build/build_config.h"
++#include "chrome/services/app_swap_playback/app_swap_playback_service.h"
++#include "chrome/services/app_swap_playback/public/mojom/app_swap_playback.mojom.h"
+ #include "chrome/services/speech/buildflags/buildflags.h"
+ #include "components/on_device_translation/buildflags/buildflags.h"
+ #include "components/paint_preview/buildflags/buildflags.h"
+@@ -151,6 +153,12 @@ static_assert(BUILDFLAG(ENABLE_PRINTING), "ChromeOS Ash must enable Printing");
+ 
+ namespace {
+ 
++auto RunAppSwapPlaybackRenderer(
++    mojo::PendingReceiver<app_swap_playback::mojom::PlaybackRenderer>
++        receiver) {
++  return std::make_unique<AppSwapPlaybackService>(std::move(receiver));
++}
++
+ auto RunFilePatcher(mojo::PendingReceiver<patch::mojom::FilePatcher> receiver) {
+   return std::make_unique<patch::FilePatcherImpl>(std::move(receiver));
+ }
+@@ -481,6 +489,7 @@ void RegisterElevatedMainThreadServices(mojo::ServiceFactory& services) {
+ }
+ 
+ void RegisterMainThreadServices(mojo::ServiceFactory& services) {
++  services.Add(RunAppSwapPlaybackRenderer);
+   services.Add(RunFilePatcher);
+   services.Add(RunUnzipper);
+   services.Add(RunCSVPasswordParser);

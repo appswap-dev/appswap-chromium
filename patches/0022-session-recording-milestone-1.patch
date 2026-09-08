@@ -1,0 +1,1636 @@
+diff --git a/chrome/browser/app_swap/app_swap_session_recording_tab_helper.cc b/chrome/browser/app_swap/app_swap_session_recording_tab_helper.cc
+new file mode 100644
+index 0000000000000..e3c1d14687423
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_session_recording_tab_helper.cc
+@@ -0,0 +1,118 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_session_recording_tab_helper.h"
++
++#include <utility>
++
++#include "base/files/file_path.h"
++#include "base/functional/bind.h"
++#include "base/time/time.h"
++#include "chrome/browser/app_swap/app_swap_route_matcher.h"
++#include "chrome/browser/app_swap/app_swap_session_recording_paths.h"
++#include "chrome/browser/app_swap/app_swap_session_recording_writer.h"
++#include "chrome/browser/app_swap/app_swap_update_available_tab_helper.h"
++#include "chrome/browser/profiles/profile.h"
++#include "content/public/browser/page.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_widget_host.h"
++#include "content/public/browser/web_contents.h"
++
++AppSwapSessionRecordingTabHelper::AppSwapSessionRecordingTabHelper(
++    content::WebContents* web_contents)
++    : content::WebContentsObserver(web_contents),
++      content::WebContentsUserData<AppSwapSessionRecordingTabHelper>(
++          *web_contents) {}
++
++AppSwapSessionRecordingTabHelper::~AppSwapSessionRecordingTabHelper() =
++    default;
++
++void AppSwapSessionRecordingTabHelper::StartRecording() {
++  if (writer_) {
++    return;
++  }
++  Profile* profile =
++      Profile::FromBrowserContext(GetWebContents().GetBrowserContext());
++  writer_ = std::make_unique<AppSwapSessionRecordingWriter>(
++      GetAppSwapRecordingsDir(profile), GetWebContents().GetLastCommittedURL());
++  // Log the URL/app this recording is starting on -- PrimaryPageChanged()
++  // only fires on a SUBSEQUENT navigation, so without this the navigation
++  // log would be missing an entry for wherever recording began.
++  LogCurrentNavigation();
++
++  // Enables continuous capture on the primary main frame's widget -- see
++  // content::RenderWidgetHost::SetPaintOpRecordingCallback() and the
++  // renderer<->browser transport it rides (third_party/blink/public/
++  // mojom/app_swap/paint_op_recording.mojom).
++  GetWebContents()
++      .GetPrimaryMainFrame()
++      ->GetRenderWidgetHost()
++      ->SetPaintOpRecordingCallback(base::BindRepeating(
++          &AppSwapSessionRecordingTabHelper::OnFrameCaptured,
++          weak_factory_.GetWeakPtr()));
++}
++
++void AppSwapSessionRecordingTabHelper::StopRecording() {
++  if (!writer_) {
++    return;
++  }
++  // A null callback disables capture -- see SetPaintOpRecordingCallback()'s
++  // own comment. Guarded on GetPrimaryMainFrame() being non-null: this can
++  // run during WebContents teardown, after the frame is already gone.
++  if (content::RenderFrameHost* main_frame =
++          GetWebContents().GetPrimaryMainFrame()) {
++    main_frame->GetRenderWidgetHost()->SetPaintOpRecordingCallback(
++        content::RenderWidgetHost::PaintOpFrameCallback());
++  }
++  writer_.reset();
++}
++
++void AppSwapSessionRecordingTabHelper::OnFrameCaptured(
++    uint32_t frame_index,
++    int layer_id,
++    const gfx::Size& bounds,
++    const gfx::Transform& transform,
++    cc::SerializedPaintOpBuffer serialized) {
++  if (!writer_) {
++    return;
++  }
++  writer_->WriteFrame(frame_index, layer_id, base::Time::Now(), bounds,
++                      transform, std::move(serialized));
++}
++
++void AppSwapSessionRecordingTabHelper::PrimaryPageChanged(
++    content::Page& page) {
++  if (recording()) {
++    LogCurrentNavigation();
++  }
++}
++
++void AppSwapSessionRecordingTabHelper::LogCurrentNavigation() {
++  Profile* profile =
++      Profile::FromBrowserContext(GetWebContents().GetBrowserContext());
++  const GURL& url = GetWebContents().GetLastCommittedURL();
++
++  std::string package_name;
++  std::string version;
++  if (std::optional<AppSwapApp> app = FindAppSwapAppForUrl(profile, url)) {
++    package_name = app->package_name;
++    // Prefer what was actually served for this navigation over the app's
++    // configured dist-tag -- see AppSwapUpdateAvailableTabHelper's own
++    // comment for why those can differ.
++    if (auto* update_helper =
++            AppSwapUpdateAvailableTabHelper::FromWebContents(
++                &GetWebContents())) {
++      if (update_helper->committed_version()) {
++        version = *update_helper->committed_version();
++      }
++    }
++    if (version.empty()) {
++      version = app->version;
++    }
++  }
++
++  writer_->WriteNavigation(base::Time::Now(), url, package_name, version);
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapSessionRecordingTabHelper);
+diff --git a/chrome/browser/app_swap/app_swap_session_recording_tab_helper.h b/chrome/browser/app_swap/app_swap_session_recording_tab_helper.h
+new file mode 100644
+index 0000000000000..3bd563d6f3f40
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_session_recording_tab_helper.h
+@@ -0,0 +1,105 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_TAB_HELPER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_TAB_HELPER_H_
++
++#include <memory>
++
++#include "base/memory/weak_ptr.h"
++#include "cc/paint/paint_op_capture_serializer.h"
++#include "content/public/browser/web_contents_observer.h"
++#include "content/public/browser/web_contents_user_data.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/gfx/geometry/transform.h"
++
++class AppSwapSessionRecordingWriter;
++
++namespace content {
++class Page;
++class WebContents;
++}  // namespace content
++
++// Tracks, per tab, whether AppSwap session recording is toggled on, and
++// owns the AppSwapSessionRecordingWriter for the current session while
++// active. See the design notes this was built from (PaintOp-based session
++// recording, Milestone 1) for full context: this is the browser-side half
++// of a renderer -> browser paint-op capture pipeline built directly on
++// top of the SerializePaintOpBufferForCapture() sequence already proven
++// (and shared with) the debug chrome.gpuBenchmarking.dumpPaintOpBuffer()
++// path in content/renderer/gpu_benchmarking_extension.cc.
++//
++// STATUS: end-to-end wired. StartRecording() enables continuous capture on
++// the primary main frame's widget via content::RenderWidgetHost::
++// SetPaintOpRecordingCallback() (bound to OnFrameCaptured() below), which
++// rides the renderer<->browser app_swap.mojom.PaintOpRecordingObserver
++// [Client] pipe pair -- see third_party/blink/public/mojom/app_swap/
++// paint_op_recording.mojom for the full design note, and
++// blink::PaintOpRecordingObserverImpl (third_party/blink/renderer/
++// platform/widget/compositing/) for the renderer-side hook into
++// LayerTreeView::WillCommit(). This transport touches core content/blink
++// classes (RenderWidgetHostImpl, blink::WidgetBase, blink.mojom.WidgetHost)
++// that couldn't be verified by building (per this session's standing "I
++// don't build" rule) -- real build/runtime issues surfacing here would not
++// be a surprise, the way Phase 0's own real build fixes weren't.
++//
++// Milestone 1 scope: capture + disk storage only, manual on/off toggle.
++// No replay, no input/DOM/navigation capture, no WebUI session browser --
++// see the plan's own non-goals list.
++class AppSwapSessionRecordingTabHelper
++    : public content::WebContentsObserver,
++      public content::WebContentsUserData<AppSwapSessionRecordingTabHelper> {
++ public:
++  ~AppSwapSessionRecordingTabHelper() override;
++
++  AppSwapSessionRecordingTabHelper(const AppSwapSessionRecordingTabHelper&) =
++      delete;
++  AppSwapSessionRecordingTabHelper& operator=(
++      const AppSwapSessionRecordingTabHelper&) = delete;
++
++  bool recording() const { return writer_ != nullptr; }
++
++  // Starts a new recording session rooted at this tab's current
++  // last-committed URL. No-op if already recording.
++  void StartRecording();
++
++  // Ends the current recording session, if any. No-op if not recording.
++  void StopRecording();
++
++  // Called once per captured, changed layer per commit while recording is
++  // active -- the browser-side sink for the renderer -> browser recording
++  // Mojo interface (bound/dispatched elsewhere; this class only owns what
++  // happens to a frame once it arrives). No-op if not currently
++  // recording, so a frame that was in flight when StopRecording() was
++  // called is silently dropped rather than reopening a just-closed
++  // session.
++  void OnFrameCaptured(uint32_t frame_index,
++                       int layer_id,
++                       const gfx::Size& bounds,
++                       const gfx::Transform& transform,
++                       cc::SerializedPaintOpBuffer serialized);
++
++ private:
++  friend class content::WebContentsUserData<AppSwapSessionRecordingTabHelper>;
++  explicit AppSwapSessionRecordingTabHelper(content::WebContents* web_contents);
++
++  // content::WebContentsObserver:
++  void PrimaryPageChanged(content::Page& page) override;
++
++  // Looks up (via FindAppSwapAppForUrl() and, if that matches,
++  // AppSwapUpdateAvailableTabHelper::committed_version()) and logs the app
++  // package/version currently serving this tab's last-committed URL, if
++  // any -- called from both StartRecording() and PrimaryPageChanged() so
++  // the navigation log always starts with an entry for the URL a
++  // recording began on, not just subsequent navigations.
++  void LogCurrentNavigation();
++
++  std::unique_ptr<AppSwapSessionRecordingWriter> writer_;
++
++  base::WeakPtrFactory<AppSwapSessionRecordingTabHelper> weak_factory_{this};
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_TAB_HELPER_H_
+diff --git a/chrome/browser/app_swap/app_swap_session_recording_writer.cc b/chrome/browser/app_swap/app_swap_session_recording_writer.cc
+new file mode 100644
+index 0000000000000..af3d939536ab9
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_session_recording_writer.cc
+@@ -0,0 +1,277 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_session_recording_writer.h"
++
++#include <array>
++#include <utility>
++
++#include "base/containers/span.h"
++#include "base/files/file.h"
++#include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
++#include "base/functional/bind.h"
++#include "base/json/json_writer.h"
++#include "base/logging.h"
++#include "base/task/thread_pool.h"
++#include "base/unguessable_token.h"
++#include "base/values.h"
++#include "chrome/browser/app_swap/app_swap_session_recording_paths.h"
++
++namespace {
++
++constexpr base::FilePath::CharType kManifestFileName[] =
++    FILE_PATH_LITERAL("manifest.json");
++
++}  // namespace
++
++// All I/O happens on the writer's dedicated SequencedTaskRunner -- this
++// class has no thread-safety of its own and relies entirely on that.
++class AppSwapSessionRecordingWriter::BackgroundWriter {
++ public:
++  // Trivial and I/O-free on purpose -- this is constructed synchronously
++  // on whatever thread owns the AppSwapSessionRecordingWriter (typically
++  // the UI thread), so it must not touch disk. Initialize() does the
++  // actual directory/manifest setup, posted to run on the background
++  // sequence immediately after construction (see the .h file's threading
++  // comment) -- ordering versus any WriteFrame() call is guaranteed by
++  // both being posted to the same SequencedTaskRunner in that order.
++  explicit BackgroundWriter(const base::FilePath& session_dir)
++      : session_dir_(session_dir) {}
++
++  ~BackgroundWriter() { current_segment_.Close(); }
++
++  void Initialize(const GURL& start_url) {
++    if (!base::CreateDirectory(session_dir_)) {
++      LOG(ERROR) << "AppSwap: failed to create recording directory "
++                 << session_dir_;
++      failed_ = true;
++      return;
++    }
++    WriteManifest(start_url);
++  }
++
++  void WriteFrame(uint32_t frame_index,
++                  int layer_id,
++                  base::Time capture_time,
++                  const gfx::Size& bounds,
++                  const gfx::Transform& transform,
++                  cc::SerializedPaintOpBuffer serialized) {
++    if (failed_) {
++      return;
++    }
++
++    // Record layout (all fields fixed-size and little-endian on every
++    // platform this fork ships on -- not attempting cross-endianness
++    // portability here, this format never leaves the machine that wrote
++    // it in Milestone 1's scope):
++    //   uint32 frame_index (shared by every layer of one commit)
++    //   uint32 layer_id
++    //   int64  capture_time (milliseconds since Unix epoch)
++    //   uint32 width
++    //   uint32 height
++    //   double transform[16] (column-major, gfx::Transform::GetColMajor())
++    //   uint32 paintops_len
++    //   byte[paintops_len] paintops
++    //   uint32 strikedata_len
++    //   byte[strikedata_len] strikedata
++    //   uint32 imagedata_len
++    //   byte[imagedata_len] imagedata
++    // Prefixed by its own uint32 total-length so a reader can find record
++    // boundaries in the segment file without parsing each record's inner
++    // fields first.
++    const uint32_t frame_index_field = frame_index;
++    const uint32_t layer_id_u32 = static_cast<uint32_t>(layer_id);
++    const int64_t capture_time_ms =
++        capture_time.InMillisecondsSinceUnixEpoch();
++    const uint32_t width = static_cast<uint32_t>(bounds.width());
++    const uint32_t height = static_cast<uint32_t>(bounds.height());
++    std::array<double, 16> transform_col_major;
++    transform.GetColMajor(base::span(transform_col_major));
++    const uint32_t paintops_len =
++        static_cast<uint32_t>(serialized.paintops.size());
++    const uint32_t strikedata_len =
++        static_cast<uint32_t>(serialized.strikedata.size());
++    const uint32_t imagedata_len =
++        static_cast<uint32_t>(serialized.imagedata.size());
++
++    const uint32_t record_len = static_cast<uint32_t>(
++        sizeof(frame_index_field) + sizeof(layer_id_u32) +
++        sizeof(capture_time_ms) + sizeof(width) + sizeof(height) +
++        sizeof(transform_col_major) + sizeof(paintops_len) + paintops_len +
++        sizeof(strikedata_len) + strikedata_len + sizeof(imagedata_len) +
++        imagedata_len);
++
++    if (!EnsureSegmentOpenForWrite(sizeof(record_len) + record_len)) {
++      return;
++    }
++
++    bool ok =
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(record_len)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(frame_index_field)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(layer_id_u32)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(capture_time_ms)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(width)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(height)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::as_byte_span(base::allow_nonunique_obj,
++                              transform_col_major)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(paintops_len)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::span(serialized.paintops)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(strikedata_len)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::span(serialized.strikedata)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::byte_span_from_ref(imagedata_len)) &&
++        current_segment_.WriteAtCurrentPosAndCheck(
++            base::span(serialized.imagedata));
++    if (!ok) {
++      LOG(ERROR) << "AppSwap: failed writing recording frame to "
++                 << current_segment_path_;
++      return;
++    }
++    current_segment_bytes_ += sizeof(record_len) + record_len;
++  }
++
++  void WriteNavigation(base::Time time,
++                       const GURL& url,
++                       const std::string& package_name,
++                       const std::string& version) {
++    if (failed_) {
++      return;
++    }
++    base::DictValue entry;
++    entry.Set("time_ms",
++              static_cast<double>(time.InMillisecondsSinceUnixEpoch()));
++    entry.Set("url", url.spec());
++    entry.Set("package_name", package_name);
++    entry.Set("version", version);
++    std::string json;
++    if (!base::JSONWriter::Write(entry, &json)) {
++      LOG(ERROR) << "AppSwap: failed to serialize navigation entry for "
++                 << session_dir_;
++      return;
++    }
++    json += "\n";
++    // NOT base::AppendToFile(): on Windows that opens with OPEN_EXISTING,
++    // which fails outright if navigations.jsonl doesn't exist yet -- true
++    // for the very first entry of every session, confirmed by actually
++    // hitting "failed to append navigation entry" on a real recording.
++    // FLAG_OPEN_ALWAYS creates it on that first call and just opens it on
++    // every one after.
++    base::File file(GetAppSwapRecordingNavigationsPath(session_dir_),
++                    base::File::FLAG_OPEN_ALWAYS | base::File::FLAG_APPEND);
++    if (!file.IsValid() ||
++        !file.WriteAtCurrentPosAndCheck(base::as_byte_span(json))) {
++      LOG(ERROR) << "AppSwap: failed to append navigation entry in "
++                 << session_dir_;
++    }
++  }
++
++ private:
++  // Opens the current segment file if needed, rolling over to a new one
++  // first if writing `additional_bytes` would push the current segment
++  // past kMaxSegmentBytes. A single frame is never split across segments,
++  // even if it alone exceeds kMaxSegmentBytes.
++  bool EnsureSegmentOpenForWrite(size_t additional_bytes) {
++    if (current_segment_.IsValid() &&
++        current_segment_bytes_ + additional_bytes >
++            static_cast<size_t>(
++                AppSwapSessionRecordingWriter::kMaxSegmentBytes)) {
++      current_segment_.Close();
++    }
++    if (current_segment_.IsValid()) {
++      return true;
++    }
++
++    current_segment_path_ =
++        GetAppSwapRecordingSegmentPath(session_dir_, next_segment_index_++);
++    current_segment_ = base::File(
++        current_segment_path_,
++        base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
++    current_segment_bytes_ = 0;
++    if (!current_segment_.IsValid()) {
++      LOG(ERROR) << "AppSwap: failed to open recording segment "
++                 << current_segment_path_;
++      failed_ = true;
++      return false;
++    }
++    return true;
++  }
++
++  void WriteManifest(const GURL& start_url) {
++    base::DictValue manifest;
++    manifest.Set("start_time_ms",
++                 static_cast<double>(
++                     base::Time::Now().InMillisecondsSinceUnixEpoch()));
++    manifest.Set("start_url", start_url.spec());
++    std::string json;
++    if (!base::JSONWriter::Write(manifest, &json) ||
++        !base::ImportantFileWriter::WriteFileAtomically(
++            session_dir_.Append(kManifestFileName), json)) {
++      LOG(ERROR) << "AppSwap: failed to write recording manifest in "
++                 << session_dir_;
++    }
++  }
++
++  base::FilePath session_dir_;
++  base::File current_segment_;
++  base::FilePath current_segment_path_;
++  size_t current_segment_bytes_ = 0;
++  int next_segment_index_ = 0;
++  bool failed_ = false;
++};
++
++AppSwapSessionRecordingWriter::AppSwapSessionRecordingWriter(
++    const base::FilePath& recordings_dir,
++    const GURL& start_url)
++    : session_dir_(recordings_dir.AppendASCII(
++          base::UnguessableToken::Create().ToString())),
++      task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
++          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++           base::TaskShutdownBehavior::BLOCK_SHUTDOWN})),
++      background_(new BackgroundWriter(session_dir_),
++                  base::OnTaskRunnerDeleter(task_runner_)) {
++  task_runner_->PostTask(
++      FROM_HERE, base::BindOnce(&BackgroundWriter::Initialize,
++                                base::Unretained(background_.get()),
++                                start_url));
++}
++
++AppSwapSessionRecordingWriter::~AppSwapSessionRecordingWriter() = default;
++
++void AppSwapSessionRecordingWriter::WriteFrame(
++    uint32_t frame_index,
++    int layer_id,
++    base::Time capture_time,
++    const gfx::Size& bounds,
++    const gfx::Transform& transform,
++    cc::SerializedPaintOpBuffer serialized) {
++  task_runner_->PostTask(
++      FROM_HERE,
++      base::BindOnce(&BackgroundWriter::WriteFrame,
++                     base::Unretained(background_.get()), frame_index,
++                     layer_id, capture_time, bounds, transform,
++                     std::move(serialized)));
++}
++
++void AppSwapSessionRecordingWriter::WriteNavigation(
++    base::Time time,
++    const GURL& url,
++    const std::string& package_name,
++    const std::string& version) {
++  task_runner_->PostTask(
++      FROM_HERE, base::BindOnce(&BackgroundWriter::WriteNavigation,
++                                base::Unretained(background_.get()), time,
++                                url, package_name, version));
++}
+diff --git a/chrome/browser/app_swap/app_swap_session_recording_writer.h b/chrome/browser/app_swap/app_swap_session_recording_writer.h
+new file mode 100644
+index 0000000000000..cb964b8b51a65
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_session_recording_writer.h
+@@ -0,0 +1,97 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_WRITER_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_WRITER_H_
++
++#include <memory>
++#include <string>
++
++#include "base/files/file_path.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/time/time.h"
++#include "cc/paint/paint_op_capture_serializer.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/gfx/geometry/transform.h"
++#include "url/gurl.h"
++
++// Writes one recording session's captured paint-op frames to disk as they
++// arrive, under a new <profile_path>/AppSwap/Recordings/<session-id>/
++// directory, plus a small manifest describing the session.
++//
++// This is a NEW storage mechanism for this codebase's AppSwap additions --
++// unlike AppSwapConfigStore (whole-file JSON rewrite on every save, the
++// right fit for small settings blobs like apps.json/route_groups.json) a
++// session recording grows continuously and unboundedly while active, so
++// every frame is APPENDED to a segment file rather than re-serializing and
++// rewriting the whole recording on each capture. Segments roll over at
++// kMaxSegmentBytes so no single file grows unbounded and a partial/corrupt
++// tail segment can't invalidate everything captured before it. Segment
++// files are named sequentially (segment_0000.paintopseg,
++// segment_0001.paintopseg, ...) so they're discoverable and orderable by a
++// directory listing alone -- the manifest only records session-level
++// metadata, not the segment list.
++//
++// All disk I/O runs on a dedicated SequencedTaskRunner (mirroring
++// AppSwapConfigStore's own threading convention, see that class's own
++// comment) -- WriteFrame() posts to it and returns immediately.
++class AppSwapSessionRecordingWriter {
++ public:
++  // Maximum size a single segment file is allowed to reach before rolling
++  // over to a new one. Not a hard per-write cap -- one frame's bytes are
++  // never split across segments, so a single frame can still push a
++  // segment slightly past this.
++  static constexpr int64_t kMaxSegmentBytes = 16 * 1024 * 1024;
++
++  // `recordings_dir` is <profile_path>/AppSwap/Recordings -- this creates
++  // and owns a new subdirectory under it for this one session.
++  AppSwapSessionRecordingWriter(const base::FilePath& recordings_dir,
++                                const GURL& start_url);
++  ~AppSwapSessionRecordingWriter();
++
++  AppSwapSessionRecordingWriter(const AppSwapSessionRecordingWriter&) =
++      delete;
++  AppSwapSessionRecordingWriter& operator=(
++      const AppSwapSessionRecordingWriter&) = delete;
++
++  // Appends one captured layer's serialized paint ops as a new frame
++  // record in the current segment. Cheap to call frequently -- the actual
++  // file write happens on the background sequence. `frame_index` is
++  // shared by every layer captured in the same commit (see
++  // paint_op_recording.mojom's OnPaintOpFrame comment); `transform` is
++  // that layer's screen-space transform at capture time, needed to
++  // composite frames back together for playback.
++  void WriteFrame(uint32_t frame_index,
++                  int layer_id,
++                  base::Time capture_time,
++                  const gfx::Size& bounds,
++                  const gfx::Transform& transform,
++                  cc::SerializedPaintOpBuffer serialized);
++
++  // Appends one entry to this session's navigation log (navigations.jsonl)
++  // -- the URL a tab was on, and (if it's an AppSwap-routed npm app) the
++  // package/version serving it, at `time`. Cheap to call frequently; the
++  // actual file write happens on the background sequence. `package_name`
++  // and `version` are both empty for a plain, non-AppSwap-routed page.
++  void WriteNavigation(base::Time time,
++                       const GURL& url,
++                       const std::string& package_name,
++                       const std::string& version);
++
++  const base::FilePath& session_dir() const { return session_dir_; }
++
++ private:
++  class BackgroundWriter;
++
++  base::FilePath session_dir_;
++  scoped_refptr<base::SequencedTaskRunner> task_runner_;
++  // Owns all segment-file state; only ever touched on task_runner_. The
++  // custom deleter runs ~BackgroundWriter() (which flushes/closes the
++  // current segment) on that same sequence rather than wherever this
++  // writer itself is destroyed.
++  std::unique_ptr<BackgroundWriter, base::OnTaskRunnerDeleter> background_;
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SESSION_RECORDING_WRITER_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_session_recording_button.cc b/chrome/browser/ui/views/app_swap/app_swap_session_recording_button.cc
+new file mode 100644
+index 0000000000000..d493a2cbe3953
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_session_recording_button.cc
+@@ -0,0 +1,105 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_session_recording_button.h"
++
++#include "base/functional/bind.h"
++#include "chrome/browser/app_swap/app_swap_session_recording_tab_helper.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "components/vector_icons/vector_icons.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
++#include "ui/views/background.h"
++
++namespace {
++constexpr float kActiveBadgeCornerRadius = 4.0f;
++}  // namespace
++
++AppSwapSessionRecordingButton::AppSwapSessionRecordingButton(
++    BrowserWindowInterface* browser)
++    : ToolbarButton(base::BindRepeating(
++          &AppSwapSessionRecordingButton::ButtonPressed,
++          base::Unretained(this))),
++      browser_(browser) {
++  SetVectorIcon(vector_icons::kScreenRecordIcon);
++  SetTooltipText(u"Record AppSwap session");
++  SetAccessibleName(u"Record session");
++  SetVisible(false);
++  browser_->GetTabStripModel()->AddObserver(this);
++  UpdateForActiveTab();
++}
++
++AppSwapSessionRecordingButton::~AppSwapSessionRecordingButton() {
++  browser_->GetTabStripModel()->RemoveObserver(this);
++}
++
++void AppSwapSessionRecordingButton::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  if (selection.active_tab_changed()) {
++    UpdateForActiveTab();
++  }
++}
++
++void AppSwapSessionRecordingButton::OnTabChangedAt(
++    tabs::TabInterface* tab,
++    TabChangeType change_type) {
++  UpdateForActiveTab();
++}
++
++void AppSwapSessionRecordingButton::ButtonPressed() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  if (!web_contents) {
++    return;
++  }
++  AppSwapSessionRecordingTabHelper* helper =
++      AppSwapSessionRecordingTabHelper::GetOrCreateForWebContents(
++          web_contents);
++  if (helper->recording()) {
++    helper->StopRecording();
++  } else {
++    helper->StartRecording();
++  }
++  SetActiveVisual(helper->recording());
++}
++
++void AppSwapSessionRecordingButton::UpdateForActiveTab() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  if (!web_contents) {
++    SetVisible(false);
++    return;
++  }
++
++  // Recording only makes sense on a real http(s) page, matching
++  // AppSwapResponsiveLabButton's own applicability check.
++  const bool applicable =
++      web_contents->GetLastCommittedURL().SchemeIsHTTPOrHTTPS();
++  SetVisible(applicable);
++
++  bool recording = false;
++  if (applicable) {
++    if (AppSwapSessionRecordingTabHelper* helper =
++            AppSwapSessionRecordingTabHelper::FromWebContents(web_contents)) {
++      recording = helper->recording();
++    }
++  }
++  SetActiveVisual(recording);
++}
++
++void AppSwapSessionRecordingButton::SetActiveVisual(bool active) {
++  if (active) {
++    SetBackground(views::CreateRoundedRectBackground(
++        ui::kColorSysNeutralContainer, kActiveBadgeCornerRadius));
++  } else {
++    SetBackground(nullptr);
++  }
++}
++
++BEGIN_METADATA(AppSwapSessionRecordingButton)
++END_METADATA
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_session_recording_button.h b/chrome/browser/ui/views/app_swap/app_swap_session_recording_button.h
+new file mode 100644
+index 0000000000000..4d249eec719d6
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_session_recording_button.h
+@@ -0,0 +1,62 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_SESSION_RECORDING_BUTTON_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_SESSION_RECORDING_BUTTON_H_
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/ui/tabs/tab_change_type.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "chrome/browser/ui/views/toolbar/toolbar_button.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++
++class BrowserWindowInterface;
++class TabStripModel;
++
++namespace tabs {
++class TabInterface;
++}  // namespace tabs
++
++// A toolbar-row toggle button, next to Home/Responsive Lab: pressing it
++// starts or stops an AppSwap session recording (real paint-op capture, see
++// AppSwapSessionRecordingTabHelper) for the active tab. Milestone 1 scope
++// -- no replay UI yet; verifying a recording means inspecting its on-disk
++// session directory directly. Modeled closely on
++// AppSwapResponsiveLabButton (same ToolbarButton + TabStripModelObserver
++// shape, same per-tab-state-needs-resync-on-tab-change structure) but
++// simpler: there's no on-screen container to swap, just the tab's own
++// recording on/off bit.
++class AppSwapSessionRecordingButton : public ToolbarButton,
++                                      public TabStripModelObserver {
++  METADATA_HEADER(AppSwapSessionRecordingButton, ToolbarButton)
++
++ public:
++  explicit AppSwapSessionRecordingButton(BrowserWindowInterface* browser);
++  AppSwapSessionRecordingButton(const AppSwapSessionRecordingButton&) =
++      delete;
++  AppSwapSessionRecordingButton& operator=(
++      const AppSwapSessionRecordingButton&) = delete;
++  ~AppSwapSessionRecordingButton() override;
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      TabChangeType change_type) override;
++
++ private:
++  void ButtonPressed();
++
++  // Recomputes this button's own visibility/active-visual state from the
++  // active tab's own AppSwapSessionRecordingTabHelper.
++  void UpdateForActiveTab();
++
++  void SetActiveVisual(bool active);
++
++  raw_ptr<BrowserWindowInterface> browser_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_SESSION_RECORDING_BUTTON_H_
+diff --git a/components/plugins/renderer/webview_plugin.h b/components/plugins/renderer/webview_plugin.h
+index d9be6eb68f914..c971961383f20 100644
+--- a/components/plugins/renderer/webview_plugin.h
++++ b/components/plugins/renderer/webview_plugin.h
+@@ -210,6 +210,13 @@ class WebViewPlugin : public blink::WebPlugin, public blink::WebViewObserver {
+             render_frame_metadata_observer_client_receiver,
+         mojo::PendingRemote<cc::mojom::RenderFrameMetadataObserver>
+             render_frame_metadata_observer) override {}
++    // AppSwap session recording: this plugin helper isn't a real,
++    // recordable tab widget, so this is a no-op like the other
++    // rarely-relevant WidgetHost methods above.
++    void RegisterPaintOpRecordingObserver(
++        mojo::PendingReceiver<app_swap::mojom::PaintOpRecordingObserverClient>,
++        mojo::PendingRemote<app_swap::mojom::PaintOpRecordingObserver>)
++        override {}
+ 
+     // This function sets the "title" attribute to the text value passed by
+     // parameter on the container's element, if possible.
+diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/browser/renderer_host/render_widget_host_impl.cc
+index 953f94195d775..dd3a958a60141 100644
+--- a/content/browser/renderer_host/render_widget_host_impl.cc
++++ b/content/browser/renderer_host/render_widget_host_impl.cc
+@@ -4056,6 +4056,57 @@ void RenderWidgetHostImpl::RegisterRenderFrameMetadataObserver(
+       std::move(render_frame_metadata_observer));
+ }
+ 
++void RenderWidgetHostImpl::RegisterPaintOpRecordingObserver(
++    mojo::PendingReceiver<app_swap::mojom::PaintOpRecordingObserverClient>
++        paint_op_recording_observer_client_receiver,
++    mojo::PendingRemote<app_swap::mojom::PaintOpRecordingObserver>
++        paint_op_recording_observer) {
++  paint_op_recording_client_receiver_.reset();
++  paint_op_recording_client_receiver_.Bind(
++      std::move(paint_op_recording_observer_client_receiver));
++  paint_op_recording_observer_remote_.reset();
++  paint_op_recording_observer_remote_.Bind(
++      std::move(paint_op_recording_observer));
++  // Re-apply whatever enabled state was already requested -- e.g. this is
++  // a fresh renderer (crash/reload) reconnecting mid-recording.
++  if (paint_op_recording_callback_) {
++    paint_op_recording_observer_remote_->SetEnabled(true);
++  }
++}
++
++void RenderWidgetHostImpl::SetPaintOpRecordingCallback(
++    PaintOpFrameCallback callback) {
++  paint_op_recording_callback_ = std::move(callback);
++  if (paint_op_recording_observer_remote_) {
++    paint_op_recording_observer_remote_->SetEnabled(
++        !!paint_op_recording_callback_);
++  }
++}
++
++void RenderWidgetHostImpl::OnPaintOpFrame(
++    uint32_t frame_index,
++    int32_t layer_id,
++    int32_t width,
++    int32_t height,
++    const gfx::Transform& transform,
++    const std::vector<uint8_t>& paintops,
++    const std::vector<uint8_t>& strikedata,
++    const std::vector<uint8_t>& imagedata) {
++  if (!paint_op_recording_callback_) {
++    // Recording was disabled after this frame was already in flight from
++    // the renderer -- drop it rather than reopening a just-closed
++    // session.
++    return;
++  }
++  cc::SerializedPaintOpBuffer serialized;
++  serialized.paintops = paintops;
++  serialized.strikedata = strikedata;
++  serialized.imagedata = imagedata;
++  paint_op_recording_callback_.Run(frame_index, layer_id,
++                                   gfx::Size(width, height), transform,
++                                   std::move(serialized));
++}
++
+ bool RenderWidgetHostImpl::HasGestureStopped() {
+   if (delegate_ && delegate_->GetInputEventRouter() &&
+       delegate_->GetInputEventRouter()->HasEventsPendingDispatch()) {
+diff --git a/content/browser/renderer_host/render_widget_host_impl.h b/content/browser/renderer_host/render_widget_host_impl.h
+index 0016174ffc095..3731323461776 100644
+--- a/content/browser/renderer_host/render_widget_host_impl.h
++++ b/content/browser/renderer_host/render_widget_host_impl.h
+@@ -32,6 +32,7 @@
+ #include "base/types/pass_key.h"
+ #include "build/build_config.h"
+ #include "cc/mojom/render_frame_metadata.mojom.h"
++#include "cc/paint/paint_op_capture_serializer.h"
+ #include "components/input/event_with_latency_info.h"
+ #include "components/input/input_disposition_handler.h"
+ #include "components/input/input_router_impl.h"
+@@ -69,6 +70,7 @@
+ #include "third_party/blink/public/mojom/keyboard_lock/keyboard_lock.mojom.h"
+ #include "third_party/blink/public/mojom/manifest/display_mode.mojom.h"
+ #include "third_party/blink/public/mojom/page/widget.mojom.h"
++#include "third_party/blink/public/mojom/app_swap/paint_op_recording.mojom.h"
+ #include "third_party/blink/public/mojom/widget/platform_widget.mojom.h"
+ #include "ui/base/dragdrop/mojom/drag_drop_types.mojom-forward.h"
+ #include "ui/base/ime/text_input_mode.h"
+@@ -162,6 +164,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl
+       public blink::mojom::FrameWidgetHost,
+       public blink::mojom::PopupWidgetHost,
+       public blink::mojom::WidgetHost,
++      public app_swap::mojom::PaintOpRecordingObserverClient,
+       public blink::mojom::PointerLockContext,
+       public input::RenderInputRouterDelegate,
+       public input::RenderInputRouterClient {
+@@ -292,6 +295,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl
+   void RemoveTrackedElementObserver(TrackedElementObserver* observer) override;
+   void AddObserver(RenderWidgetHostObserver* observer) override;
+   void RemoveObserver(RenderWidgetHostObserver* observer) override;
++  void SetPaintOpRecordingCallback(PaintOpFrameCallback callback) override;
+   display::ScreenInfo GetScreenInfo() const override;
+   display::ScreenInfos GetScreenInfos() const override;
+   float GetDeviceScaleFactor() override;
+@@ -380,6 +384,23 @@ class CONTENT_EXPORT RenderWidgetHostImpl
+           render_frame_metadata_observer_client_receiver,
+       mojo::PendingRemote<cc::mojom::RenderFrameMetadataObserver>
+           render_frame_metadata_observer) override;
++  // AppSwap session recording (Milestone 1). See
++  // third_party/blink/public/mojom/app_swap/paint_op_recording.mojom.
++  void RegisterPaintOpRecordingObserver(
++      mojo::PendingReceiver<app_swap::mojom::PaintOpRecordingObserverClient>
++          paint_op_recording_observer_client_receiver,
++      mojo::PendingRemote<app_swap::mojom::PaintOpRecordingObserver>
++          paint_op_recording_observer) override;
++
++  // app_swap::mojom::PaintOpRecordingObserverClient implementation.
++  void OnPaintOpFrame(uint32_t frame_index,
++                      int32_t layer_id,
++                      int32_t width,
++                      int32_t height,
++                      const gfx::Transform& transform,
++                      const std::vector<uint8_t>& paintops,
++                      const std::vector<uint8_t>& strikedata,
++                      const std::vector<uint8_t>& imagedata) override;
+ 
+   // blink::mojom::PopupWidgetHost implementation.
+   void RequestClosePopup() override;
+@@ -1597,6 +1618,19 @@ class CONTENT_EXPORT RenderWidgetHostImpl
+       screen_orientation_type_for_testing_;
+ 
+   RenderFrameMetadataProviderImpl render_frame_metadata_provider_;
++
++  // AppSwap session recording (Milestone 1). `paint_op_recording_callback_`
++  // null means recording is off -- SetPaintOpRecordingCallback() is the
++  // only thing that changes that, and re-applies the enabled/disabled
++  // state to `paint_op_recording_observer_remote_` (if already bound) or
++  // to a newly-(re)connected one in RegisterPaintOpRecordingObserver()
++  // (e.g. after a renderer crash/reload mid-recording).
++  mojo::Receiver<app_swap::mojom::PaintOpRecordingObserverClient>
++      paint_op_recording_client_receiver_{this};
++  mojo::Remote<app_swap::mojom::PaintOpRecordingObserver>
++      paint_op_recording_observer_remote_;
++  PaintOpFrameCallback paint_op_recording_callback_;
++
+   bool surface_id_allocation_suppressed_ = false;
+ 
+   const viz::FrameSinkId frame_sink_id_;
+diff --git a/content/public/browser/render_widget_host.h b/content/public/browser/render_widget_host.h
+index 556fde8f225a0..365ae967a758f 100644
+--- a/content/public/browser/render_widget_host.h
++++ b/content/public/browser/render_widget_host.h
+@@ -28,6 +28,7 @@
+ #include "ui/base/dragdrop/mojom/drag_drop_types.mojom-forward.h"
+ #include "ui/base/mojom/menu_source_type.mojom-forward.h"
+ #include "ui/display/screen_infos.h"
++#include "ui/gfx/geometry/transform.h"
+ 
+ namespace blink {
+ class WebMouseEvent;
+@@ -42,8 +43,13 @@ namespace display {
+ struct ScreenInfo;
+ }
+ 
++namespace cc {
++struct SerializedPaintOpBuffer;
++}
++
+ namespace gfx {
+ class Point;
++class Size;
+ }
+ 
+ namespace ui {
+@@ -287,6 +293,26 @@ class CONTENT_EXPORT RenderWidgetHost {
+   virtual void AddObserver(RenderWidgetHostObserver* observer) = 0;
+   virtual void RemoveObserver(RenderWidgetHostObserver* observer) = 0;
+ 
++  // AppSwap session recording (Milestone 1): `callback` is invoked once
++  // per changed PictureLayer per committed compositor frame while
++  // recording is active -- a null `callback` disables recording (the
++  // default). See third_party/blink/public/mojom/app_swap/
++  // paint_op_recording.mojom for the renderer<->browser transport this
++  // rides, and cc/paint/paint_op_capture_serializer.h for the format of
++  // the bytes the callback receives. Best-effort: not guaranteed to fire
++  // for every single commit, and frames already in flight when this is
++  // called with a null callback may still arrive and are silently
++  // dropped. `frame_index` is shared by every layer captured in the same
++  // commit (for regrouping during playback); `transform` is that layer's
++  // screen-space transform at capture time.
++  using PaintOpFrameCallback =
++      base::RepeatingCallback<void(uint32_t frame_index,
++                                   int layer_id,
++                                   const gfx::Size& bounds,
++                                   const gfx::Transform& transform,
++                                   cc::SerializedPaintOpBuffer serialized)>;
++  virtual void SetPaintOpRecordingCallback(PaintOpFrameCallback callback) = 0;
++
+   // Get info regarding the screen showing this RenderWidgetHost.
+   virtual display::ScreenInfo GetScreenInfo() const = 0;
+ 
+diff --git a/content/public/test/fake_render_widget_host.cc b/content/public/test/fake_render_widget_host.cc
+index 302757a1c7c9d..5b85a382df812 100644
+--- a/content/public/test/fake_render_widget_host.cc
++++ b/content/public/test/fake_render_widget_host.cc
+@@ -84,6 +84,12 @@ void FakeRenderWidgetHost::RegisterRenderFrameMetadataObserver(
+     mojo::PendingRemote<cc::mojom::RenderFrameMetadataObserver>
+         render_frame_metadata_observer) {}
+ 
++void FakeRenderWidgetHost::RegisterPaintOpRecordingObserver(
++    mojo::PendingReceiver<app_swap::mojom::PaintOpRecordingObserverClient>
++        paint_op_recording_observer_client_receiver,
++    mojo::PendingRemote<app_swap::mojom::PaintOpRecordingObserver>
++        paint_op_recording_observer) {}
++
+ void FakeRenderWidgetHost::RequestClosePopup() {}
+ 
+ void FakeRenderWidgetHost::SetPopupBounds(const gfx::Rect& bounds,
+diff --git a/content/public/test/fake_render_widget_host.h b/content/public/test/fake_render_widget_host.h
+index 85cd97be21401..de4d13ce99f35 100644
+--- a/content/public/test/fake_render_widget_host.h
++++ b/content/public/test/fake_render_widget_host.h
+@@ -80,6 +80,13 @@ class FakeRenderWidgetHost : public blink::mojom::FrameWidgetHost,
+           render_frame_metadata_observer_client_receiver,
+       mojo::PendingRemote<cc::mojom::RenderFrameMetadataObserver>
+           render_frame_metadata_observer) override;
++  // AppSwap session recording: no-op fake, same as the other
++  // rarely-exercised WidgetHost methods above.
++  void RegisterPaintOpRecordingObserver(
++      mojo::PendingReceiver<app_swap::mojom::PaintOpRecordingObserverClient>
++          paint_op_recording_observer_client_receiver,
++      mojo::PendingRemote<app_swap::mojom::PaintOpRecordingObserver>
++          paint_op_recording_observer) override;
+ 
+   // blink::mojom::PopupWidgetHost overrides.
+   void RequestClosePopup() override;
+diff --git a/third_party/blink/public/mojom/BUILD.gn b/third_party/blink/public/mojom/BUILD.gn
+index 99f0bf2c5d58e..af77f078a22a6 100644
+--- a/third_party/blink/public/mojom/BUILD.gn
++++ b/third_party/blink/public/mojom/BUILD.gn
+@@ -66,6 +66,7 @@ mojom("mojom_platform") {
+     "ai/model_streaming_responder.mojom",
+     "annotation/annotation.mojom",
+     "app_banner/app_banner.mojom",
++    "app_swap/paint_op_recording.mojom",
+     "associated_interfaces/associated_interfaces.mojom",
+     "autoplay/autoplay.mojom",
+     "back_forward_cache_not_restored_reasons.mojom",
+diff --git a/third_party/blink/public/mojom/app_swap/paint_op_recording.mojom b/third_party/blink/public/mojom/app_swap/paint_op_recording.mojom
+new file mode 100644
+index 0000000000000..1e0c0b5bc13c1
+--- /dev/null
++++ b/third_party/blink/public/mojom/app_swap/paint_op_recording.mojom
+@@ -0,0 +1,98 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++module app_swap.mojom;
++
++import "ui/gfx/mojom/transform.mojom";
++
++// AppSwap session recording (Milestone 1): a per-widget, toggleable,
++// best-effort channel for the renderer to push captured cc::PaintOpBuffer
++// content (see cc/paint/paint_op_capture_serializer.h -- the same
++// serialization sequence the debug chrome.gpuBenchmarking.
++// dumpPaintOpBuffer() path in content/renderer/gpu_benchmarking_extension.cc
++// already uses) to the browser process, which has the real file-system
++// access needed to persist it (see chrome/browser/app_swap/
++// app_swap_session_recording_writer.h -- renderer file I/O is normally
++// sandbox-blocked, so unlike the debug dump path this cannot write to disk
++// itself).
++//
++// Modeled structurally on cc.mojom.RenderFrameMetadataObserver /
++// RenderFrameMetadataObserverClient (cc/mojom/render_frame_metadata.mojom)
++// -- the closest existing precedent in this checkout for "toggleable,
++// high-frequency (up to once per compositor commit), best-effort,
++// renderer-pushes-to-browser" traffic. Like that pair, this is meant to be
++// bootstrapped over a DEDICATED, non-frame-associated mojo::Remote/
++// mojo::Receiver pipe -- handed over via a one-shot call on the existing
++// blink.mojom.WidgetHost/blink.mojom.Widget associated channel (see
++// RegisterRenderFrameMetadataObserver in
++// third_party/blink/public/mojom/widget/platform_widget.mojom, and its
++// real bootstrap call site, blink::WidgetBase::CreateRenderFrameObserver(),
++// third_party/blink/renderer/platform/widget/widget_base.cc) -- rather
++// than riding RenderFrameHostImpl::GetRemoteAssociatedInterfaces(), which
++// is meant for navigation/frame-ordered traffic and would couple this
++// channel's ordering to that.
++//
++// STATUS: fully wired end to end. RegisterPaintOpRecordingObserver() lives
++// on blink.mojom.WidgetHost (this module's own import target, added
++// alongside RegisterRenderFrameMetadataObserver just above it in that
++// file); content::RenderWidgetHostImpl implements it and the
++// PaintOpRecordingObserverClient methods
++// (content/browser/renderer_host/render_widget_host_impl.{h,cc}); the
++// renderer-side bootstrap is blink::WidgetBase::
++// CreatePaintOpRecordingObserver() (third_party/blink/renderer/platform/
++// widget/widget_base.{h,cc}), called once from InitializeCompositing()
++// right after a fresh LayerTreeView is initialized; the actual per-commit
++// hook is blink::PaintOpRecordingObserverImpl (third_party/blink/
++// renderer/platform/widget/compositing/), OWNED BY LayerTreeView itself
++// (not WidgetBase) specifically so it moves together with LayerTreeView
++// across a widget reattachment -- see LayerTreeView::
++// SetPaintOpRecordingObserver()'s own comment for why that ownership
++// choice matters. This touches core content/blink classes that couldn't
++// be verified by building (per this session's standing "I don't build"
++// rule) -- real build/runtime issues surfacing here would not be a
++// surprise, the way Phase 0's own real build fixes weren't.
++
++// Implemented by the renderer (a new PaintOpRecordingObserverImpl,
++// modeled on blink::RenderFrameMetadataObserverImpl, hooked into
++// blink::WidgetBase's existing LayerTreeViewDelegate overrides -- the
++// real, already-firing per-commit callback confirmed via direct source
++// reading, see WidgetBase : public LayerTreeViewDelegate).
++interface PaintOpRecordingObserver {
++  // Enables or disables capture. Disabled by default -- when disabled,
++  // the renderer-side hook does no work at all (no layer-tree walk, no
++  // serialization), so a tab with this feature off pays zero cost.
++  SetEnabled(bool enabled);
++};
++
++// Implemented by the browser (owned analogously to
++// content::RenderFrameMetadataProviderImpl, i.e. per-widget --
++// content::RenderWidgetHostImpl -- forwarding into whichever tab-level
++// sink is currently recording, e.g. AppSwapSessionRecordingTabHelper::
++// OnFrameCaptured).
++interface PaintOpRecordingObserverClient {
++  // Called once per changed PictureLayer per committed compositor frame,
++  // while enabled. `layer_id` is assigned by the renderer in per-commit
++  // layer-tree iteration order -- unique only within one captured commit,
++  // NOT a stable identifier for "the same layer" across multiple calls,
++  // so it must not be used to correlate frames beyond a single commit.
++  // `frame_index` IS stable across calls within one commit -- it's a
++  // simple counter incremented once per OnCommit(), shared by every layer
++  // emitted during that commit, and is how a later reader regroups
++  // per-layer records back into "everything that belongs to one frame"
++  // (needed for playback compositing). `transform` is that layer's
++  // cc::Layer::ScreenSpaceTransform() at capture time, needed to place it
++  // correctly when compositing a frame's layers back together during
++  // playback. `paintops`/`strikedata`/`imagedata` are exactly what
++  // cc::SerializePaintOpBufferForCapture() (cc/paint/
++  // paint_op_capture_serializer.h) produces -- see that function's own
++  // comment for the format.
++  OnPaintOpFrame(uint32 frame_index,
++                int32 layer_id,
++                int32 width,
++                int32 height,
++                gfx.mojom.Transform transform,
++                array<uint8> paintops,
++                array<uint8> strikedata,
++                array<uint8> imagedata);
++};
+diff --git a/third_party/blink/public/mojom/widget/platform_widget.mojom b/third_party/blink/public/mojom/widget/platform_widget.mojom
+index 6c682e0ec983b..ecaa1403a77df 100644
+--- a/third_party/blink/public/mojom/widget/platform_widget.mojom
++++ b/third_party/blink/public/mojom/widget/platform_widget.mojom
+@@ -5,6 +5,7 @@
+ module blink.mojom;
+ 
+ import "cc/mojom/render_frame_metadata.mojom";
++import "third_party/blink/public/mojom/app_swap/paint_op_recording.mojom";
+ import "mojo/public/mojom/base/string16.mojom";
+ import "mojo/public/mojom/base/text_direction.mojom";
+ import "mojo/public/mojom/base/time.mojom";
+@@ -93,6 +94,20 @@ interface WidgetHost {
+         render_frame_metadata_observer_client_receiver,
+       pending_remote<cc.mojom.RenderFrameMetadataObserver>
+         render_frame_metadata_observer);
++
++  // AppSwap session recording (Milestone 1): registers a dedicated,
++  // non-frame-associated pipe pair for continuous cc::PaintOpBuffer
++  // capture, mirroring RegisterRenderFrameMetadataObserver just above --
++  // see third_party/blink/public/mojom/app_swap/paint_op_recording.mojom
++  // for the full design note. Called once, at the same point
++  // RegisterRenderFrameMetadataObserver is (in conjunction with
++  // CreateFrameSink); the actual capture only starts once the browser
++  // calls SetEnabled(true) on the returned observer.
++  RegisterPaintOpRecordingObserver(
++      pending_receiver<app_swap.mojom.PaintOpRecordingObserverClient>
++        paint_op_recording_observer_client_receiver,
++      pending_remote<app_swap.mojom.PaintOpRecordingObserver>
++        paint_op_recording_observer);
+ };
+ 
+ // Implemented in Blink, this interface defines widget-specific methods that
+diff --git a/third_party/blink/renderer/core/frame/frame_test_helpers.cc b/third_party/blink/renderer/core/frame/frame_test_helpers.cc
+index b7107ebba2544..8a44694b9ffa6 100644
+--- a/third_party/blink/renderer/core/frame/frame_test_helpers.cc
++++ b/third_party/blink/renderer/core/frame/frame_test_helpers.cc
+@@ -1165,6 +1165,12 @@ void TestWebFrameWidgetHost::RegisterRenderFrameMetadataObserver(
+     mojo::PendingRemote<cc::mojom::blink::RenderFrameMetadataObserver>
+         render_frame_metadata_observer) {}
+ 
++void TestWebFrameWidgetHost::RegisterPaintOpRecordingObserver(
++    mojo::PendingReceiver<app_swap::mojom::blink::PaintOpRecordingObserverClient>
++        paint_op_recording_observer_client_receiver,
++    mojo::PendingRemote<app_swap::mojom::blink::PaintOpRecordingObserver>
++        paint_op_recording_observer) {}
++
+ void TestWebFrameWidgetHost::AnimateDoubleTapZoomInMainFrame(
+     const gfx::Point& tap_point,
+     const gfx::Rect& rect_to_zoom) {}
+diff --git a/third_party/blink/renderer/core/frame/frame_test_helpers.h b/third_party/blink/renderer/core/frame/frame_test_helpers.h
+index 6f4c3aa178514..bf2a43e127719 100644
+--- a/third_party/blink/renderer/core/frame/frame_test_helpers.h
++++ b/third_party/blink/renderer/core/frame/frame_test_helpers.h
+@@ -202,6 +202,13 @@ class TestWebFrameWidgetHost : public mojom::blink::WidgetHost,
+           render_frame_metadata_observer_client_receiver,
+       mojo::PendingRemote<cc::mojom::blink::RenderFrameMetadataObserver>
+           render_frame_metadata_observer) override;
++  // AppSwap session recording: no-op for this test helper, same as the
++  // other rarely-exercised WidgetHost methods above.
++  void RegisterPaintOpRecordingObserver(
++      mojo::PendingReceiver<app_swap::mojom::blink::PaintOpRecordingObserverClient>
++          paint_op_recording_observer_client_receiver,
++      mojo::PendingRemote<app_swap::mojom::blink::PaintOpRecordingObserver>
++          paint_op_recording_observer) override;
+ 
+   // blink::mojom::FrameWidgetHost overrides.
+   void AnimateDoubleTapZoomInMainFrame(const gfx::Point& tap_point,
+diff --git a/third_party/blink/renderer/platform/BUILD.gn b/third_party/blink/renderer/platform/BUILD.gn
+index 233618cf12e7b..2068227213555 100644
+--- a/third_party/blink/renderer/platform/BUILD.gn
++++ b/third_party/blink/renderer/platform/BUILD.gn
+@@ -1636,6 +1636,8 @@ component("platform") {
+     "widget/compositing/layer_tree_view.cc",
+     "widget/compositing/layer_tree_view.h",
+     "widget/compositing/layer_tree_view_delegate.h",
++    "widget/compositing/paint_op_recording_observer_impl.cc",
++    "widget/compositing/paint_op_recording_observer_impl.h",
+     "widget/compositing/queue_report_time_swap_promise.cc",
+     "widget/compositing/queue_report_time_swap_promise.h",
+     "widget/compositing/render_frame_metadata_observer_impl.cc",
+diff --git a/third_party/blink/renderer/platform/widget/compositing/layer_tree_view.cc b/third_party/blink/renderer/platform/widget/compositing/layer_tree_view.cc
+index 260a705e2ce20..cd5530a170093 100644
+--- a/third_party/blink/renderer/platform/widget/compositing/layer_tree_view.cc
++++ b/third_party/blink/renderer/platform/widget/compositing/layer_tree_view.cc
+@@ -46,6 +46,7 @@
+ #include "third_party/blink/renderer/platform/graphics/dark_mode_settings_builder.h"
+ #include "third_party/blink/renderer/platform/graphics/raster_dark_mode_filter_impl.h"
+ #include "third_party/blink/renderer/platform/scheduler/public/widget_scheduler.h"
++#include "third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.h"
+ #include "ui/gfx/presentation_feedback.h"
+ 
+ namespace cc {
+@@ -384,13 +385,39 @@ void LayerTreeView::WillCommit(const cc::CommitState&) {
+   widget_scheduler_->DidCommitFrameToCompositor();
+ }
+ 
++void LayerTreeView::SetPaintOpRecordingObserver(
++    std::unique_ptr<PaintOpRecordingObserverImpl> observer) {
++  paint_op_recording_observer_ = std::move(observer);
++}
++
+ void LayerTreeView::DidCommit(int source_frame_number,
+                               base::TimeTicks commit_start_time,
+                               base::TimeTicks commit_finish_time) {
++  // AppSwap session recording (Milestone 1): needs the real cc::Layer
++  // tree via layer_tree_host_->root_layer() -- confirmed by an actual
++  // crash (cc/trees/layer_tree_host.cc:530, "Check failed:
++  // !inside_will_commit_") that this is NOT safe to call from
++  // WillCommit() (root_layer()'s non-const overload calls
++  // thread_unsafe_commit_state(), which calls
++  // WaitForProtectedSequenceCompletion() -> WaitForCommitCompletion(),
++  // which CHECKs it isn't invoked while cc::LayerTreeHost::inside_will_commit_
++  // is true -- true for the *entire* duration of the client_->WillCommit()
++  // call, unconditionally, regardless of whether recording is even
++  // enabled). DidCommit() runs after that guard is released, so this is
++  // the correct hook instead. Placed after the staleness check below
++  // (not before) so a commit belonging to a previous, already-detached
++  // delegate doesn't get captured. See PaintOpRecordingObserverImpl's own
++  // class comment for why this isn't routed through a formal
++  // cc::RenderFrameMetadataObserver-style interface instead. Cheap no-op
++  // (a null check, then a disabled-check inside OnCommit itself) when
++  // recording isn't active for this widget.
+   if (!delegate_ ||
+       source_frame_number < first_source_frame_for_current_delegate_) {
+     return;
+   }
++  if (paint_op_recording_observer_) {
++    paint_op_recording_observer_->OnCommit(layer_tree_host_->root_layer());
++  }
+   delegate_->DidCommitCompositorFrame(commit_start_time, commit_finish_time);
+ }
+ 
+diff --git a/third_party/blink/renderer/platform/widget/compositing/layer_tree_view.h b/third_party/blink/renderer/platform/widget/compositing/layer_tree_view.h
+index 4c5723d185b9f..d4945b007054d 100644
+--- a/third_party/blink/renderer/platform/widget/compositing/layer_tree_view.h
++++ b/third_party/blink/renderer/platform/widget/compositing/layer_tree_view.h
+@@ -7,6 +7,8 @@
+ 
+ #include <stdint.h>
+ 
++#include <utility>
++
+ #include "base/containers/circular_deque.h"
+ #include "base/functional/callback.h"
+ #include "base/memory/raw_ptr.h"
+@@ -24,6 +26,7 @@
+ 
+ namespace cc {
+ class AnimationHost;
++class Layer;
+ class LayerTreeFrameSink;
+ class LayerTreeHost;
+ class LayerTreeSettings;
+@@ -33,6 +36,8 @@ class TaskGraphRunner;
+ 
+ namespace blink {
+ 
++class PaintOpRecordingObserverImpl;
++
+ namespace scheduler {
+ class WidgetScheduler;
+ }  // namespace scheduler
+@@ -151,6 +156,25 @@ class PLATFORM_EXPORT LayerTreeView
+     return layer_tree_host_.get();
+   }
+ 
++  // AppSwap session recording (Milestone 1): takes ownership of
++  // `observer`, which WillCommit() calls with the committed cc::Layer
++  // tree's root on every commit from then on. Owned HERE (not by
++  // WidgetBase, which constructs it) specifically so it moves together
++  // with this LayerTreeView during ClearPreviousDelegateAndReattachIfNeeded()
++  // reattachment (widget_base.cc's `new_widget->layer_tree_view_ =
++  // std::move(layer_tree_view_)`) -- mirroring how a real
++  // cc::RenderFrameMetadataObserver is owned by (and moves with) the
++  // cc::LayerTreeHost this class owns. Getting this ownership wrong (e.g.
++  // keeping it as a sibling member on WidgetBase instead) would leave a
++  // dangling reference in the moved LayerTreeView after a reattachment,
++  // once the original WidgetBase-owned observer was destroyed.
++  // Defined in the .cc file, not inline here -- PaintOpRecordingObserverImpl
++  // is only forward-declared in this header, and assigning into
++  // paint_op_recording_observer_ (a std::unique_ptr<PaintOpRecordingObserverImpl>)
++  // destroys any previous value, which requires a complete type.
++  void SetPaintOpRecordingObserver(
++      std::unique_ptr<PaintOpRecordingObserverImpl> observer);
++
+  protected:
+   friend class RenderViewImplScaleFactorTest;
+ 
+@@ -203,6 +227,8 @@ class PLATFORM_EXPORT LayerTreeView
+   // callbacks which are tied to content produced by the previous delegate.
+   int first_source_frame_for_current_delegate_ = 0;
+ 
++  std::unique_ptr<PaintOpRecordingObserverImpl> paint_op_recording_observer_;
++
+   base::WeakPtrFactory<LayerTreeView> weak_factory_{this};
+   base::WeakPtrFactory<LayerTreeView> weak_factory_for_delegate_{this};
+ };
+diff --git a/third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.cc b/third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.cc
+new file mode 100644
+index 0000000000000..0e02123560be9
+--- /dev/null
++++ b/third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.cc
+@@ -0,0 +1,96 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.h"
++
++#include <utility>
++
++#include "base/memory/scoped_refptr.h"
++#include "cc/layers/layer.h"
++#include "cc/paint/display_item_list.h"
++#include "cc/paint/paint_op_capture_serializer.h"
++#include "cc/trees/layer_tree_host.h"
++#include "cc/trees/property_tree.h"
++
++namespace blink {
++
++namespace {
++
++// mojom's `array<uint8>` maps to blink::Vector<uint8_t> in the -blink
++// generated bindings, not std::vector<uint8_t> --
++// cc::SerializePaintOpBufferForCapture() (a plain, non-Blink cc/paint
++// helper, shared with the debug capture path in content/renderer/
++// gpu_benchmarking_extension.cc) necessarily returns the latter, so this
++// copies once at the renderer/mojo boundary.
++Vector<uint8_t> ToBlinkVector(const std::vector<uint8_t>& data) {
++  Vector<uint8_t> result;
++  result.Append(data.data(), static_cast<wtf_size_t>(data.size()));
++  return result;
++}
++
++}  // namespace
++
++PaintOpRecordingObserverImpl::PaintOpRecordingObserverImpl() = default;
++PaintOpRecordingObserverImpl::~PaintOpRecordingObserverImpl() = default;
++
++void PaintOpRecordingObserverImpl::Bind(
++    mojo::PendingReceiver<app_swap::mojom::blink::PaintOpRecordingObserver>
++        receiver,
++    mojo::PendingRemote<app_swap::mojom::blink::PaintOpRecordingObserverClient>
++        client) {
++  receiver_.Bind(std::move(receiver));
++  client_.Bind(std::move(client));
++}
++
++void PaintOpRecordingObserverImpl::SetEnabled(bool enabled) {
++  enabled_ = enabled;
++}
++
++void PaintOpRecordingObserverImpl::OnCommit(const cc::Layer* root_layer) {
++  if (!enabled_ || !client_ || !root_layer) {
++    return;
++  }
++
++  const uint32_t frame_index = frame_index_++;
++
++  const cc::ScrollTree& scroll_tree =
++      root_layer->layer_tree_host()->property_trees()->scroll_tree();
++
++  int layer_id = 0;
++  for (auto* layer : *root_layer->layer_tree_host()) {
++    scoped_refptr<cc::DisplayItemList> display_list =
++        layer->CapturePaintOpDisplayListForTesting();
++    if (!display_list) {
++      continue;
++    }
++
++    // A real page can have scrollable subtrees (kDrawScrollingContents
++    // ops) whose offsets MUST be supplied at serialize time -- confirmed
++    // by an actual crash (cc/paint/paint_op_buffer_serializer.cc:287,
++    // hit by focusing a search box on a real page) when this was
++    // omitted. See SerializePaintOpBufferForCapture()'s own comment for
++    // why cc/paint can't build this map itself.
++    cc::ScrollOffsetMap raster_inducing_scroll_offsets;
++    for (auto& [element_id, unused] :
++        display_list->raster_inducing_scrolls()) {
++      raster_inducing_scroll_offsets[element_id] =
++          scroll_tree.current_scroll_offset(element_id);
++    }
++
++    std::optional<cc::SerializedPaintOpBuffer> serialized =
++        cc::SerializePaintOpBufferForCapture(display_list->paint_op_buffer(),
++                                             &raster_inducing_scroll_offsets);
++    if (serialized) {
++      client_->OnPaintOpFrame(frame_index, layer_id, layer->bounds().width(),
++                              layer->bounds().height(),
++                              layer->ScreenSpaceTransform(),
++                              ToBlinkVector(serialized->paintops),
++                              ToBlinkVector(serialized->strikedata),
++                              ToBlinkVector(serialized->imagedata));
++    }
++    ++layer_id;
++  }
++}
++
++}  // namespace blink
+diff --git a/third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.h b/third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.h
+new file mode 100644
+index 0000000000000..4ea94c7094436
+--- /dev/null
++++ b/third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.h
+@@ -0,0 +1,84 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WIDGET_COMPOSITING_PAINT_OP_RECORDING_OBSERVER_IMPL_H_
++#define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WIDGET_COMPOSITING_PAINT_OP_RECORDING_OBSERVER_IMPL_H_
++
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/pending_remote.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "third_party/blink/public/mojom/app_swap/paint_op_recording.mojom-blink.h"
++#include "third_party/blink/renderer/platform/platform_export.h"
++
++namespace cc {
++class Layer;
++}
++
++namespace blink {
++
++// AppSwap session recording (Milestone 1): the renderer-side half of the
++// app_swap.mojom.PaintOpRecordingObserver[Client] pipe pair -- see that
++// mojom file's own design note for the full architecture and precedent
++// this is modeled on (cc.mojom.RenderFrameMetadataObserver).
++//
++// Deliberately NOT a cc::RenderFrameMetadataObserver-style interface
++// formally registered with cc::LayerTreeHost: this needs the real
++// cc::Layer tree (cc::CommitState::root_layer) directly, not a
++// post-processed metadata struct, so it's driven by a plain callback
++// LayerTreeView invokes from its own WillCommit() override -- see
++// LayerTreeView::SetPaintOpRecordingCallback() and WidgetBase::
++// InitializeCompositing() (where this class is constructed and wired up,
++// mirroring WidgetBase::CreateRenderFrameObserver()'s own mojo-pipe
++// bootstrap shape).
++//
++// Uses Layer::CapturePaintOpDisplayListForTesting() (cc/layers/layer.h)
++// rather than the zero-forced-repaint production PictureLayer::
++// GetDisplayItemList() accessor -- a deliberate Milestone 1 simplification
++// (reusing already-proven code from the earlier capture spike) that costs
++// a real, disclosed repaint on every commit while recording is enabled;
++// migrating to the production accessor (and the free "unchanged since last
++// commit" skip that comes with it) is a documented follow-up, not
++// something this milestone needed to get right to prove the pipeline
++// works end-to-end.
++class PLATFORM_EXPORT PaintOpRecordingObserverImpl
++    : public app_swap::mojom::blink::PaintOpRecordingObserver {
++ public:
++  PaintOpRecordingObserverImpl();
++  ~PaintOpRecordingObserverImpl() override;
++
++  PaintOpRecordingObserverImpl(const PaintOpRecordingObserverImpl&) = delete;
++  PaintOpRecordingObserverImpl& operator=(const PaintOpRecordingObserverImpl&) =
++      delete;
++
++  void Bind(
++      mojo::PendingReceiver<app_swap::mojom::blink::PaintOpRecordingObserver>
++          receiver,
++      mojo::PendingRemote<
++          app_swap::mojom::blink::PaintOpRecordingObserverClient> client);
++
++  // app_swap::mojom::blink::PaintOpRecordingObserver:
++  void SetEnabled(bool enabled) override;
++
++  // Called from LayerTreeView::WillCommit() once per commit. Cheap no-op
++  // when disabled (a single bool check) or when `root_layer` is null.
++  void OnCommit(const cc::Layer* root_layer);
++
++ private:
++  mojo::Receiver<app_swap::mojom::blink::PaintOpRecordingObserver> receiver_{
++      this};
++  mojo::Remote<app_swap::mojom::blink::PaintOpRecordingObserverClient> client_;
++  bool enabled_ = false;
++  // Incremented once per OnCommit() call (not per layer) -- shared by
++  // every layer emitted during that commit, so a later reader can regroup
++  // per-layer OnPaintOpFrame() calls back into "everything captured in one
++  // commit." Deliberately not reset when recording toggles off/on again;
++  // uniqueness within one recording session's segment files is all that
++  // matters, not starting back at 0.
++  uint32_t frame_index_ = 0;
++};
++
++}  // namespace blink
++
++#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_WIDGET_COMPOSITING_PAINT_OP_RECORDING_OBSERVER_IMPL_H_
+diff --git a/third_party/blink/renderer/platform/widget/widget_base.cc b/third_party/blink/renderer/platform/widget/widget_base.cc
+index e35a983c4e5eb..8eec48f707755 100644
+--- a/third_party/blink/renderer/platform/widget/widget_base.cc
++++ b/third_party/blink/renderer/platform/widget/widget_base.cc
+@@ -53,6 +53,7 @@
+ #include "third_party/blink/renderer/platform/widget/compositing/blink_categorized_worker_pool_delegate.h"
+ #include "third_party/blink/renderer/platform/widget/compositing/layer_tree_settings.h"
+ #include "third_party/blink/renderer/platform/widget/compositing/layer_tree_view.h"
++#include "third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.h"
+ #include "third_party/blink/renderer/platform/widget/compositing/render_frame_metadata_observer_impl.h"
+ #include "third_party/blink/renderer/platform/widget/compositing/widget_compositor.h"
+ #include "third_party/blink/renderer/platform/widget/frame_widget.h"
+@@ -243,6 +244,15 @@ void WidgetBase::InitializeCompositing(
+             : nullptr,
+         cc::CategorizedWorkerPool::GetOrCreate(
+             &BlinkCategorizedWorkerPoolDelegate::Get()));
++
++    // AppSwap session recording (Milestone 1). Only for a genuinely new
++    // LayerTreeView (this `else` branch) -- on the `previous_widget`
++    // reattachment path above, the existing LayerTreeView (and whatever
++    // PaintOpRecordingObserverImpl it already owns) simply moves over
++    // with it, matching CreateRenderFrameObserver()'s own real
++    // RenderFrameMetadataObserver, which is likewise only ever created
++    // here, not on the reattachment path.
++    CreatePaintOpRecordingObserver();
+   }
+ 
+   screen_infos_ = screen_infos;
+@@ -1125,6 +1135,31 @@ WidgetBase::CreateRenderFrameObserver() {
+   return render_frame_metadata_observer;
+ }
+ 
++void WidgetBase::CreatePaintOpRecordingObserver() {
++  mojo::PendingRemote<app_swap::mojom::blink::PaintOpRecordingObserver>
++      observer_remote;
++  mojo::PendingRemote<app_swap::mojom::blink::PaintOpRecordingObserverClient>
++      client_remote;
++  mojo::PendingReceiver<app_swap::mojom::blink::PaintOpRecordingObserverClient>
++      client_receiver = client_remote.InitWithNewPipeAndPassReceiver();
++
++  auto paint_op_recording_observer =
++      std::make_unique<PaintOpRecordingObserverImpl>();
++  paint_op_recording_observer->Bind(
++      observer_remote.InitWithNewPipeAndPassReceiver(),
++      std::move(client_remote));
++
++  widget_host_->RegisterPaintOpRecordingObserver(std::move(client_receiver),
++                                                 std::move(observer_remote));
++
++  // Owned by layer_tree_view_, not this WidgetBase -- see
++  // LayerTreeView::SetPaintOpRecordingObserver()'s own comment for why
++  // that ownership matters (it needs to move together with
++  // layer_tree_view_ across a widget reattachment).
++  layer_tree_view_->SetPaintOpRecordingObserver(
++      std::move(paint_op_recording_observer));
++}
++
+ void WidgetBase::SetCompositorVisible(bool visible) {
+   if (never_composited_)
+     return;
+diff --git a/third_party/blink/renderer/platform/widget/widget_base.h b/third_party/blink/renderer/platform/widget/widget_base.h
+index a26fb60d607ca..cc6741e509214 100644
+--- a/third_party/blink/renderer/platform/widget/widget_base.h
++++ b/third_party/blink/renderer/platform/widget/widget_base.h
+@@ -218,6 +218,17 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
+   std::unique_ptr<cc::RenderFrameMetadataObserver> CreateRenderFrameObserver()
+       override;
+ 
++  // AppSwap session recording (Milestone 1). Not an override of anything
++  // -- unlike CreateRenderFrameObserver() just above, this isn't routed
++  // through a formal cc-owned observer interface (see
++  // PaintOpRecordingObserverImpl's own class comment for why), so it's
++  // just called directly from InitializeCompositing(). Constructs
++  // paint_op_recording_observer_, bootstraps its mojo pipe via
++  // widget_host_ (same pipe-construction shape as
++  // CreateRenderFrameObserver()), and registers it with
++  // layer_tree_view_.
++  void CreatePaintOpRecordingObserver();
++
+   std::unique_ptr<cc::LayerTreeFrameSink> CreateUnboundedFrameSink(
+       CrossVariantMojoRemote<
+           viz::mojom::blink::CompositorFrameSinkInterfaceBase>

@@ -577,6 +577,133 @@ gen 0018-i18n-translations.patch \
 gen 0019-supported-ui-locales.patch \
   ui/base/l10n/l10n_util.cc
 
+# Standalone spike tool (not a shipping feature) for session-recording
+# feasibility research: proves whether a cc::PaintOpBuffer -- including
+# text, the highest-risk op -- survives serialize -> disk -> deserialize
+# (read back in a SEPARATE process invocation) -> Playback() with
+# pixel-identical output. See the tool's own file comment for the full
+# rationale and the real, existing Chromium test pattern it's built from.
+gen 0020-paintop-disk-roundtrip-spike.patch \
+  cc/paint/paintop_disk_roundtrip_tool.cc \
+  cc/paint/BUILD.gn
+
+# Phase 1 of the same feasibility research: capture a REAL cc::PaintOpBuffer
+# from a live AppSwap page instead of Phase 0's hand-built one, via a new
+# chrome.gpuBenchmarking.dumpPaintOpBuffer(dirname) method (modeled closely
+# on the existing printToSkPicture/SkPictureSerializer right next to it).
+# Layer::CapturePaintOpDisplayListForTesting() (overridden in PictureLayer)
+# is the one small addition to cc/layers itself: it's the same
+# ContentLayerClient::PaintContentsToDisplayList() call GetPicture() already
+# makes today, just returning the real DisplayItemList/PaintOpBuffer
+# directly instead of re-recording it into an SkPicture. Capture-to-disk
+# only -- no replay. paintop_disk_roundtrip_tool.cc (already covered by
+# 0020 above) gained one additive --mode=read_capture for verifying these
+# real captures with the same tool, rather than its own hand-built buffers.
+gen 0021-paintop-capture-real-page.patch \
+  cc/layers/layer.h \
+  cc/layers/layer.cc \
+  cc/layers/picture_layer.h \
+  cc/layers/picture_layer.cc \
+  cc/paint/paint_op_capture_serializer.h \
+  cc/paint/paint_op_capture_serializer.cc \
+  content/renderer/gpu_benchmarking_extension.h \
+  content/renderer/gpu_benchmarking_extension.cc
+
+# Real feature (not a spike): Milestone 1 of continuous per-tab session
+# recording, scoped in the "Real feature: continuous session recording"
+# plan. Storage/toggle/frame-sink layers only -- the actual renderer<->
+# browser transport that would feed real frames into
+# AppSwapSessionRecordingTabHelper::OnFrameCaptured() is designed (see
+# third_party/blink/public/mojom/app_swap/paint_op_recording.mojom's own
+# design note) but not yet wired up; see that TabHelper's own STATUS
+# comment for exactly what's left and why it stopped there this session.
+# Changes to tab_helpers.cc (already covered by 0012 above), toolbar_view.
+# {cc,h} (already covered by 0013 above), chrome/browser/app_swap/BUILD.gn
+# (already covered by 0005 above), and chrome/browser/ui/views/app_swap/
+# BUILD.gn (already covered by 0009 above) -- each just gained one new
+# line for this feature -- are picked up automatically by those patches,
+# not listed again here.
+gen 0022-session-recording-milestone-1.patch \
+  chrome/browser/app_swap/app_swap_session_recording_tab_helper.h \
+  chrome/browser/app_swap/app_swap_session_recording_tab_helper.cc \
+  chrome/browser/app_swap/app_swap_session_recording_writer.h \
+  chrome/browser/app_swap/app_swap_session_recording_writer.cc \
+  chrome/browser/ui/views/app_swap/app_swap_session_recording_button.h \
+  chrome/browser/ui/views/app_swap/app_swap_session_recording_button.cc \
+  third_party/blink/public/mojom/app_swap/paint_op_recording.mojom \
+  third_party/blink/public/mojom/BUILD.gn \
+  third_party/blink/public/mojom/widget/platform_widget.mojom \
+  content/public/browser/render_widget_host.h \
+  content/browser/renderer_host/render_widget_host_impl.h \
+  content/browser/renderer_host/render_widget_host_impl.cc \
+  third_party/blink/renderer/platform/BUILD.gn \
+  third_party/blink/renderer/platform/widget/compositing/layer_tree_view.h \
+  third_party/blink/renderer/platform/widget/compositing/layer_tree_view.cc \
+  third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.h \
+  third_party/blink/renderer/platform/widget/compositing/paint_op_recording_observer_impl.cc \
+  third_party/blink/renderer/platform/widget/widget_base.h \
+  third_party/blink/renderer/platform/widget/widget_base.cc \
+  components/plugins/renderer/webview_plugin.h \
+  content/public/test/fake_render_widget_host.h \
+  content/public/test/fake_render_widget_host.cc \
+  third_party/blink/renderer/core/frame/frame_test_helpers.h \
+  third_party/blink/renderer/core/frame/frame_test_helpers.cc
+
+# appswap://recordings: lists every AppSwap session recording on disk for
+# the current Profile (listing only, no playback -- see the
+# "appswap://recordings" plan's own scope note). Follows the
+# appswap://projects WebUI template exactly (mojom + *_ui.* +
+# *_page_handler.* + Lit resources). Changes to chrome_web_ui_configs.cc
+# (0005), chrome_browser_interface_binders_webui_parts_desktop.cc (0015),
+# chrome/browser/ui/webui/BUILD.gn (0005), chrome/browser/app_swap/BUILD.gn
+# (0005), and tools/gritsettings/resource_ids.spec (0014) -- each just
+# gained one new registration line/entry -- are picked up automatically
+# by those patches, not listed again here. The resource_ids.spec entry's
+# own comment flags that its numeric id was placed by hand (right after
+# app_swap_projects' own block), not computed via grit's id-assignment
+# tooling -- re-derive it properly if a build reports a collision.
+gen 0023-recordings-webui.patch \
+  chrome/browser/app_swap/app_swap_session_recording_paths.h \
+  chrome/browser/app_swap/app_swap_session_recording_paths.cc \
+  chrome/browser/app_swap/app_swap_recordings_scanner.h \
+  chrome/browser/app_swap/app_swap_recordings_scanner.cc \
+  chrome/browser/ui/webui/app_swap_recordings \
+  chrome/browser/resources/app_swap_recordings
+
+# Session recording player: continuous autoplay + scrub bar for a saved
+# recording, added to the appswap://recordings page (0023). Two real gaps
+# had to close first -- the capture format didn't record each layer's
+# screen-space transform or which layers belonged to the same commit
+# (paint_op_recording.mojom/paint_op_recording_observer_impl.cc/
+# render_widget_host*/app_swap_session_recording_tab_helper.*/
+# app_swap_session_recording_writer.* all already tracked by 0022, picked
+# up automatically), and playback needs a real Ganesh (GPU) canvas since
+# captured text round-trips as DrawSlugOp (only Ganesh/Graphite SkDevices
+# implement it) -- cc/paint/paint_op_capture_serializer.{h,cc}'s new
+# DeserializePaintOpBufferForPlayback() is already tracked by 0021, also
+# picked up automatically. What's new here: a dedicated child-process
+# renderer service (chrome/services/app_swap_playback/, launched via
+# content::ServiceProcessHost::Launch -- mirrors on_device_model's own
+# lazy-launch-from-a-WebUI-page-handler precedent, and reuses cc/paint/
+# paintop_disk_roundtrip_tool.cc's already-proven GL/Ganesh bootstrap
+# almost verbatim), a browser-side reader that indexes and re-reads a
+# recording's segment files on demand (app_swap_session_recording_reader.*,
+# new -- offsets only, not payloads, so scrubbing never decodes every prior
+# frame), and its chrome/utility/services.cc + chrome/utility/BUILD.gn
+# registration (the required "add a Run<X> factory + services.Add(...)"
+# point for any new isolated service, same shape as RunRemovableStorageWriter
+# right next to it). Changes to app_swap_recordings.mojom/
+# _page_handler.*/the Lit resources (new player.ts/player.html.ts/
+# player.css alongside app.ts's existing files) and
+# tools/gritsettings/resource_ids.spec's size bump are all covered by 0023/
+# 0014 respectively, not listed again here.
+gen 0024-session-recording-player.patch \
+  chrome/browser/app_swap/app_swap_session_recording_reader.h \
+  chrome/browser/app_swap/app_swap_session_recording_reader.cc \
+  chrome/services/app_swap_playback \
+  chrome/utility/services.cc \
+  chrome/utility/BUILD.gn
+
 # Whether `f` (a path relative to src/) is one of the images tracked under
 # resources/ instead of as a patch -- sync_binary_resources() above already
 # copied it there, so it's covered even though it won't appear in any
