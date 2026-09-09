@@ -1,0 +1,50 @@
+diff --git a/chrome/browser/ui/startup/startup_browser_creator.cc b/chrome/browser/ui/startup/startup_browser_creator.cc
+index 661831f8e98d6..ef143dea02781 100644
+--- a/chrome/browser/ui/startup/startup_browser_creator.cc
++++ b/chrome/browser/ui/startup/startup_browser_creator.cc
+@@ -1632,6 +1632,25 @@ StartupProfilePathInfo GetStartupProfilePath(
+             .mode = StartupProfileMode::kBrowserWindow};
+   }
+ 
++  if (command_line.HasSwitch(switches::kProject)) {
++    // Use GetSwitchValueNative() rather than GetSwitchValueASCII() to
++    // support non-ASCII project names.
++    base::CommandLine::StringType project_name_native =
++        command_line.GetSwitchValueNative(switches::kProject);
++    if (!project_name_native.empty()) {
++      std::string project_name_utf8;
++#if BUILDFLAG(IS_WIN)
++      project_name_utf8 = base::WideToUTF8(project_name_native);
++#else
++      project_name_utf8 = std::move(project_name_native);
++#endif
++      base::FilePath project_dir =
++          g_browser_process->profile_manager()->GetOrCreateProjectProfileDir(
++              base::UTF8ToUTF16(project_name_utf8));
++      return {.path = project_dir, .mode = StartupProfileMode::kBrowserWindow};
++    }
++  }
++
+   base::FilePath command_line_profile_directory =
+       command_line.GetSwitchValuePath(switches::kProfileDirectory);
+ 
+diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
+index 58a7df2b46a14..961acd628ab08 100644
+--- a/chrome/common/chrome_switches.h
++++ b/chrome/common/chrome_switches.h
+@@ -612,6 +612,15 @@ inline constexpr char kProfileEmail[] = "profile-email";
+ inline constexpr char kCreateProfileEmailIfNotExists[] =
+     "create-profile-email-if-not-exists";
+ 
++// Selects (creating it first if it doesn't already exist) the project --
++// see chrome/browser/app_swap -- with the given display name to associate
++// with the first browser launched. Unlike kProfileDirectory/kProfileEmail,
++// this always succeeds rather than falling back to a picker or the last
++// used profile: `appswap <url> --project=<name>` is meant to open <url> in
++// that named project whether or not it already existed. Takes priority
++// over kProfileDirectory and kProfileEmail if more than one is given.
++inline constexpr char kProject[] = "project";
++
+ // Forces proxy auto-detection.
+ inline constexpr char kProxyAutoDetect[] = "proxy-auto-detect";
+ 

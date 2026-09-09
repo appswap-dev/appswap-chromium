@@ -75,10 +75,10 @@ index 0000000000000..ed287a4ee8773
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_TAB_HELPER_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc
 new file mode 100644
-index 0000000000000..0ee2b2354e43c
+index 0000000000000..3bcefd858adff
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,180 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -88,7 +88,6 @@ index 0000000000000..0ee2b2354e43c
 +#include <vector>
 +
 +#include "base/functional/bind.h"
-+#include "base/logging.h"
 +#include "chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -157,15 +156,12 @@ index 0000000000000..0ee2b2354e43c
 +void AppSwapResponsiveLabButton::ButtonPressed() {
 +  content::WebContents* web_contents =
 +      browser_->GetTabStripModel()->GetActiveWebContents();
-+  LOG(ERROR) << "[ResponsiveLab] ButtonPressed: web_contents="
-+             << web_contents;
 +  if (!web_contents) {
 +    return;
 +  }
 +  AppSwapResponsiveLabTabHelper* helper =
 +      AppSwapResponsiveLabTabHelper::GetOrCreateForWebContents(web_contents);
 +  const bool new_active = !helper->active();
-+  LOG(ERROR) << "[ResponsiveLab] ButtonPressed: new_active=" << new_active;
 +  helper->SetActive(new_active);
 +  SyncContentsContainer(web_contents, new_active);
 +  if (!new_active) {
@@ -226,15 +222,11 @@ index 0000000000000..0ee2b2354e43c
 +    content::WebContents* web_contents,
 +    bool active) {
 +  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
-+  LOG(ERROR) << "[ResponsiveLab] SyncContentsContainer: active=" << active
-+             << " browser_view=" << browser_view;
 +  if (!browser_view) {
 +    return;
 +  }
 +  ContentsContainerView* container =
 +      browser_view->GetContentsContainerViewFor(web_contents);
-+  LOG(ERROR) << "[ResponsiveLab] SyncContentsContainer: container="
-+             << container;
 +  if (!container) {
 +    // web_contents isn't currently shown by any container (e.g. it's a
 +    // background tab) -- nothing on screen to sync.
@@ -243,28 +235,17 @@ index 0000000000000..0ee2b2354e43c
 +
 +  AppSwapResponsiveLabOverlayView* overlay =
 +      container->app_swap_responsive_lab_overlay_view();
-+  LOG(ERROR) << "[ResponsiveLab] SyncContentsContainer: overlay=" << overlay
-+             << " overlay bounds=" << (overlay ? overlay->bounds().ToString()
-+                                               : "n/a")
-+             << " overlay widget=" << (overlay ? overlay->GetWidget() : nullptr);
 +  if (!overlay) {
 +    return;
 +  }
 +
 +  if (active) {
 +    const GURL url = web_contents->GetLastCommittedURL();
-+    LOG(ERROR) << "[ResponsiveLab] SyncContentsContainer: showing grid for "
-+               << url;
 +    overlay->ShowGridFor(
 +        web_contents,
 +        Profile::FromBrowserContext(web_contents->GetBrowserContext()), url,
 +        BuildDevicePresets());
 +    container->contents_view()->SetVisible(false);
-+    LOG(ERROR) << "[ResponsiveLab] SyncContentsContainer: after "
-+               << "ShowGridFor(), overlay visible=" << overlay->GetVisible()
-+               << " bounds=" << overlay->bounds().ToString()
-+               << " contents_view visible="
-+               << container->contents_view()->GetVisible();
 +  } else {
 +    // HideCurrent() detaches whatever the overlay is currently showing --
 +    // which, since it's one-per-content-slot rather than one-per-tab, may
@@ -376,10 +357,10 @@ index 0000000000000..a31238232ffd0
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_BUTTON_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc
 new file mode 100644
-index 0000000000000..c74efa6760520
+index 0000000000000..8b7a12ff96fe0
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc
-@@ -0,0 +1,232 @@
+@@ -0,0 +1,201 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -389,7 +370,6 @@ index 0000000000000..c74efa6760520
 +#include <algorithm>
 +#include <utility>
 +
-+#include "base/logging.h"
 +#include "base/numerics/safe_conversions.h"
 +#include "ui/base/metadata/metadata_impl_macros.h"
 +#include "ui/color/color_id.h"
@@ -572,36 +552,6 @@ index 0000000000000..c74efa6760520
 +  gfx::Transform transform;
 +  transform.Scale(scale_);
 +  content_->SetTransform(transform);
-+  // TEMPORARY debug logging: chasing the browser-window-wide positioning
-+  // glitch (canvas painting over the toolbar, cropped at the window's
-+  // right/bottom edges). Remove once found.
-+  LOG(ERROR) << "[ResponsiveLab] CanvasView::ApplyPanAndScale: this bounds="
-+             << bounds().ToString() << " widget=" << GetWidget()
-+             << " pan_offset=" << pan_offset_.ToString()
-+             << " scale=" << scale_
-+             << " content bounds=" << content_->bounds().ToString()
-+             << " content transform=" << content_->GetTransform().ToString()
-+             << " content layer=" << content_->layer();
-+  // TEMPORARY debug logging: chasing "webviews get cropped too much" when
-+  // dragging the pane toward the top (pan_offset_.y() goes negative,
-+  // content_'s top edge moves above this view's own origin). Logs each
-+  // cell's own bounds/visible-bounds unconditionally now -- gating this on
-+  // pan_offset_.y() < 0 sounded right but missed the previous repro
-+  // entirely, since zooming toward any point other than content_'s own
-+  // top-left already pushes pan_offset_ negative on its own,
-+  // independent of manual panning direction. So: always log; it's only
-+  // ~2 lines per cell. Remove once found.
-+  for (views::View* cell : content_->children()) {
-+    LOG(ERROR) << "[ResponsiveLab] CanvasView::ApplyPanAndScale: cell "
-+               << "bounds=" << cell->bounds().ToString()
-+               << " visible_bounds=" << cell->GetVisibleBounds().ToString();
-+    for (views::View* child : cell->children()) {
-+      LOG(ERROR) << "[ResponsiveLab] CanvasView::ApplyPanAndScale:   "
-+                 << "child bounds=" << child->bounds().ToString()
-+                 << " visible_bounds="
-+                 << child->GetVisibleBounds().ToString();
-+    }
-+  }
 +}
 +
 +void AppSwapResponsiveLabCanvasView::NotifyChanged() {
@@ -1284,10 +1234,10 @@ index 0000000000000..808cecbeee537
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_MINIMAP_VIEW_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc
 new file mode 100644
-index 0000000000000..0aa5cc2ed178b
+index 0000000000000..f52e4c653649f
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc
-@@ -0,0 +1,246 @@
+@@ -0,0 +1,209 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1298,7 +1248,6 @@ index 0000000000000..0aa5cc2ed178b
 +#include <utility>
 +
 +#include "base/functional/bind.h"
-+#include "base/logging.h"
 +#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h"
 +#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.h"
 +#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h"
@@ -1376,9 +1325,6 @@ index 0000000000000..0aa5cc2ed178b
 +    Profile* profile,
 +    const GURL& url,
 +    std::vector<DevicePreset> presets) {
-+  LOG(ERROR) << "[ResponsiveLab] OverlayView::ShowGridFor: web_contents="
-+             << web_contents << " current_owner_=" << current_owner_
-+             << " url=" << url;
 +  if (current_owner_ == web_contents) {
 +    SetVisible(true);
 +    return;
@@ -1397,7 +1343,6 @@ index 0000000000000..0aa5cc2ed178b
 +  current_owner_ = web_contents;
 +  Observe(web_contents);
 +  SetVisible(true);
-+  LogState("ShowGridFor (end)");
 +}
 +
 +void AppSwapResponsiveLabOverlayView::HideCurrent() {
@@ -1436,8 +1381,6 @@ index 0000000000000..0aa5cc2ed178b
 +  // without trying to hand the grid back to its holder -- that
 +  // WebContentsUserData is being torn down along with the WebContents
 +  // itself, so there's nothing to hand it to; just let it go.
-+  LOG(ERROR) << "[ResponsiveLab] OverlayView::WebContentsDestroyed: "
-+             << "current_owner_=" << current_owner_;
 +  current_owner_ = nullptr;
 +  Observe(nullptr);
 +  canvas_view_->DetachContent();  // dropped -- see comment above
@@ -1447,7 +1390,6 @@ index 0000000000000..0aa5cc2ed178b
 +void AppSwapResponsiveLabOverlayView::OnBoundsChanged(
 +    const gfx::Rect& previous_bounds) {
 +  views::View::OnBoundsChanged(previous_bounds);
-+  LogState("OnBoundsChanged");
 +}
 +
 +void AppSwapResponsiveLabOverlayView::Layout(PassKey) {
@@ -1461,7 +1403,6 @@ index 0000000000000..0aa5cc2ed178b
 +      minimap_size.width(), minimap_size.height()));
 +
 +  minimap_view_->Refresh();
-+  LogState("Layout");
 +}
 +
 +void AppSwapResponsiveLabOverlayView::AddedToWidget() {
@@ -1504,42 +1445,14 @@ index 0000000000000..0aa5cc2ed178b
 +#endif
 +}
 +
-+void AppSwapResponsiveLabOverlayView::LogState(const char* where) {
-+  gfx::Point origin_in_screen;
-+  gfx::Point origin_in_widget;
-+  if (GetWidget()) {
-+    views::View::ConvertPointToScreen(this, &origin_in_screen);
-+    views::View::ConvertPointToWidget(this, &origin_in_widget);
-+  }
-+  LOG(ERROR) << "[ResponsiveLab] OverlayView::LogState(" << where
-+             << "): this bounds=" << bounds().ToString()
-+             << " visible=" << GetVisible() << " widget=" << GetWidget()
-+             << " this layer=" << layer()
-+             << " origin_in_widget=" << origin_in_widget.ToString()
-+             << " origin_in_screen=" << origin_in_screen.ToString()
-+             << " widget window bounds="
-+             << (GetWidget() ? GetWidget()->GetWindowBoundsInScreen().ToString()
-+                             : "n/a")
-+             << " widget client bounds="
-+             << (GetWidget()
-+                     ? GetWidget()->GetClientAreaBoundsInScreen().ToString()
-+                     : "n/a")
-+             << " current_owner_=" << current_owner_
-+             << " canvas bounds=" << canvas_view_->bounds().ToString()
-+             << " canvas layer=" << canvas_view_->layer()
-+             << " canvas has_content=" << canvas_view_->has_content()
-+             << " content preferred_size="
-+             << canvas_view_->ContentPreferredSize().ToString();
-+}
-+
 +BEGIN_METADATA(AppSwapResponsiveLabOverlayView)
 +END_METADATA
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h
 new file mode 100644
-index 0000000000000..3919b18d81f3f
+index 0000000000000..08c8cd7955b87
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,164 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1671,10 +1584,6 @@ index 0000000000000..3919b18d81f3f
 +  // Passed to canvas_view_ as its change callback -- refreshes the minimap
 +  // whenever the canvas's content, pan, or zoom changes.
 +  void OnCanvasChanged();
-+
-+  // TEMPORARY debug helper: logs this view's own state plus the canvas's
-+  // current content/viewport. Remove once the blank-grid bug is found.
-+  void LogState(const char* where);
 +
 +  // The tab whose grid is currently attached to canvas_view_, or null if
 +  // nothing is currently shown. Non-owning -- the grid content's real
@@ -1947,20 +1856,18 @@ index 0000000000000..59bdb7d64087a
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_WHEEL_OBSERVER_MAC_H_
 diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
-index 099b89a24c048..36d1718361144 100644
+index 099b89a24c048..a5ed04119463f 100644
 --- a/chrome/browser/ui/views/frame/contents_container_view.cc
 +++ b/chrome/browser/ui/views/frame/contents_container_view.cc
-@@ -9,7 +9,9 @@
- #include <utility>
+@@ -10,6 +10,7 @@
  
  #include "base/i18n/rtl.h"
-+#include "base/logging.h"
  #include "chrome/browser/actor/ui/actor_overlay_web_view.h"
 +#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h"
  #include "chrome/browser/devtools/devtools_contents_resizing_strategy.h"
  #include "chrome/browser/enterprise/data_protection/data_protection_overlay_view.h"
  #include "chrome/browser/glic/browser_ui/context_sharing_border_view.h"
-@@ -126,6 +128,9 @@ ContentsContainerView::ContentsContainerView(BrowserView* browser_view)
+@@ -126,6 +127,9 @@ ContentsContainerView::ContentsContainerView(BrowserView* browser_view)
    read_anything_immersive_overlay_view_ =
        AddChildView(std::move(read_anything_immersive_overlay_view));
  
@@ -1970,7 +1877,7 @@ index 099b89a24c048..36d1718361144 100644
    contents_scrim_view_ = AddChildView(std::make_unique<ScrimView>());
    contents_scrim_view_->layer()->SetName("ContentsScrimView");
  
-@@ -600,6 +605,19 @@ views::ProposedLayout ContentsContainerView::CalculateProposedLayout(
+@@ -600,6 +604,15 @@ views::ProposedLayout ContentsContainerView::CalculateProposedLayout(
                                         non_devtools_contents_bounds);
    }
  
@@ -1978,10 +1885,6 @@ index 099b89a24c048..36d1718361144 100644
 +  // AppSwap Responsive Lab is active, rather than overlaying on top of it
 +  // (see AppSwapResponsiveLabButton::SyncContentsContainer, which hides
 +  // contents_view_ for the same tab this shows for).
-+  // TEMPORARY debug logging: remove once the blank-grid bug is found.
-+  LOG(ERROR) << "[ResponsiveLab] CalculateProposedLayout: overlay visible="
-+             << app_swap_responsive_lab_overlay_view_->GetVisible()
-+             << " bounds=" << non_devtools_contents_bounds.ToString();
 +  layouts.child_layouts.emplace_back(
 +      app_swap_responsive_lab_overlay_view_.get(),
 +      app_swap_responsive_lab_overlay_view_->GetVisible(),

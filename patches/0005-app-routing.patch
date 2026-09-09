@@ -1438,10 +1438,10 @@ index 0000000000000..707f425096a7c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_SOURCE_H_
 diff --git a/chrome/browser/app_swap/app_swap_url_loader_factory.cc b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
 new file mode 100644
-index 0000000000000..e7f9cb6bddbc4
+index 0000000000000..b735a7d43fbca
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_url_loader_factory.cc
-@@ -0,0 +1,989 @@
+@@ -0,0 +1,1096 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1460,11 +1460,13 @@ index 0000000000000..e7f9cb6bddbc4
 +#include "base/files/file_util.h"
 +#include "base/functional/bind.h"
 +#include "base/functional/callback_helpers.h"
++#include "base/json/json_reader.h"
 +#include "base/memory/self_deleting.h"
 +#include "base/no_destructor.h"
 +#include "base/strings/escape.h"
 +#include "base/strings/string_number_conversions.h"
 +#include "base/task/thread_pool.h"
++#include "base/values.h"
 +#include "chrome/browser/app_swap/app_swap_apps_service.h"
 +#include "chrome/browser/app_swap/app_swap_apps_service_factory.h"
 +#include "chrome/browser/app_swap/app_swap_artifact_provider.h"
@@ -1519,11 +1521,85 @@ index 0000000000000..e7f9cb6bddbc4
 +  return *runner;
 +}
 +
-+// Resolves a request URL path to a file on disk under `serve_dir`, applying
-+// SPA fallback for navigations. Returns an empty path when nothing matches.
-+base::FilePath ResolveFilePath(const base::FilePath& serve_dir,
-+                               const std::string& path,
-+                               bool accepts_html) {
++// An app's package.json's "appswap" dict, controlling how ResolveFilePath()
++// serves it -- both fields are opt-in and independent: a package with
++// neither behaves exactly as before this config existed.
++struct AppSwapServeConfig {
++  // Resolved from a package.json {"appswap": {"servePath": "<subdir>"}}
++  // declaration -- lets a package's build output live in a subdirectory
++  // (e.g. "dist") rather than requiring the package root itself to be the
++  // served web root. Equal to the package root if there's no such
++  // declaration, the declared subdirectory doesn't exist, or the JSON
++  // can't be parsed, so a malformed/missing field degrades to "package
++  // root is the web root" rather than breaking serving outright.
++  base::FilePath serve_dir;
++
++  // From {"appswap": {"notFoundPage": "<file>"}}, relative to `serve_dir`.
++  // A multi-page app (server-style routing, e.g. a Starlight docs site)
++  // sets this to get a real 404 response for an unmatched path instead of
++  // silently serving the homepage; a single-page app that does its own
++  // client-side routing (and wants every unmatched path to reach its own
++  // router, e.g. to render its own "not found" UI) leaves this unset,
++  // which keeps the pre-existing SPA-fallback-to-root-index.html behavior.
++  // Empty if unset.
++  std::string not_found_page;
++};
++
++AppSwapServeConfig ReadServeConfig(const base::FilePath& package_dir) {
++  AppSwapServeConfig config{.serve_dir = package_dir};
++  std::string contents;
++  if (!base::ReadFileToString(
++          package_dir.Append(FILE_PATH_LITERAL("package.json")), &contents)) {
++    return config;
++  }
++  std::optional<base::Value> parsed =
++      base::JSONReader::Read(contents, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
++  if (!parsed || !parsed->is_dict()) {
++    return config;
++  }
++  const base::DictValue* appswap_config =
++      parsed->GetDict().FindDict("appswap");
++  if (!appswap_config) {
++    return config;
++  }
++  if (const std::string* serve_path =
++          appswap_config->FindString("servePath");
++      serve_path && !serve_path->empty() &&
++      serve_path->find("..") == std::string::npos) {
++    base::FilePath resolved =
++        package_dir.Append(base::FilePath::FromUTF8Unsafe(*serve_path))
++            .NormalizePathSeparators();
++    if (base::DirectoryExists(resolved)) {
++      config.serve_dir = resolved;
++    }
++  }
++  if (const std::string* not_found_page =
++          appswap_config->FindString("notFoundPage");
++      not_found_page && !not_found_page->empty() &&
++      not_found_page->find("..") == std::string::npos) {
++    config.not_found_page = *not_found_page;
++  }
++  return config;
++}
++
++// The result of ResolveFilePath(): `path` is empty when nothing matches at
++// all (a genuine 404, no body). `is_not_found` distinguishes a resolved
++// notFoundPage (served with a real 404 status) from every other resolved
++// path (served as a normal 200).
++struct ResolvedFile {
++  base::FilePath path;
++  bool is_not_found = false;
++};
++
++// Resolves a request URL path to a file on disk under `package_dir` (see
++// AppSwapServeConfig::serve_dir for the actual served root, which may be a
++// subdirectory of it), applying SPA fallback (or a configured notFoundPage,
++// see AppSwapServeConfig) for navigations.
++ResolvedFile ResolveFilePath(const base::FilePath& package_dir,
++                             const std::string& path,
++                             bool accepts_html) {
++  const AppSwapServeConfig config = ReadServeConfig(package_dir);
++  const base::FilePath& serve_dir = config.serve_dir;
 +  std::string_view path_view(path);
 +  if (path_view.empty() || path_view == "/") {
 +    path_view = "index.html";
@@ -1545,12 +1621,12 @@ index 0000000000000..e7f9cb6bddbc4
 +  std::string relative;
 +  if (!base::UnescapeBinaryURLComponentSafe(
 +          relative_str, /*fail_on_path_separators=*/true, &relative)) {
-+    return base::FilePath();
++    return {};
 +  }
 +
 +  // Reject any path that could escape the serve directory.
 +  if (relative.find("..") != std::string::npos) {
-+    return base::FilePath();
++    return {};
 +  }
 +
 +  base::FilePath full =
@@ -1558,18 +1634,48 @@ index 0000000000000..e7f9cb6bddbc4
 +          .NormalizePathSeparators();
 +
 +  if (base::PathExists(full) && !base::DirectoryExists(full)) {
-+    return full;
++    return {.path = full};
 +  }
 +
-+  // SPA fallback: only for navigations (requests that accept HTML), never for
-+  // missing asset subresources.
-+  if (accepts_html) {
-+    base::FilePath index = serve_dir.Append(FILE_PATH_LITERAL("index.html"));
-+    if (base::PathExists(index)) {
-+      return index;
++  // A directory-style route (e.g. "/products" for a multi-page static
++  // build that has its own products/index.html, as opposed to a single-
++  // page app relying purely on client-side routing) resolves to that
++  // subdirectory's own index.html -- this is a real, exact match on
++  // disk, not a guess, so it applies regardless of `accepts_html` and
++  // must be tried before the fallback below, or every such route would
++  // silently serve the fallback's content instead of its own.
++  if (base::DirectoryExists(full)) {
++    base::FilePath nested_index = full.Append(FILE_PATH_LITERAL("index.html"));
++    if (base::PathExists(nested_index)) {
++      return {.path = nested_index};
 +    }
 +  }
-+  return base::FilePath();
++
++  // Fallback for navigations only (requests that accept HTML), never for
++  // missing asset subresources -- either a configured notFoundPage (a
++  // real 404, for an app with server-style routing) or, absent that, the
++  // pre-existing SPA fallback to the served root's own index.html (for an
++  // app that does its own client-side routing and expects every unmatched
++  // path to reach it).
++  if (accepts_html) {
++    if (!config.not_found_page.empty()) {
++      base::FilePath not_found_path = serve_dir.Append(
++          base::FilePath::FromUTF8Unsafe(config.not_found_page));
++      if (base::PathExists(not_found_path) &&
++          !base::DirectoryExists(not_found_path)) {
++        return {.path = not_found_path, .is_not_found = true};
++      }
++      // Configured but missing on disk: a real misconfiguration, not
++      // something to paper over by falling back to the SPA behavior the
++      // app didn't ask for.
++      return {};
++    }
++    base::FilePath index = serve_dir.Append(FILE_PATH_LITERAL("index.html"));
++    if (base::PathExists(index)) {
++      return {.path = index};
++    }
++  }
++  return {};
 +}
 +
 +// Self-owned URLLoader that streams a single file from disk as the response.
@@ -1612,12 +1718,13 @@ index 0000000000000..e7f9cb6bddbc4
 +        &AppSwapFileLoader::OnMojoDisconnect, base::Unretained(this)));
 +    client_.Bind(std::move(client));
 +
-+    base::FilePath file_path =
++    ResolvedFile resolved =
 +        ResolveFilePath(serve_dir, std::string(url.path()), accepts_html);
-+    if (file_path.empty()) {
++    if (resolved.path.empty()) {
 +      OnClientComplete(net::ERR_FILE_NOT_FOUND);
 +      return;
 +    }
++    base::FilePath file_path = resolved.path;
 +
 +    base::File::Info info;
 +    if (!base::GetFileInfo(file_path, &info) || info.is_directory) {
@@ -1633,8 +1740,8 @@ index 0000000000000..e7f9cb6bddbc4
 +
 +    auto head = network::mojom::URLResponseHead::New();
 +    head->response_type = network::mojom::FetchResponseType::kBasic;
-+    head->headers =
-+        base::MakeRefCounted<net::HttpResponseHeaders>("HTTP/1.1 200 OK");
++    head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
++        resolved.is_not_found ? "HTTP/1.1 404 Not Found" : "HTTP/1.1 200 OK");
 +    std::string mime_type;
 +    if (!net::GetMimeTypeFromFile(file_path, &mime_type)) {
 +      mime_type = "application/octet-stream";
@@ -2523,7 +2630,7 @@ index 0000000000000..fe601f5a4a79b
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_URL_LOADER_FACTORY_H_
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index b30e20b986fb2..1d6f0b26f756f 100644
+index b30e20b986fb2..1946d3d7c5b04 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
 @@ -650,6 +650,9 @@
@@ -2603,7 +2710,36 @@ index b30e20b986fb2..1d6f0b26f756f 100644
  #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
    if (disable_secure_dns) {
      WebContents* web_contents = WebContents::FromRenderFrameHost(frame);
-@@ -7471,20 +7520,21 @@ bool ChromeContentBrowserClient::ShowPaymentHandlerWindow(
+@@ -7368,6 +7417,28 @@ bool ChromeContentBrowserClient::HandleWebUI(
+     content::BrowserContext* browser_context) {
+   DCHECK(browser_context);
+ 
++  // BrowserURLHandlerImpl::ReverseURLRewrite() tests this function against
++  // the CURRENTLY DISPLAYED virtual URL to decide whether it's safe to
++  // re-derive the displayed appswap:// URL for a same-document navigation
++  // (e.g. the pushState-based navigation chrome://settings' UI does
++  // between its own sub-pages) -- but after the first navigation to any
++  // WebUI page, that virtual URL is already appswap://, not chrome://.
++  // Every check below (and UseWebUIForURL()/WebUIConfigMap::GetConfig() at
++  // the end) only recognizes chrome://, so without this, that self-test
++  // fails on every subsequent same-document navigation, freezing the
++  // omnibox on whichever WebUI sub-page loaded first. Normalizing the
++  // scheme back to chrome:// here is safe for real navigations too --
++  // those never reach this function still bearing an appswap:// scheme,
++  // since HandleAppSwapURLRewrite (browser_about_handler.cc) already
++  // converts those earlier in the handler chain; this only ever fires
++  // from ReverseURLRewrite's isolated self-test, which discards this
++  // call's URL mutations and only uses the boolean result.
++  if (url->SchemeIs(content::kAppSwapUIScheme)) {
++    GURL::Replacements replacements;
++    replacements.SetSchemeStr(content::kChromeUIScheme);
++    *url = url->ReplaceComponents(replacements);
++  }
++
+   // Rewrite chrome://help to chrome://settings/help.
+   if (url->SchemeIs(content::kChromeUIScheme) &&
+       url->host() == chrome::kChromeUIHelpHost) {
+@@ -7471,20 +7542,21 @@ bool ChromeContentBrowserClient::ShowPaymentHandlerWindow(
  bool ChromeContentBrowserClient::HandleWebUIReverse(
      GURL* url,
      content::BrowserContext* browser_context) {

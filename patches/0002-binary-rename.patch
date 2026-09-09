@@ -284,10 +284,10 @@ index 1a6b899b4bc3a..b2ca2133702a3 100644
  const base::FilePath::CharType kBrowserProcessExecutablePath[] =
      FPL(PRODUCT_FULLNAME_STRING ".app/Contents/MacOS/" PRODUCT_FULLNAME_STRING);
 diff --git a/chrome/common/chrome_constants.h b/chrome/common/chrome_constants.h
-index 464a435a50d51..523364e7f9c8e 100644
+index 464a435a50d51..8ecd03efc5845 100644
 --- a/chrome/common/chrome_constants.h
 +++ b/chrome/common/chrome_constants.h
-@@ -36,11 +36,11 @@ extern const char kMacHelperSuffixAlerts[];
+@@ -36,21 +36,22 @@ extern const char kMacHelperSuffixAlerts[];
  
  #if BUILDFLAG(IS_WIN)
  inline constexpr base::FilePath::CharType kBrowserResourcesDll[] =
@@ -302,6 +302,19 @@ index 464a435a50d51..523364e7f9c8e 100644
  inline constexpr base::FilePath::CharType kStatusTrayWindowClass[] =
      FILE_PATH_LITERAL("Chrome_StatusTrayWindow");
  #endif  // BUILDFLAG(IS_WIN)
+ 
+ inline constexpr char kInitialProfile[] = "Default";
+ inline constexpr char kMultiProfileDirPrefix[] = "Profile ";
++inline constexpr char kProjectDirPrefix[] = "Project-";
+ inline constexpr base::FilePath::CharType kGuestProfileDir[] =
+-    FILE_PATH_LITERAL("Guest Profile");
++    FILE_PATH_LITERAL("Default Project");
+ inline constexpr base::FilePath::CharType kSystemProfileDir[] =
+-    FILE_PATH_LITERAL("System Profile");
++    FILE_PATH_LITERAL("System Project");
+ 
+ // filenames
+ inline constexpr base::FilePath::CharType kAccountPreferencesFilename[] =
 diff --git a/chrome/installer/mini_installer/BUILD.gn b/chrome/installer/mini_installer/BUILD.gn
 index ce1f5a5711eeb..9571b75052a4a 100644
 --- a/chrome/installer/mini_installer/BUILD.gn

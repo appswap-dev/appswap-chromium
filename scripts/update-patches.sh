@@ -396,6 +396,8 @@ gen 0014-npm-version-picker-webui.patch \
 # vector any config mutation reallocates, and SwitchTabsOffAppSwapProfile
 # scopes itself to the calling project's own windows.
 gen 0015-projects.patch \
+  chrome/browser/profiles/profile_manager.cc \
+  chrome/browser/profiles/profile_manager.h \
   chrome/browser/app_swap/app_swap_apps_service_factory.cc \
   chrome/browser/app_swap/app_swap_apps_service_factory.h \
   chrome/browser/app_swap/app_swap_config_store.cc \
@@ -576,6 +578,13 @@ gen 0018-i18n-translations.patch \
 # strings would show up as untranslated English there.
 gen 0019-supported-ui-locales.patch \
   ui/base/l10n/l10n_util.cc
+
+# --project=<name> command-line switch: resolves (creating if missing, see
+# ProfileManager::GetOrCreateProjectProfileDir() in 0015-projects.patch) to
+# that project's profile directory at startup.
+gen 0020-project-cli-switch.patch \
+  chrome/common/chrome_switches.h \
+  chrome/browser/ui/startup/startup_browser_creator.cc
 
 # Whether `f` (a path relative to src/) is one of the images tracked under
 # resources/ instead of as a patch -- sync_binary_resources() above already

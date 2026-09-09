@@ -1498,6 +1498,113 @@ index 191ecd9db7e66..c29e19e8c7c4a 100644
    AtMemoryQueryServiceFactory::GetInstance();
  #if !BUILDFLAG(IS_ANDROID)
    AutoPictureInPictureHatsServiceFactory::GetInstance();
+diff --git a/chrome/browser/profiles/profile_manager.cc b/chrome/browser/profiles/profile_manager.cc
+index 988128a711e39..38907038c2bf4 100644
+--- a/chrome/browser/profiles/profile_manager.cc
++++ b/chrome/browser/profiles/profile_manager.cc
+@@ -33,12 +33,12 @@
+ #include "base/observer_list.h"
+ #include "base/run_loop.h"
+ #include "base/strings/strcat.h"
+-#include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/task/thread_pool.h"
+ #include "base/threading/scoped_blocking_call.h"
+ #include "base/trace_event/trace_event.h"
++#include "base/uuid.h"
+ #include "base/version_info/version_info.h"
+ #include "build/build_config.h"
+ #include "build/chromeos_buildflags.h"
+@@ -969,6 +969,30 @@ base::FilePath ProfileManager::GetProfileDirForEmail(const std::string& email) {
+   return base::FilePath();
+ }
+ 
++base::FilePath ProfileManager::GetOrCreateProjectProfileDir(
++    const std::u16string& project_name) {
++  ProfileAttributesStorage& storage = GetProfileAttributesStorage();
++  for (const auto* entry : storage.GetAllProfilesAttributes()) {
++    if (entry->GetName() == project_name) {
++      return entry->GetPath();
++    }
++  }
++
++  // No existing project has this name -- create one. Registering the
++  // ProfileAttributesEntry synchronously here (rather than after the
++  // profile itself loads) mirrors CreateMultiProfileAsync()'s "add a
++  // storage entry early" step, so the requested name is what the caller's
++  // later ProfileManager::GetProfile(new_path) call picks up instead of a
++  // generated default.
++  base::FilePath new_path = GenerateNextProfileDirectoryPath();
++  ProfileAttributesInitParams init_params;
++  init_params.profile_path = new_path;
++  init_params.profile_name = project_name;
++  init_params.icon_index = storage.ChooseAvatarIconIndexForNewProfile();
++  storage.AddProfile(std::move(init_params));
++  return new_path;
++}
++
+ std::vector<Profile*> ProfileManager::GetLoadedProfiles() const {
+   std::vector<Profile*> profiles;
+   for (auto iter = profiles_info_.begin(); iter != profiles_info_.end();
+@@ -1133,20 +1157,26 @@ base::FilePath ProfileManager::GenerateNextProfileDirectoryPath() {
+ }
+ 
+ base::FilePath ProfileManager::GetNextExpectedProfileDirectoryPath() {
+-  PrefService* local_state = g_browser_process->local_state();
+-  DCHECK(local_state);
+-
+   DCHECK(profiles::IsMultipleProfilesEnabled());
+ 
+-  // Create the next profile in the next available directory slot.
+-  int next_directory = local_state->GetInteger(prefs::kProfilesNumCreated);
+-  std::string profile_name = chrome::kMultiProfileDirPrefix;
+-  profile_name.append(base::NumberToString(next_directory));
++  // Each project gets a "Project-<uuid>" directory instead of stock
++  // Chromium's incrementing "Profile N" -- an opaque, unguessable id fits
++  // this product's "project" framing better than a sequential slot number
++  // that leaks creation order and count. Kept as a direct child of
++  // user_data_dir_ (a single path component), not a Projects/<uuid>
++  // subdirectory -- Chromium's profile subsystem assumes that everywhere,
++  // down to the storage key persisted in Local State being exactly the
++  // directory's basename (see ProfileAttributesStorage::
++  // StorageKeyFromProfilePath()), so a nested directory works right up
++  // until the first restart silently reconstructs the wrong path.
++  std::string dir_name =
++      base::StrCat({chrome::kProjectDirPrefix,
++                    base::Uuid::GenerateRandomV4().AsLowercaseString()});
+   base::FilePath new_path = user_data_dir_;
+ #if BUILDFLAG(IS_WIN)
+-  new_path = new_path.Append(base::ASCIIToWide(profile_name));
++  new_path = new_path.Append(base::ASCIIToWide(dir_name));
+ #else
+-  new_path = new_path.Append(profile_name);
++  new_path = new_path.Append(dir_name);
+ #endif
+   return new_path;
+ }
+diff --git a/chrome/browser/profiles/profile_manager.h b/chrome/browser/profiles/profile_manager.h
+index 5f49c6e87f2ea..f84f4cd0d069c 100644
+--- a/chrome/browser/profiles/profile_manager.h
++++ b/chrome/browser/profiles/profile_manager.h
+@@ -252,6 +252,17 @@ class ProfileManager : public Profile::Delegate {
+   // path if none exists.
+   base::FilePath GetProfileDirForEmail(const std::string& email);
+ 
++  // Returns the path of the project (see chrome/browser/app_swap) named
++  // `project_name`, creating a new one with that name if none already
++  // exists -- used by the --project=<name> command-line switch (see
++  // GetStartupProfilePath() in startup_browser_creator.cc). Unlike
++  // GetProfileDirForEmail() (which returns an empty path on a miss and
++  // leaves creation to an interactive picker), this always returns a
++  // usable path -- --project is meant to "just work" whether or not the
++  // named project already exists.
++  base::FilePath GetOrCreateProjectProfileDir(
++      const std::u16string& project_name);
++
+   // Returns loaded and fully initialized profiles. Notes:
+   // - profiles order is NOT guaranteed to be related with the creation order.
+   // - only returns profiles owned by the ProfileManager. In particular, this
 diff --git a/chrome/browser/resources/app_swap_projects/BUILD.gn b/chrome/browser/resources/app_swap_projects/BUILD.gn
 new file mode 100644
 index 0000000000000..c4c96e22fc0b9
