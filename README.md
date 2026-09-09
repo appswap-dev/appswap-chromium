@@ -30,10 +30,91 @@ appswap/
 
 ## Prerequisites
 
-- **depot_tools** on `PATH` (`gclient`, `gn`, `autoninja`).
+- **depot_tools** on `PATH` (`gclient`, `gn`, `autoninja`). If you don't have it
+  yet:
+  ```bash
+  git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git depot_tools
+  export PATH="$PWD/depot_tools:$PATH"   # add to your shell profile to persist
+  ```
+  `depot_tools/` at the repo root is git-ignored, so this is a safe place to
+  put it.
 - **Git for Windows** (provides Git Bash, which the `.ps1` wrappers call).
 - **Python 3** (used by the portable packaging script).
-- A Chromium Windows build toolchain (Visual Studio + Windows SDK).
+- **Visual Studio 2022** with the "Desktop development with C++" workload,
+  **plus the C++ ATL component** (`Microsoft.VisualStudio.Component.VC.ATL`) —
+  not installed by default even with that workload, and Chromium needs it
+  (`atldef.h` errors mean it's missing). Add it via the Visual Studio
+  Installer, or:
+  ```powershell
+  & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify `
+    --installPath "C:\Program Files\Microsoft Visual Studio\2022\Community" `
+    --add Microsoft.VisualStudio.Component.VC.ATL --quiet --norestart
+  ```
+  (must be run elevated — `--quiet`/`--passive` require it).
+- **The exact Windows SDK version this pin requires.** Chromium hardcodes a
+  required SDK version in `src/build/vs_toolchain.py`'s `SDK_VERSION`
+  constant — for the currently pinned revision that's **10.0.28000**, ahead of
+  what the public VS Installer's release channel offers as of this writing
+  (it tops out at 10.0.26100). Install it standalone:
+  ```powershell
+  winget install -e --id Microsoft.WindowsSDK.10.0.28000
+  ```
+  `gn gen` will fail with a path like `...\Windows Kits\10\include\10.0.28000.0\um`
+  "does not exist" if it's missing. Check `SDK_VERSION` in `vs_toolchain.py`
+  after switching Chromium versions — it can change.
+
+### Windows-specific gotchas
+
+- **`core.autocrlf` must be `false`.** Git for Windows defaults to
+  `core.autocrlf=true`, which rewrites every text file's line endings to CRLF
+  on checkout — including `patches/*.patch`. A CRLF-mangled patch file makes
+  `git apply` reject *every* file in it with `patch does not apply`, even
+  though the content is otherwise byte-identical (diffing with
+  `git diff --ignore-space-at-eol` shows no real change). Fix it once,
+  globally, before cloning or syncing anything:
+  ```bash
+  git config --global core.autocrlf false
+  git config --global core.filemode false
+  git config --global core.fscache true
+  git config --global core.preloadindex true
+  ```
+  If you already cloned this repo with `core.autocrlf=true` in effect, the
+  files on disk are already CRLF-corrupted even after fixing the setting —
+  `git checkout -- .` (after fixing the setting) re-checks them out cleanly,
+  since the fix only changes *future* checkouts. Verify with
+  `git diff --ignore-space-at-eol --stat` (should print nothing).
+- Set `DEPOT_TOOLS_WIN_TOOLCHAIN=0` before running `sync-chromium.sh`/`.ps1`.
+  Without it, `gclient runhooks` tries to fetch Google's internal (Googler-only)
+  Visual Studio toolchain package instead of using your locally installed
+  Visual Studio + Windows SDK.
+- **Low RAM relative to core count causes misleading build failures.** If
+  `autoninja` uses too much parallelism for the available memory, compiler
+  processes fail to even start, and Windows reports it as
+  `DLL Initialization Failed` (or a bare `NTSTATUS` code) — not a compile
+  error, and easy to mistake for one. If you see a large batch of unrelated
+  files fail at once, pass a lower `-j`, e.g.
+  `autoninja -j 4 -C out/Release chrome mini_installer` (roughly 2-3GB of RAM
+  per job is a safe budget).
+- **`midl.exe output different from files in ...`** the first time you build:
+  Chromium checks in a reference copy of MIDL-generated code under
+  `third_party/win_build_output/midl/` to catch cross-toolchain drift, and it
+  rarely matches a freshly-installed SDK's MIDL output exactly. This is
+  expected, not a real error — follow the `copy /y ...` (or `cp -f ...`)
+  command the build error itself prints, run from `src/out/Release` (paths in
+  the error are relative to there, not your shell's cwd). It may need doing
+  for more than one `.idl` target; passing `-k 0` to `autoninja` surfaces all
+  of them in one pass instead of one at a time. This patches files inside
+  `src/`, which is git-ignored, so it has to be redone after any fresh
+  `sync-chromium.sh`.
+- **Stale precompiled module cache after installing/upgrading a VC++ toolset
+  component** (e.g. adding ATL mid-project, like above): you may see
+  `precompiled file 'obj/build/modules/system/module.pcm' was compiled for
+  target ... but the current translation unit is being compiled for target
+  ...`. Fix by deleting the stale cache and regenerating the build graph:
+  ```bash
+  rm -rf src/out/Release/obj/build/modules
+  cd src && gn gen out/Release
+  ```
 
 ## Scripts
 
@@ -52,6 +133,7 @@ alias that runs the Bash script from PowerShell:
 
 ```bash
 # 1. Fetch the exact Chromium revision and its dependencies
+export DEPOT_TOOLS_WIN_TOOLCHAIN=0   # Windows only; see Prerequisites above
 scripts/sync-chromium.sh
 
 # 2. Apply the AppSwap patches
@@ -64,6 +146,7 @@ scripts/build.sh
 On Windows PowerShell:
 
 ```powershell
+$env:DEPOT_TOOLS_WIN_TOOLCHAIN = "0"
 .\scripts\sync-chromium.ps1
 .\scripts\apply-patches.ps1
 .\scripts\build.ps1
