@@ -250,6 +250,8 @@ gen 0008-app-profiles.patch \
 
 gen 0009-tab-strip-profile-button.patch \
   chrome/browser/ui/views/app_swap/BUILD.gn \
+  chrome/browser/ui/views/app_swap/app_swap_badge_style.cc \
+  chrome/browser/ui/views/app_swap/app_swap_badge_style.h \
   chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.cc \
   chrome/browser/ui/views/app_swap/app_swap_profile_switch_util.h \
   chrome/browser/ui/views/app_swap/app_swap_profile_tab_strip_button.cc \

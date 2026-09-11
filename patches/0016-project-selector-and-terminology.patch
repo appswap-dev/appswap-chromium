@@ -340,10 +340,10 @@ index 564554a675e1b..2c64cb723b459 100644
    ['/privacy', 'SettingsMenu_PrivacyClicked'],
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc
 new file mode 100644
-index 0000000000000..5e93c956b2780
+index 0000000000000..fe5ca19eeabc6
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,88 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -355,7 +355,6 @@ index 0000000000000..5e93c956b2780
 +#include <utility>
 +
 +#include "base/functional/bind.h"
-+#include "base/hash/hash.h"
 +#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/browser_process.h"
 +#include "chrome/browser/profiles/profile.h"
@@ -365,48 +364,14 @@ index 0000000000000..5e93c956b2780
 +#include "chrome/browser/ui/browser_element_identifiers.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "ui/base/metadata/metadata_impl_macros.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_badge_style.h"
 +#include "ui/color/color_id.h"
 +#include "ui/color/color_provider.h"
 +#include "ui/gfx/color_utils.h"
-+#include "ui/gfx/geometry/insets.h"
-+#include "ui/views/background.h"
-+#include "ui/views/border.h"
 +#include "ui/views/view_class_properties.h"
 +
 +namespace {
 +
-+// Modest rounding for a "rounded rectangle" chip, not a full pill/stadium.
-+constexpr float kBadgeCornerRadius = 6.0f;
-+
-+// Same curated palette as AppSwapProfileTabStripButton -- see its comment
-+// for why these specific hues (avoids washed-out yellows, spans hues that
-+// stay distinct under red-green color blindness).
-+constexpr double kBadgeHues[] = {
-+    210.0,  // blue
-+    175.0,  // teal
-+    150.0,  // blue-leaning green (not yellow-green)
-+    265.0,  // purple
-+    330.0,  // magenta / pink
-+    25.0,   // orange
-+    245.0,  // indigo
-+    355.0,  // pink-leaning red
-+};
-+
-+double HueForProjectName(const std::string& name) {
-+  return kBadgeHues[base::PersistentHash(name) % std::size(kBadgeHues)];
-+}
-+
-+SkColor ComputeBadgeBackgroundColor(const std::string& name, bool dark_theme) {
-+  color_utils::HSL hsl;
-+  hsl.h = HueForProjectName(name) / 360.0;
-+  hsl.s = dark_theme ? 0.40 : 0.62;
-+  hsl.l = dark_theme ? 0.28 : 0.80;
-+  return color_utils::HSLToSkColor(hsl, SK_AlphaOPAQUE);
-+}
-+
-+SkColor ComputeBadgeTextColor(SkColor background) {
-+  return color_utils::BlendForMinContrast(SK_ColorBLACK, background).color;
-+}
 +
 +}  // namespace
 +
@@ -450,18 +415,10 @@ index 0000000000000..5e93c956b2780
 +    const std::string& project_name) {
 +  bool dark_theme = false;
 +  if (const ui::ColorProvider* color_provider = GetColorProvider()) {
-+    dark_theme =
-+        color_utils::IsDark(color_provider->GetColor(ui::kColorWindowBackground));
++    dark_theme = color_utils::IsDark(
++        color_provider->GetColor(ui::kColorWindowBackground));
 +  }
-+
-+  const SkColor background_color =
-+      ComputeBadgeBackgroundColor(project_name, dark_theme);
-+  const SkColor text_color = ComputeBadgeTextColor(background_color);
-+
-+  SetBackground(
-+      views::CreateRoundedRectBackground(background_color, kBadgeCornerRadius));
-+  SetEnabledTextColors(text_color);
-+  SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(4, 10)));
++  ApplyAppSwapBadgeStyle(this, project_name, dark_theme);
 +}
 +
 +void AppSwapProjectSelectorButton::OnThemeChanged() {

@@ -2487,10 +2487,10 @@ index 0000000000000..608b86770dbc1
 +let instance: BrowserProxy|null = null;
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.cc b/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.cc
 new file mode 100644
-index 0000000000000..00a2887001110
+index 0000000000000..f987a63d9a7ee
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_route_group_tab_strip_button.cc
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,210 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2503,7 +2503,6 @@ index 0000000000000..00a2887001110
 +#include <utility>
 +
 +#include "base/functional/bind.h"
-+#include "base/hash/hash.h"
 +#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/app_swap/app_swap_route_group_pin_tab_helper.h"
 +#include "chrome/browser/app_swap/app_swap_route_group_service_factory.h"
@@ -2516,12 +2515,10 @@ index 0000000000000..00a2887001110
 +#include "ui/base/mojom/menu_source_type.mojom.h"
 +#include "ui/base/models/menu_separator_types.h"
 +#include "ui/base/window_open_disposition.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_badge_style.h"
 +#include "ui/color/color_id.h"
 +#include "ui/color/color_provider.h"
 +#include "ui/gfx/color_utils.h"
-+#include "ui/gfx/geometry/insets.h"
-+#include "ui/views/background.h"
-+#include "ui/views/border.h"
 +#include "ui/views/controls/menu/menu_item_view.h"
 +#include "ui/views/controls/menu/menu_model_adapter.h"
 +#include "ui/views/controls/menu/menu_runner.h"
@@ -2535,37 +2532,6 @@ index 0000000000000..00a2887001110
 +constexpr int kManageCommandId = 2;
 +constexpr int kGroupCommandBase = 3;
 +
-+constexpr float kBadgeCornerRadius = 6.0f;
-+
-+// Same curated palette as AppSwapProfileTabStripButton -- see its comment
-+// for why these specific hues (avoids washed-out yellows, spans hues that
-+// stay distinct under red-green color blindness).
-+constexpr double kBadgeHues[] = {
-+    210.0,  // blue
-+    175.0,  // teal
-+    150.0,  // blue-leaning green (not yellow-green)
-+    265.0,  // purple
-+    330.0,  // magenta / pink
-+    25.0,   // orange
-+    245.0,  // indigo
-+    355.0,  // pink-leaning red
-+};
-+
-+double HueForGroupName(const std::string& name) {
-+  return kBadgeHues[base::PersistentHash(name) % std::size(kBadgeHues)];
-+}
-+
-+SkColor ComputeBadgeBackgroundColor(const std::string& name, bool dark_theme) {
-+  color_utils::HSL hsl;
-+  hsl.h = HueForGroupName(name) / 360.0;
-+  hsl.s = dark_theme ? 0.40 : 0.62;
-+  hsl.l = dark_theme ? 0.28 : 0.80;
-+  return color_utils::HSLToSkColor(hsl, SK_AlphaOPAQUE);
-+}
-+
-+SkColor ComputeBadgeTextColor(SkColor background) {
-+  return color_utils::BlendForMinContrast(SK_ColorBLACK, background).color;
-+}
 +
 +}  // namespace
 +
@@ -2648,18 +2614,10 @@ index 0000000000000..00a2887001110
 +    const std::string& group_name) {
 +  bool dark_theme = false;
 +  if (const ui::ColorProvider* color_provider = GetColorProvider()) {
-+    dark_theme =
-+        color_utils::IsDark(color_provider->GetColor(ui::kColorWindowBackground));
++    dark_theme = color_utils::IsDark(
++        color_provider->GetColor(ui::kColorWindowBackground));
 +  }
-+
-+  const SkColor background_color =
-+      ComputeBadgeBackgroundColor(group_name, dark_theme);
-+  const SkColor text_color = ComputeBadgeTextColor(background_color);
-+
-+  SetBackground(
-+      views::CreateRoundedRectBackground(background_color, kBadgeCornerRadius));
-+  SetEnabledTextColors(text_color);
-+  SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(4, 10)));
++  ApplyAppSwapBadgeStyle(this, group_name, dark_theme);
 +}
 +
 +void AppSwapRouteGroupTabStripButton::OnThemeChanged() {
