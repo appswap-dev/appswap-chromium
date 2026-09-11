@@ -835,10 +835,10 @@ index 0000000000000..0745c287bb5d5
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_INSPECTOR_H_
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_session.cc b/chrome/browser/app_swap/app_swap_responsive_lab_session.cc
 new file mode 100644
-index 0000000000000..051cf32ecca4e
+index 0000000000000..2727ca71cacd3
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_session.cc
-@@ -0,0 +1,261 @@
+@@ -0,0 +1,273 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1074,7 +1074,19 @@ index 0000000000000..051cf32ecca4e
 +    const gfx::Vector2dF& pan_offset,
 +    float scale) {
 +  pan_offset_ = pan_offset;
++  if (scale_ == scale) {
++    return;
++  }
 +  scale_ = scale;
++
++  // The zoom is part of each viewport's emulation, not something the
++  // compositor applies afterwards, so changing it means re-sending it.
++  for (Viewport& viewport : viewports_) {
++    ApplyEmulation(viewport);
++  }
++  for (Observer& observer : observers_) {
++    observer.OnResponsiveLabCanvasScaleChanged();
++  }
 +}
 +
 +void AppSwapResponsiveLabSession::ResetCanvasTransform() {
@@ -1095,17 +1107,17 @@ index 0000000000000..051cf32ecca4e
 +
 +void AppSwapResponsiveLabSession::ApplyEmulation(Viewport& viewport) {
 +  if (viewport.client) {
-+    viewport.client->ApplyPreset(viewport.preset);
++    viewport.client->ApplyPreset(viewport.preset, scale_);
 +  }
 +}
 +
 +WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapResponsiveLabSession);
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_session.h b/chrome/browser/app_swap/app_swap_responsive_lab_session.h
 new file mode 100644
-index 0000000000000..7bda3428f008e
+index 0000000000000..abb50f597a604
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_session.h
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,200 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1182,6 +1194,11 @@ index 0000000000000..7bda3428f008e
 +
 +    // The lab was toggled on or off, or the previewed URL changed.
 +    virtual void OnResponsiveLabActiveChanged() {}
++
++    // The canvas zoom changed. Fired only when the *scale* changes, not on
++    // every pan frame, so an observer can afford to re-read whatever it
++    // needs here.
++    virtual void OnResponsiveLabCanvasScaleChanged() {}
 +
 +    // This session is going away. Observers must stop observing here.
 +    //
@@ -1404,10 +1421,10 @@ index 0000000000000..bd727dcfceb7d
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_TYPES_H_
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.cc b/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.cc
 new file mode 100644
-index 0000000000000..dd03778374a09
+index 0000000000000..cedca24ab69fc
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.cc
-@@ -0,0 +1,188 @@
+@@ -0,0 +1,192 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1476,7 +1493,8 @@ index 0000000000000..dd03778374a09
 +}
 +
 +void AppSwapResponsiveLabViewportClient::ApplyPreset(
-+    const AppSwapDevicePreset& preset) {
++    const AppSwapDevicePreset& preset,
++    float canvas_scale) {
 +  const gfx::Size size = preset.EffectiveSize();
 +
 +  base::DictValue metrics;
@@ -1494,6 +1512,9 @@ index 0000000000000..dd03778374a09
 +  // Load-bearing: see this class's comment. Without it EmulationHandler
 +  // resizes the RenderWidgetHostView out from under NativeViewHost.
 +  metrics.Set("dontSetVisibleSize", true);
++  // The canvas zoom, applied by the renderer. See the header for why this
++  // is not left to the compositor.
++  metrics.Set("scale", static_cast<double>(canvas_scale));
 +  if (preset.mobile) {
 +    metrics.Set("screenOrientation",
 +                base::DictValue()
@@ -1598,10 +1619,10 @@ index 0000000000000..dd03778374a09
 +}
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.h b/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.h
 new file mode 100644
-index 0000000000000..af76305d68745
+index 0000000000000..e874ab7e43b06
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.h
-@@ -0,0 +1,113 @@
+@@ -0,0 +1,123 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1687,11 +1708,21 @@ index 0000000000000..af76305d68745
 +                   base::DictValue params,
 +                   CommandCallback callback);
 +
-+  // Applies `preset`'s emulation parameters. Safe to call repeatedly; the
-+  // renderer reapplies the override itself across navigations (see
-+  // EmulationHandler::SetRenderer), so this does not need re-sending on
-+  // every load.
-+  void ApplyPreset(const AppSwapDevicePreset& preset);
++  // Applies `preset`'s emulation parameters, rendered at `canvas_scale`.
++  //
++  // The scale is handed to the renderer rather than left to the compositor
++  // to apply to the finished texture, which is the difference between text
++  // that stays sharp when the canvas is zoomed out and text that turns to
++  // mush. Blink lays the page out at the device's own CSS size and
++  // rasterizes the result at the size it will actually occupy; a
++  // compositor-side downscale instead minifies an already-rasterized
++  // texture. devicePixelRatio reported to the page is unaffected -- that
++  // stays the preset's own.
++  //
++  // Safe to call repeatedly; the renderer reapplies the override itself
++  // across navigations (see EmulationHandler::SetRenderer), so this does
++  // not need re-sending on every load.
++  void ApplyPreset(const AppSwapDevicePreset& preset, float canvas_scale);
 +
 +  // Drops every override ApplyPreset() installed, returning the page to the
 +  // host's own metrics and user agent.
@@ -3258,10 +3289,10 @@ index 0000000000000..89b505ea60255
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CANVAS_VIEW_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc
 new file mode 100644
-index 0000000000000..c2721de926689
+index 0000000000000..0896ca33c78b8
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc
-@@ -0,0 +1,307 @@
+@@ -0,0 +1,341 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3386,8 +3417,6 @@ index 0000000000000..c2721de926689
 +
 +  header_ = AddChildView(std::make_unique<views::Label>());
 +  header_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-+  header_->SetProperty(views::kMarginsKey,
-+                       gfx::Insets::TLBR(0, 0, kHeaderBottomMargin, 0));
 +  UpdateHeaderText();
 +
 +  base_font_ = header_->font_list();
@@ -3407,18 +3436,6 @@ index 0000000000000..c2721de926689
 +      profile, preset_size);
 +  web_view->SetPreferredSize(preset_size);
 +  web_view->LoadInitialURL(url);
-+  // Margins, not padding: the shadow is drawn outside the renderer's own
-+  // rectangle, and without room reserved for it inside this cell it would
-+  // be drawn over by the neighbouring cell or clipped away at the row's
-+  // edge. GetMargin() returns negative insets, so this subtracts them.
-+  const gfx::Insets shadow_margin =
-+      gfx::ShadowValue::GetMargin(CardShadows());
-+  const int ring = base::ClampCeil(kCardBorderGap + kCardBorderWidth);
-+  web_view->SetProperty(views::kMarginsKey,
-+                        gfx::Insets::TLBR(-shadow_margin.top() + ring,
-+                                          -shadow_margin.left() + ring,
-+                                          -shadow_margin.bottom() + ring,
-+                                          -shadow_margin.right() + ring));
 +  web_view_ = AddChildView(std::move(web_view));
 +
 +  // ZoomController's default mode zooms every WebContents showing the
@@ -3475,8 +3492,13 @@ index 0000000000000..c2721de926689
 +}
 +
 +void AppSwapResponsiveLabCellView::ApplyCardCorners() {
-+  web_view_->holder()->SetNativeViewCornerRadii(
-+      gfx::RoundedCornersF(kCardCornerRadius));
++  // See the header: the radius is pre-scaled only when nothing downstream
++  // will scale it. Getting this backwards leaves the page's corners and the
++  // border drawn around them rounded by different amounts -- four times
++  // apart at the minimum zoom.
++  const bool renderer_scales = session_ && session_->inspection_allowed();
++  web_view_->holder()->SetNativeViewCornerRadii(gfx::RoundedCornersF(
++      renderer_scales ? CardCornerRadius() : kCardCornerRadius));
 +}
 +
 +void AppSwapResponsiveLabCellView::OnPaint(gfx::Canvas* canvas) {
@@ -3540,11 +3562,48 @@ index 0000000000000..c2721de926689
 +}
 +
 +void AppSwapResponsiveLabCellView::ApplyScale() {
-+  const gfx::Size native_size = preset_.EffectiveSize();
-+  web_view_->SetSizes(
-+      native_size,
-+      gfx::Size(base::ClampRound(native_size.width() * scale_),
-+                base::ClampRound(native_size.height() * scale_)));
++  const gfx::Size device_size = preset_.EffectiveSize();
++  const gfx::Size laid_out_size(
++      base::ClampRound(device_size.width() * scale_),
++      base::ClampRound(device_size.height() * scale_));
++
++  // Who applies the zoom to the page depends on whether this viewport has a
++  // protocol client.
++  //
++  // With one, the renderer does it: it is told to lay out at the device's
++  // CSS size and rasterize the result at `scale`, so text stays sharp at
++  // any zoom. The surface then already *is* the laid-out size and must not
++  // be pinned, or NativeViewHost would add a second scale on top of it.
++  //
++  // Without one -- enterprise policy can deny developer tools, and the lab
++  // still works without them -- the surface is pinned at the device size
++  // and NativeViewHost magnifies it. That is softer when zoomed out, but it
++  // is the only way to keep the page from reflowing to the zoomed size,
++  // which would defeat the point of comparing fixed device widths.
++  const bool renderer_scales = session_ && session_->inspection_allowed();
++  web_view_->SetSizes(renderer_scales ? gfx::Size() : device_size,
++                      laid_out_size);
++
++  // Margins, not padding: the shadow, the gap and the border are all drawn
++  // outside the renderer's own rectangle, and without room reserved for
++  // them inside this cell they would be drawn over by the neighbour or
++  // clipped at the row's edge. GetMargin() returns negative insets, so this
++  // subtracts them.
++  //
++  // The shadow's share scales with the canvas, like the corner radius and
++  // the header font do, so a zoomed-out cell is the same object seen
++  // smaller rather than a small page carrying a full-size shadow. The ring
++  // does not: it is a hairline at every zoom, and scaling it away would
++  // leave the border with nowhere to land.
++  const gfx::Insets shadow = gfx::ShadowValue::GetMargin(CardShadows());
++  const int ring = base::ClampCeil(kCardBorderGap + kCardBorderWidth);
++  const auto scaled = [this, ring](int edge) {
++    return base::ClampRound(-edge * scale_) + ring;
++  };
++  web_view_->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(scaled(shadow.top()), scaled(shadow.left()),
++                        scaled(shadow.bottom()), scaled(shadow.right())));
 +
 +  // The header scales with the cell rather than staying a fixed size, so
 +  // the canvas keeps the same proportions at every zoom level. A derived
@@ -3556,6 +3615,12 @@ index 0000000000000..c2721de926689
 +  const int base_size = base_font_.GetFontSize();
 +  const int scaled_size = std::max(1, base::ClampRound(base_size * scale_));
 +  header_->SetFontList(base_font_.DeriveWithSizeDelta(scaled_size - base_size));
++  // The gap under it scales too, or a zoomed-out cell carries a full-size
++  // gap under a three-pixel label.
++  header_->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(0, 0, base::ClampRound(kHeaderBottomMargin * scale_),
++                        0));
 +
 +  InvalidateLayout();
 +}
@@ -3571,10 +3636,10 @@ index 0000000000000..c2721de926689
 +END_METADATA
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.h
 new file mode 100644
-index 0000000000000..be1459747cc47
+index 0000000000000..7783f7e73b86b
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.h
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,130 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3684,10 +3749,12 @@ index 0000000000000..be1459747cc47
 +  // has no native wrapper to talk to before then, so a call at construction
 +  // time is silently dropped.
 +  //
-+  // Deliberately passes the *unscaled* radius, unlike the border: the
-+  // renderer's layer is pinned at the device's real size and scaled by the
-+  // canvas zoom (see AppSwapResponsiveLabPinnedSizeWebView), so a radius in
-+  // that layer's own space is magnified along with everything else in it.
++  // Which radius it passes depends on who is applying the canvas zoom, the
++  // same split ApplyScale() makes. When the renderer scales, its layer is
++  // already at the on-screen size and the radius has to be scaled to match
++  // the border. When the surface is pinned instead, the layer is at the
++  // device's size and magnified afterwards, so the radius is magnified with
++  // it and must be passed unscaled.
 +  void ApplyCardCorners();
 +
 +  AppSwapDevicePreset preset_;
@@ -4092,10 +4159,10 @@ index 0000000000000..9a5815a48fd04
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_GRID_VIEW_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.cc
 new file mode 100644
-index 0000000000000..15fd8de92f963
+index 0000000000000..3d92b327661fe
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.cc
-@@ -0,0 +1,176 @@
+@@ -0,0 +1,183 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -4126,7 +4193,6 @@ index 0000000000000..15fd8de92f963
 +constexpr int kPanelHeight = 130;
 +constexpr int kPanelPadding = 10;
 +constexpr float kPanelCornerRadius = 8.0f;
-+constexpr int kContentOutlineThickness = 1;
 +constexpr int kViewportIndicatorThickness = 2;
 +
 +// A cell narrower than this would be a sliver rather than a readable
@@ -4151,11 +4217,6 @@ index 0000000000000..15fd8de92f963
 +  SetBackground(views::CreateRoundedRectBackground(
 +      ui::kColorSysSurfaceVariant, kPanelCornerRadius));
 +  SetBorder(views::CreateEmptyBorder(gfx::Insets(kPanelPadding)));
-+
-+  auto content_outline = std::make_unique<views::View>();
-+  content_outline->SetBorder(views::CreateSolidBorder(
-+      kContentOutlineThickness, ui::kColorSysOutline));
-+  content_outline_ = AddChildView(std::move(content_outline));
 +
 +  auto viewport_indicator = std::make_unique<views::View>();
 +  viewport_indicator->SetBorder(views::CreateSolidBorder(
@@ -4190,10 +4251,6 @@ index 0000000000000..15fd8de92f963
 +      inner.x() + (inner.width() - scaled_width) / 2.0f,
 +      inner.y() + (inner.height() - scaled_height) / 2.0f);
 +
-+  content_outline_->SetBoundsRect(gfx::ToEnclosingRect(
-+      gfx::RectF(fit_offset_.x(), fit_offset_.y(), scaled_width,
-+                scaled_height)));
-+
 +  // One rect per cell, so the minimap shows the grid as the row of
 +  // differently proportioned pages it is -- which is what tells the user
 +  // where they are. A single outline can only say "somewhere in the
@@ -4209,12 +4266,29 @@ index 0000000000000..15fd8de92f963
 +    cell_rects_.push_back(rect);
 +  }
 +
++  // The grid's full extent. Not drawn -- the cells are the content, and an
++  // outline around them only ever enclosed the header labels and the row's
++  // padding as well, which read as an empty band around everything. Still
++  // computed, because it is what the indicator is clipped to.
++  const gfx::RectF content_rect(fit_offset_.x(), fit_offset_.y(), scaled_width,
++                                scaled_height);
 +  gfx::RectF indicator(canvas_->VisibleContentRect());
 +  indicator.Scale(fit_scale_);
 +  indicator.Offset(fit_offset_);
-+  indicator.Intersect(gfx::RectF(inner));
-+  viewport_indicator_->SetVisible(!indicator.IsEmpty());
-+  if (!indicator.IsEmpty()) {
++
++  // Clipped to the content, not to the panel: an indicator is a statement
++  // about which part of the content is on screen, so one that extended past
++  // the content outline -- which it does whenever the canvas is wider than
++  // the grid, i.e. at every zoomed-out level -- was claiming to point at
++  // something that isn't there.
++  indicator.Intersect(content_rect);
++
++  // And once it covers the whole grid there is no part to point at, so it
++  // says nothing and is better gone than drawn as a frame around
++  // everything.
++  const bool shows_everything = indicator == content_rect;
++  viewport_indicator_->SetVisible(!indicator.IsEmpty() && !shows_everything);
++  if (viewport_indicator_->GetVisible()) {
 +    viewport_indicator_->SetBoundsRect(gfx::ToEnclosingRect(indicator));
 +  }
 +
@@ -4227,8 +4301,8 @@ index 0000000000000..15fd8de92f963
 +  views::View::OnPaint(canvas);
 +
 +  // Painted here rather than as child views, so these land above this
-+  // view's own background but below content_outline_ and the viewport
-+  // indicator, which both need to stay readable on top of them.
++  // view's own background but below the viewport indicator, which needs to
++  // stay readable on top of them.
 +  const ui::ColorProvider* colors = GetColorProvider();
 +  const SkColor fill = colors->GetColor(ui::kColorSysSurface);
 +  const SkColor outline = colors->GetColor(ui::kColorSysOutline);
@@ -4274,10 +4348,10 @@ index 0000000000000..15fd8de92f963
 +END_METADATA
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h
 new file mode 100644
-index 0000000000000..4e0d4c32de50c
+index 0000000000000..4a00c75643d34
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,87 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -4354,7 +4428,6 @@ index 0000000000000..4e0d4c32de50c
 +  // per cell would mean reconciling a child list to draw three rectangles.
 +  std::vector<gfx::Rect> cell_rects_;
 +
-+  raw_ptr<views::View> content_outline_ = nullptr;
 +  raw_ptr<views::View> viewport_indicator_ = nullptr;
 +
 +  // The "fit content into this panel's inner area" mapping Refresh() last
@@ -5398,10 +5471,10 @@ index 0000000000000..85d6d97703d9b
 +};
 diff --git a/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.cc b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.cc
 new file mode 100644
-index 0000000000000..7dacbc2687abf
+index 0000000000000..b6a2d2efa5f7d
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.cc
-@@ -0,0 +1,329 @@
+@@ -0,0 +1,335 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -5630,6 +5703,12 @@ index 0000000000000..7dacbc2687abf
 +  page_->OnConsoleCleared();
 +}
 +
++void AppSwapResponsiveLabPageHandler::OnResponsiveLabCanvasScaleChanged() {
++  // Ctrl+Wheel over the canvas changes the zoom without going through this
++  // handler, so the panel's readout only follows if the session says so.
++  PushState();
++}
++
 +void AppSwapResponsiveLabPageHandler::OnInspectorPickingChanged() {
 +  PushPicking();
 +}
@@ -5733,10 +5812,10 @@ index 0000000000000..7dacbc2687abf
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.h b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.h
 new file mode 100644
-index 0000000000000..6365087660fa2
+index 0000000000000..af915855f7e38
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.h
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,119 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -5814,6 +5893,7 @@ index 0000000000000..6365087660fa2
 +  // AppSwapResponsiveLabSession::Observer:
 +  void OnResponsiveLabViewportsChanged() override;
 +  void OnResponsiveLabActiveChanged() override;
++  void OnResponsiveLabCanvasScaleChanged() override;
 +  void OnResponsiveLabSessionDestroying() override;
 +
 +  // AppSwapResponsiveLabInspector::Observer:
