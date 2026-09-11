@@ -835,7 +835,7 @@ index 0000000000000..0745c287bb5d5
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_INSPECTOR_H_
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_session.cc b/chrome/browser/app_swap/app_swap_responsive_lab_session.cc
 new file mode 100644
-index 0000000000000..2727ca71cacd3
+index 0000000000000..25139822eead0
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_session.cc
 @@ -0,0 +1,273 @@
@@ -955,7 +955,7 @@ index 0000000000000..2727ca71cacd3
 +  }
 +  previewed_url_ = url;
 +  for (Observer& observer : observers_) {
-+    observer.OnResponsiveLabActiveChanged();
++    observer.OnResponsiveLabPreviewedUrlChanged();
 +  }
 +}
 +
@@ -1114,10 +1114,10 @@ index 0000000000000..2727ca71cacd3
 +WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapResponsiveLabSession);
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_session.h b/chrome/browser/app_swap/app_swap_responsive_lab_session.h
 new file mode 100644
-index 0000000000000..abb50f597a604
+index 0000000000000..78cdfb7d3d836
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_session.h
-@@ -0,0 +1,200 @@
+@@ -0,0 +1,206 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1192,8 +1192,14 @@ index 0000000000000..abb50f597a604
 +    // it wholesale anyway.
 +    virtual void OnResponsiveLabViewportsChanged() {}
 +
-+    // The lab was toggled on or off, or the previewed URL changed.
++    // The lab was toggled on or off.
 +    virtual void OnResponsiveLabActiveChanged() {}
++
++    // The page the lab is previewing changed -- the user navigated the
++    // host tab, typically from the address bar. Separate from
++    // OnResponsiveLabActiveChanged() because the cells have to re-navigate
++    // to follow it, which a mere toggle never asks for.
++    virtual void OnResponsiveLabPreviewedUrlChanged() {}
 +
 +    // The canvas zoom changed. Fired only when the *scale* changes, not on
 +    // every pan frame, so an observer can afford to re-read whatever it
@@ -3289,10 +3295,10 @@ index 0000000000000..89b505ea60255
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CANVAS_VIEW_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc
 new file mode 100644
-index 0000000000000..0896ca33c78b8
+index 0000000000000..f7686b69f2fbf
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc
-@@ -0,0 +1,341 @@
+@@ -0,0 +1,357 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3309,6 +3315,8 @@ index 0000000000000..0896ca33c78b8
 +#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "components/zoom/zoom_controller.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/web_contents.h"
 +#include "cc/paint/paint_flags.h"
 +#include "ui/base/metadata/metadata_impl_macros.h"
 +#include "ui/color/color_id.h"
@@ -3474,6 +3482,20 @@ index 0000000000000..0896ca33c78b8
 +  }
 +}
 +
++void AppSwapResponsiveLabCellView::SetPreviewedUrl(const GURL& url) {
++  content::WebContents* contents = web_view_->web_contents();
++  if (!contents || !url.is_valid() ||
++      contents->GetLastCommittedURL() == url) {
++    return;
++  }
++  // The same load views::WebView::LoadInitialURL() does, which is not
++  // reusable here: it is documented for the first navigation only, and it
++  // also sizes the WebContents -- which would undo this cell's size pin.
++  contents->GetController().LoadURL(url, content::Referrer(),
++                                    ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
++                                    std::string());
++}
++
 +gfx::Rect AppSwapResponsiveLabCellView::viewport_bounds() const {
 +  return web_view_->bounds();
 +}
@@ -3636,10 +3658,10 @@ index 0000000000000..0896ca33c78b8
 +END_METADATA
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.h
 new file mode 100644
-index 0000000000000..7783f7e73b86b
+index 0000000000000..a2368109850ef
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.h
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,136 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3711,6 +3733,12 @@ index 0000000000000..7783f7e73b86b
 +  // state survives a rotation or a size edit. No-op if `preset` is
 +  // unchanged.
 +  void SetPreset(const AppSwapDevicePreset& preset);
++
++  // Navigates this cell to `url`, so the grid follows the host tab when the
++  // user types a new address. No-op if the cell is already there -- the
++  // grid fans this out to every cell, and a cell that just loaded the URL
++  // should not reload it.
++  void SetPreviewedUrl(const GURL& url);
 +
 +  // Lays this cell out `scale` times its device size, keeping the renderer
 +  // itself pinned at that device's real pixel size.
@@ -3891,10 +3919,10 @@ index 0000000000000..9d579336150fb
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_GRID_HOLDER_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.cc
 new file mode 100644
-index 0000000000000..a8b68757f38e7
+index 0000000000000..4839f1b81a10c
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.cc
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,186 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -4006,6 +4034,18 @@ index 0000000000000..a8b68757f38e7
 +  Reconcile();
 +}
 +
++void AppSwapResponsiveLabGridView::OnResponsiveLabPreviewedUrlChanged() {
++  if (!session_) {
++    return;
++  }
++  for (views::View* child : children()) {
++    if (AppSwapResponsiveLabCellView* cell =
++            views::AsViewClass<AppSwapResponsiveLabCellView>(child)) {
++      cell->SetPreviewedUrl(session_->previewed_url());
++    }
++  }
++}
++
 +void AppSwapResponsiveLabGridView::OnResponsiveLabSessionDestroying() {
 +  // The cells are about to lose the session their WebContents are
 +  // registered with. They notice via their own WeakPtr; all this view has
@@ -4071,10 +4111,10 @@ index 0000000000000..a8b68757f38e7
 +END_METADATA
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.h
 new file mode 100644
-index 0000000000000..9a5815a48fd04
+index 0000000000000..476a77b5b425a
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.h
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,91 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -4138,6 +4178,7 @@ index 0000000000000..9a5815a48fd04
 +
 +  // AppSwapResponsiveLabSession::Observer:
 +  void OnResponsiveLabViewportsChanged() override;
++  void OnResponsiveLabPreviewedUrlChanged() override;
 +  void OnResponsiveLabSessionDestroying() override;
 +
 + private:
@@ -5479,10 +5520,10 @@ index 0000000000000..85d6d97703d9b
 +};
 diff --git a/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.cc b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.cc
 new file mode 100644
-index 0000000000000..b6a2d2efa5f7d
+index 0000000000000..5fe3ede02a3eb
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.cc
-@@ -0,0 +1,335 @@
+@@ -0,0 +1,340 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -5751,6 +5792,11 @@ index 0000000000000..b6a2d2efa5f7d
 +  PushState();
 +}
 +
++void AppSwapResponsiveLabPageHandler::OnResponsiveLabPreviewedUrlChanged() {
++  // The URL is part of the state the panel shows in its header.
++  PushState();
++}
++
 +void AppSwapResponsiveLabPageHandler::OnResponsiveLabSessionDestroying() {
 +  // The tab this panel was showing is closing. Stop observing first, then
 +  // push: by the time the bridge's WeakPtr is cleared the session is gone,
@@ -5820,10 +5866,10 @@ index 0000000000000..b6a2d2efa5f7d
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.h b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.h
 new file mode 100644
-index 0000000000000..af915855f7e38
+index 0000000000000..ccb838123b4b5
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.h
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,120 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -5901,6 +5947,7 @@ index 0000000000000..af915855f7e38
 +  // AppSwapResponsiveLabSession::Observer:
 +  void OnResponsiveLabViewportsChanged() override;
 +  void OnResponsiveLabActiveChanged() override;
++  void OnResponsiveLabPreviewedUrlChanged() override;
 +  void OnResponsiveLabCanvasScaleChanged() override;
 +  void OnResponsiveLabSessionDestroying() override;
 +
