@@ -1,18 +1,20 @@
 diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
-index 6da26cc50c070..2cbf6bac9f674 100644
+index 6da26cc50c070..cd0aa600ce9c8 100644
 --- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
 +++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
-@@ -30,6 +30,9 @@
+@@ -30,6 +30,11 @@
  #include "chrome/browser/ui/webui/access_code_cast/access_code_cast_ui.h"
  #include "chrome/browser/ui/webui/app_service_internals/app_service_internals.mojom.h"
  #include "chrome/browser/ui/webui/app_service_internals/app_service_internals_ui.h"
 +#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker.mojom.h"
 +#include "chrome/browser/ui/webui/app_swap_projects/app_swap_projects_ui.h"
++#include "chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab.mojom.h"
++#include "chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_ui.h"
 +#include "chrome/browser/ui/webui/app_swap_version_picker/app_swap_version_picker_ui.h"
  #include "chrome/browser/ui/webui/autofill_ml_internals/autofill_ml_internals_ui.h"
  #include "chrome/browser/ui/webui/bookmarks/bookmarks_ui.h"
  #include "chrome/browser/ui/webui/color_pipeline_internals/color_pipeline_internals_ui.h"
-@@ -638,6 +641,13 @@ void PopulateChromeWebUIFrameBindersPartsDesktop(
+@@ -638,6 +643,17 @@ void PopulateChromeWebUIFrameBindersPartsDesktop(
    RegisterWebUIControllerInterfaceBinder<
        feedback::report_unsafe_site::mojom::PageHandlerFactory, FeedbackUI>(map);
  
@@ -22,6 +24,10 @@ index 6da26cc50c070..2cbf6bac9f674 100644
 +
 +  RegisterWebUIControllerInterfaceBinder<
 +      app_swap_projects::mojom::PageHandlerFactory, AppSwapProjectsUI>(map);
++
++  RegisterWebUIControllerInterfaceBinder<
++      app_swap_responsive_lab::mojom::PageHandlerFactory,
++      AppSwapResponsiveLabUI>(map);
 +
    RegisterWebUIControllerInterfaceBinder<
        contextual_cueing_internals::mojom::PageHandler,
@@ -1164,20 +1170,21 @@ index 0000000000000..5b8b57da99c93
 +
 +#endif  // CHROME_BROWSER_UI_WEBUI_APP_SWAP_VERSION_PICKER_APP_SWAP_VERSION_PICKER_UI_H_
 diff --git a/third_party/lit/v3_0/BUILD.gn b/third_party/lit/v3_0/BUILD.gn
-index 510846ce9fcaa..c7239bd41aa02 100644
+index 510846ce9fcaa..5af607e72cbad 100644
 --- a/third_party/lit/v3_0/BUILD.gn
 +++ b/third_party/lit/v3_0/BUILD.gn
-@@ -30,6 +30,8 @@ ts_library("build_ts") {
+@@ -30,6 +30,9 @@ ts_library("build_ts") {
      "//chrome/browser/resources/app_home:build_ts",
      "//chrome/browser/resources/app_service_internals:build_ts",
      "//chrome/browser/resources/app_settings:build_ts",
 +    "//chrome/browser/resources/app_swap_projects:build_ts",
++    "//chrome/browser/resources/app_swap_responsive_lab:build_ts",
 +    "//chrome/browser/resources/app_swap_version_picker:build_ts",
      "//chrome/browser/resources/autofill_ml_internals:build_ts",
      "//chrome/browser/resources/bookmarks:build_ts",
      "//chrome/browser/resources/browser_actuator_internals:build_ts",
 diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_ids.spec
-index f3d3447299098..50eb9270fa786 100644
+index f3d3447299098..2d7016d977d43 100644
 --- a/tools/gritsettings/resource_ids.spec
 +++ b/tools/gritsettings/resource_ids.spec
 @@ -228,6 +228,10 @@
@@ -1202,3 +1209,19 @@ index f3d3447299098..50eb9270fa786 100644
    "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/ash/print_preview/resources.grd": {
      "META": {"sizes": {"includes": [500]}},
      "includes": [2850],
+@@ -1803,6 +1811,15 @@
+     "includes": [10140],
+   },
+ 
++  # AppSwap Responsive Lab's panel. Placed at the end of this section
++  # rather than beside the other app_swap_* entries near 2810: those sit in
++  # a densely packed run with no free range wide enough to add to, and an
++  # overlapping range is a grit error, not a warning.
++  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/app_swap_responsive_lab/resources.grd": {
++    "META": {"sizes": {"includes": [20]}},
++    "includes": [10260],
++  },
++
+   "<(SHARED_INTERMEDIATE_DIR)/THIS_IS_A_PLACEHOLDER.grd": {
+     "META": {"sizes": {"includes": [800]}},
+     "includes": [12000],
