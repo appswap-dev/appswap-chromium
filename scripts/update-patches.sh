@@ -12,6 +12,21 @@ cd "$ROOT/src"
 # Include untracked files (e.g. newly added tools) in the diff.
 git add -N -A 2>/dev/null || true
 
+# Blob-hash abbreviation length for the `index` lines every hunk header
+# carries. Pinned rather than left to git's `core.abbrev=auto`, which scales
+# with how many objects the local checkout happens to have -- a shallower or
+# deeper clone picks a different length, which rewrites the index line of
+# *every* hunk in *every* patch and buries a one-file change in a
+# twenty-file diff.
+#
+# Two values because there are two repositories, each with its own object
+# count and so its own natural length: src/ and the much smaller nested
+# third_party/devtools-frontend/src. These are what the committed patches
+# already use, so pinning them is a no-op on a checkout where auto happened
+# to agree.
+ABBREV=13
+DEVTOOLS_ABBREV=10
+
 # gen <patch-file> <pathspec...> -> writes patches/<patch-file> from the diff
 # restricted to the given paths.
 #
@@ -27,7 +42,7 @@ gen() {
     rm -f "$out"
     echo "  (no changes) $name"
   else
-    git diff --binary HEAD -- "$@" > "$out"
+    git diff --binary --abbrev="$ABBREV" HEAD -- "$@" > "$out"
     echo "  wrote $name"
   fi
 }
@@ -47,7 +62,8 @@ gen_devtools() {
     rm -f "$out"
     echo "  (no changes) $name"
   else
-    git -C "$DEVTOOLS_DIR" diff --binary HEAD -- "$@" > "$out"
+    git -C "$DEVTOOLS_DIR" diff --binary --abbrev="$DEVTOOLS_ABBREV" \
+      HEAD -- "$@" > "$out"
     echo "  wrote $name"
   fi
 }
@@ -521,13 +537,36 @@ gen 0016-project-selector-and-terminology.patch \
 # chrome/browser/ui/views/toolbar/toolbar_view.{cc,h},
 # chrome/browser/ui/tab_helpers.cc) are picked up automatically by
 # 0005/0009/0012/0013 above.
+#
+# The panel is a WebUI page (chrome/browser/ui/webui/app_swap_responsive_lab
+# + its resources), hosted in a views::WebView docked beside the canvas and
+# driven from the browser process over the Chrome DevTools Protocol -- one
+# AppSwapResponsiveLabViewportClient per viewport, which is also what
+# supplies each cell's device emulation. Its registration edits land in
+# whichever patch already owns each shared file, same as the other WebUIs:
+# chrome_web_ui_configs.cc and chrome/browser/ui/webui/BUILD.gn in 0005,
+# chrome_browser_interface_binders_webui_parts_desktop.cc,
+# tools/gritsettings/resource_ids.spec and third_party/lit/v3_0/BUILD.gn in
+# 0014, chrome/chrome_paks.gni in 0004.
 gen 0017-responsive-lab.patch \
+  chrome/browser/app_swap/app_swap_responsive_lab_inspector.cc \
+  chrome/browser/app_swap/app_swap_responsive_lab_inspector.h \
+  chrome/browser/app_swap/app_swap_responsive_lab_session.cc \
+  chrome/browser/app_swap/app_swap_responsive_lab_session.h \
   chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.cc \
   chrome/browser/app_swap/app_swap_responsive_lab_tab_helper.h \
+  chrome/browser/app_swap/app_swap_responsive_lab_types.cc \
+  chrome/browser/app_swap/app_swap_responsive_lab_types.h \
+  chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.cc \
+  chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.h \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.h \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.h \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.cc \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.h \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.h \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.cc \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_minimap_view.h \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc \
@@ -540,6 +579,8 @@ gen 0017-responsive-lab.patch \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.h \
   chrome/browser/ui/views/frame/contents_container_view.cc \
   chrome/browser/ui/views/frame/contents_container_view.h \
+  chrome/browser/ui/webui/app_swap_responsive_lab \
+  chrome/browser/resources/app_swap_responsive_lab \
   ui/views/controls/native/native_view_host.cc \
   ui/views/controls/native/native_view_host_mac.mm
 

@@ -37,10 +37,10 @@ index 4a223bd530cdb..a338b5bea0a5e 100644
        "views/profiles/isolated_mode_menu_view.cc",
 diff --git a/chrome/browser/ui/views/app_swap/BUILD.gn b/chrome/browser/ui/views/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..6be3008d5e0c6
+index 0000000000000..947e81ee2329d
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/BUILD.gn
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,75 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -57,8 +57,12 @@ index 0000000000000..6be3008d5e0c6
 +    "app_swap_reload_button_controller.h",
 +    "app_swap_responsive_lab_canvas_view.cc",
 +    "app_swap_responsive_lab_canvas_view.h",
++    "app_swap_responsive_lab_cell_view.cc",
++    "app_swap_responsive_lab_cell_view.h",
 +    "app_swap_responsive_lab_grid_holder.cc",
 +    "app_swap_responsive_lab_grid_holder.h",
++    "app_swap_responsive_lab_grid_view.cc",
++    "app_swap_responsive_lab_grid_view.h",
 +    "app_swap_responsive_lab_minimap_view.cc",
 +    "app_swap_responsive_lab_minimap_view.h",
 +    "app_swap_responsive_lab_overlay_view.cc",
@@ -78,6 +82,7 @@ index 0000000000000..6be3008d5e0c6
 +    "//chrome/browser/ui/tabs",
 +    "//chrome/browser/ui/views/page_info",
 +    "//chrome/browser/ui/views/controls:controls",
++    "//chrome/browser/ui/webui/app_swap_responsive_lab",
 +    "//chrome/browser/ui/webui/app_swap_version_picker",
 +    "//chrome/app:generated_resources",
 +    "//components/constrained_window",
