@@ -736,7 +736,7 @@ index 720bcdd58c8a3..bec496e24566f 100644
      "//chrome/browser/ui/views/download",
      "//chrome/browser/ui/views/extensions:extension_popup",
 diff --git a/chrome/browser/ui/views/toolbar/reload_button.cc b/chrome/browser/ui/views/toolbar/reload_button.cc
-index a86b7baa53a5d..dbd357c59422c 100644
+index a86b7baa53a5d..fca98b8c232c3 100644
 --- a/chrome/browser/ui/views/toolbar/reload_button.cc
 +++ b/chrome/browser/ui/views/toolbar/reload_button.cc
 @@ -17,6 +17,7 @@
@@ -747,7 +747,7 @@ index a86b7baa53a5d..dbd357c59422c 100644
  #include "chrome/browser/ui/waap/initial_webui_window_metrics_manager.h"
  #include "chrome/browser/ui/waap/waap_ui_metrics_recorder.h"
  #include "chrome/grit/browser_resources.h"
-@@ -30,8 +31,11 @@
+@@ -30,6 +31,8 @@
  #include "ui/base/ui_base_features.h"
  #include "ui/base/window_open_disposition.h"
  #include "ui/base/window_open_disposition_utils.h"
@@ -755,11 +755,8 @@ index a86b7baa53a5d..dbd357c59422c 100644
 +#include "ui/color/color_provider.h"
  #include "ui/compositor/compositor.h"
  #include "ui/gfx/color_palette.h"
-+#include "ui/gfx/color_utils.h"
  #include "ui/gfx/paint_vector_icon.h"
- #include "ui/menus/simple_menu_model.h"
- #include "ui/views/accessibility/view_accessibility.h"
-@@ -58,7 +62,8 @@ static constexpr gfx::Tween::Type kIconAnimationTween =
+@@ -58,7 +61,8 @@ static constexpr gfx::Tween::Type kIconAnimationTween =
  ReloadButton::ReloadButton(
      Profile* profile,
      CommandUpdater* command_updater,
@@ -769,7 +766,7 @@ index a86b7baa53a5d..dbd357c59422c 100644
      : ToolbarButton(base::BindRepeating(&ReloadButton::ButtonPressed,
                                          base::Unretained(this)),
                      CreateMenuModel(),
-@@ -83,6 +88,19 @@ ReloadButton::ReloadButton(
+@@ -83,6 +87,19 @@ ReloadButton::ReloadButton(
    if (window_metrics_manager_) {
      window_metrics_manager_->OnReloadButtonCreated();
    }
@@ -789,7 +786,7 @@ index a86b7baa53a5d..dbd357c59422c 100644
    SetVisibleMode(Mode::kReload);
    SetTriggerableEventFlags(ui::EF_LEFT_MOUSE_BUTTON |
                             ui::EF_MIDDLE_MOUSE_BUTTON);
-@@ -156,6 +174,11 @@ void ReloadButton::PaintButtonContents(gfx::Canvas* canvas) {
+@@ -156,6 +173,11 @@ void ReloadButton::PaintButtonContents(gfx::Canvas* canvas) {
  }
  
  void ReloadButton::UpdateCachedTooltipText() {
@@ -801,7 +798,7 @@ index a86b7baa53a5d..dbd357c59422c 100644
    int reload_tooltip =
        ShouldShowMenu() ? IDS_TOOLTIP_RELOAD_WITH_MENU : IDS_TOOLTIP_RELOAD;
    SetTooltipText(l10n_util::GetStringUTF16(
-@@ -311,6 +334,12 @@ base::CallbackListSubscription ReloadButton::AddVisibleModeChangedCallback(
+@@ -311,6 +333,12 @@ base::CallbackListSubscription ReloadButton::AddVisibleModeChangedCallback(
  }
  
  void ReloadButton::ButtonPressed(const ui::Event& event) {
@@ -814,7 +811,7 @@ index a86b7baa53a5d..dbd357c59422c 100644
    // This is called in order to signal that external protocol dialogs are
    // allowed to show due to a user action, which are likely to happen on the
    // next page load after the reload button is clicked.
-@@ -364,6 +393,59 @@ void ReloadButton::ButtonPressed(const ui::Event& event) {
+@@ -364,6 +392,72 @@ void ReloadButton::ButtonPressed(const ui::Event& event) {
    }
  }
  
@@ -841,7 +838,23 @@ index a86b7baa53a5d..dbd357c59422c 100644
 +  if (!color_provider) {
 +    return std::nullopt;
 +  }
-+  return color_provider->GetColor(ui::kColorAccent);
++  // kColorSysPrimary, not kColorAccent: the latter is a hardcoded Google
++  // blue (see core_default_color_mixer.cc), so the pill stayed blue in a
++  // window themed any other color. kColorSysPrimary comes from the dynamic
++  // palette the browser generates from the user's theme, so it follows it.
++  return color_provider->GetColor(ui::kColorSysPrimary);
++}
++
++std::optional<SkColor> ReloadButton::GetAppSwapUpdateForegroundColor() const {
++  const ui::ColorProvider* color_provider = GetColorProvider();
++  if (!color_provider) {
++    return std::nullopt;
++  }
++  // The palette's own counterpart to kColorSysPrimary. This used to be
++  // color_utils::GetColorWithMaxContrast() over the pill color, i.e. plain
++  // black or white; the paired token is guaranteed legible on the pill in
++  // both light and dark mode without that guess.
++  return color_provider->GetColor(ui::kColorSysOnPrimary);
 +}
 +
 +std::optional<SkColor> ReloadButton::GetHighlightTextColor() const {
@@ -849,23 +862,20 @@ index a86b7baa53a5d..dbd357c59422c 100644
 +      !appswap_reload_controller_->HasPendingUpdate()) {
 +    return ToolbarButton::GetHighlightTextColor();
 +  }
-+  std::optional<SkColor> highlight_color = GetAppSwapUpdateHighlightColor();
-+  if (!highlight_color) {
-+    return ToolbarButton::GetHighlightTextColor();
-+  }
 +  // The default HighlightColorAnimation text color is the highlight color
 +  // itself (see ToolbarButton::HighlightColorAnimation::GetTextColor()),
-+  // which would paint "Update" in the same green as its own pill background.
-+  // Use the higher-contrast of black/white against that background instead.
-+  return color_utils::GetColorWithMaxContrast(*highlight_color);
++  // which would paint "Update" in the same color as its own pill
++  // background.
++  std::optional<SkColor> foreground = GetAppSwapUpdateForegroundColor();
++  return foreground ? foreground : ToolbarButton::GetHighlightTextColor();
 +}
 +
 +SkColor ReloadButton::GetForegroundColor(ButtonState state) const {
 +  if (appswap_reload_controller_ &&
 +      appswap_reload_controller_->HasPendingUpdate()) {
-+    if (std::optional<SkColor> highlight_color =
-+            GetAppSwapUpdateHighlightColor()) {
-+      return color_utils::GetColorWithMaxContrast(*highlight_color);
++    if (std::optional<SkColor> foreground =
++            GetAppSwapUpdateForegroundColor()) {
++      return *foreground;
 +    }
 +  }
 +  return ToolbarButton::GetForegroundColor(state);
@@ -875,7 +885,7 @@ index a86b7baa53a5d..dbd357c59422c 100644
    if (!command_updater_) {
      return;
 diff --git a/chrome/browser/ui/views/toolbar/reload_button.h b/chrome/browser/ui/views/toolbar/reload_button.h
-index 735b1d5f798b4..5612898f4b54c 100644
+index 735b1d5f798b4..42fd94f197b84 100644
 --- a/chrome/browser/ui/views/toolbar/reload_button.h
 +++ b/chrome/browser/ui/views/toolbar/reload_button.h
 @@ -5,6 +5,9 @@
@@ -907,20 +917,20 @@ index 735b1d5f798b4..5612898f4b54c 100644
    ReloadButton(const ReloadButton&) = delete;
    ReloadButton& operator=(const ReloadButton&) = delete;
    ~ReloadButton() override;
-@@ -100,6 +106,27 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
+@@ -100,6 +106,32 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
  
    void ExecuteBrowserCommand(int command, int event_flags);
  
 +  // ToolbarButton:
 +  // Overridden because the default HighlightColorAnimation text color is the
-+  // highlight color itself, which would paint "Update" in the same green as
++  // highlight color itself, which would paint "Update" in the same color as
 +  // its own pill background.
 +  std::optional<SkColor> GetHighlightTextColor() const override;
 +
 +  // ToolbarButton:
-+  // Overridden so the reload icon itself also uses the max-contrast color
-+  // while the "Update" pill is showing, instead of the normal toolbar icon
-+  // color -- otherwise the icon and the text next to it wouldn't match.
++  // Overridden so the reload icon itself also uses the on-pill color while
++  // the "Update" pill is showing, instead of the normal toolbar icon color
++  // -- otherwise the icon and the text next to it wouldn't match.
 +  SkColor GetForegroundColor(ButtonState state) const override;
 +
 +  // Applies appswap_reload_controller_'s current state to this button's
@@ -932,10 +942,15 @@ index 735b1d5f798b4..5612898f4b54c 100644
 +  // nullopt if no ColorProvider is available yet.
 +  std::optional<SkColor> GetAppSwapUpdateHighlightColor() const;
 +
++  // What to paint on top of that pill -- its label and its icon. Paired
++  // with the pill color rather than derived from it, so the two always come
++  // from the same palette.
++  std::optional<SkColor> GetAppSwapUpdateForegroundColor() const;
++
    void OnDoubleClickTimer();
    void OnStopToReloadTimer();
    void UpdateAccessibleHasPopup();
-@@ -151,6 +178,12 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
+@@ -151,6 +183,12 @@ class ReloadButton : public ToolbarButton, public ReloadControl {
    // Not owned and might be null.
    const raw_ptr<InitialWebUIWindowMetricsManager> window_metrics_manager_;
  
