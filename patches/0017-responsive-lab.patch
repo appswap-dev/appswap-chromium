@@ -3891,10 +3891,10 @@ index 0000000000000..9d579336150fb
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_GRID_HOLDER_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.cc
 new file mode 100644
-index 0000000000000..7f5873788d74e
+index 0000000000000..a8b68757f38e7
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.cc
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,174 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3990,7 +3990,14 @@ index 0000000000000..7f5873788d74e
 +  const int spacing = base::ClampRound(kCellSpacing * scale_);
 +  layout_->set_between_child_spacing(spacing);
 +  layout_->set_inside_border_insets(gfx::Insets(spacing));
-+  SetBoundsRect(gfx::Rect(GetPreferredSize()));
++  // SizeToPreferredSize(), never SetBoundsRect(gfx::Rect(GetPreferredSize())),
++  // which is what this was: that also moves the view to (0, 0), and this
++  // view's origin is where AppSwapResponsiveLabCanvasView keeps the pan.
++  // Zooming hid the bug, because ZoomBy() re-applies the pan immediately
++  // after scaling. Rotating a viewport did not: that path runs from the
++  // session observer with no canvas involvement, so the canvas snapped back
++  // to its origin on every rotate, add and remove.
++  SizeToPreferredSize();
 +}
 +
 +AppSwapResponsiveLabGridView::~AppSwapResponsiveLabGridView() = default;
@@ -4043,8 +4050,9 @@ index 0000000000000..7f5873788d74e
 +  // nothing above ever resizes it for us (AppSwapResponsiveLabCanvasView
 +  // only ever repositions it via SetPosition()), so it must be sized to its
 +  // own preferred size explicitly. Re-done on every reconcile, since adding
-+  // or removing a viewport changes what that preferred size is.
-+  SetBoundsRect(gfx::Rect(GetPreferredSize()));
++  // or removing a viewport changes what that preferred size is. Sized, not
++  // bounded -- see ApplyScale() for what setting the origin here cost.
++  SizeToPreferredSize();
 +}
 +
 +AppSwapResponsiveLabCellView* AppSwapResponsiveLabGridView::FindCell(
