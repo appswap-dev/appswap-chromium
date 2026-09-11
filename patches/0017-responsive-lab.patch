@@ -2889,10 +2889,10 @@ index 0000000000000..37e51ed6b31f4
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_BUTTON_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc
 new file mode 100644
-index 0000000000000..09384c6fd1df1
+index 0000000000000..73d57f1d5a78a
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_canvas_view.cc
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,227 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2950,7 +2950,14 @@ index 0000000000000..09384c6fd1df1
 +  // without an explicit background here that empty area would show
 +  // whatever undefined content the compositor happens to have, not a
 +  // deliberate canvas color.
-+  SetBackground(views::CreateSolidBackground(ui::kColorWindowBackground));
++  // kColorSysBaseContainer, not kColorWindowBackground: the latter is the
++  // same near-white the previewed pages themselves are, so a cell was
++  // separated from the board behind it only by its hairline border. This
++  // token is a tinted container -- light grey under a light theme, a dark
++  // tint of the theme's own hue under a dark one -- so the cells read as
++  // cards laid on a surface. AppSwapResponsiveLabGridView paints the same
++  // color, since the row covers most of this view whenever it is on screen.
++  SetBackground(views::CreateSolidBackground(ui::kColorSysBaseContainer));
 +}
 +AppSwapResponsiveLabCanvasView::~AppSwapResponsiveLabCanvasView() = default;
 +
@@ -3919,10 +3926,10 @@ index 0000000000000..9d579336150fb
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_GRID_HOLDER_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.cc
 new file mode 100644
-index 0000000000000..4839f1b81a10c
+index 0000000000000..aedc3e82e08c5
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_view.cc
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,190 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3956,7 +3963,11 @@ index 0000000000000..4839f1b81a10c
 +  // covers most of it and is repositioned constantly while panning; an
 +  // explicit opaque background keeps every repaint starting from a clean
 +  // base rather than from whatever the compositor last left there.
-+  SetBackground(views::CreateSolidBackground(ui::kColorWindowBackground));
++  // Matches AppSwapResponsiveLabCanvasView's own background -- see there
++  // for why it is this token. The seam between the two must be invisible:
++  // this row is repositioned on every pan, so any difference would read as
++  // a rectangle sliding around behind the cells.
++  SetBackground(views::CreateSolidBackground(ui::kColorSysBaseContainer));
 +
 +  layout_ = SetLayoutManager(std::make_unique<views::BoxLayout>(
 +      views::BoxLayout::Orientation::kHorizontal));
@@ -4490,7 +4501,7 @@ index 0000000000000..4a00c75643d34
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_MINIMAP_VIEW_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc
 new file mode 100644
-index 0000000000000..4784b8610f1f0
+index 0000000000000..b441f70426504
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.cc
 @@ -0,0 +1,336 @@
@@ -4557,7 +4568,7 @@ index 0000000000000..4784b8610f1f0
 +AppSwapResponsiveLabOverlayView::AppSwapResponsiveLabOverlayView()
 +    : panel_width_(kDefaultPanelWidth) {
 +  SetVisible(false);
-+  SetBackground(views::CreateSolidBackground(ui::kColorWindowBackground));
++  SetBackground(views::CreateSolidBackground(ui::kColorSysBaseContainer));
 +
 +  // No LayoutManager here -- canvas_view_ fills this view's own bounds and
 +  // minimap_view_ is anchored to a corner of it, which Layout(PassKey)
