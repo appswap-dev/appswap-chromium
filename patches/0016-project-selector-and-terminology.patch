@@ -340,54 +340,56 @@ index 564554a675e1b..2c64cb723b459 100644
    ['/privacy', 'SettingsMenu_PrivacyClicked'],
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc
 new file mode 100644
-index 0000000000000..fe5ca19eeabc6
+index 0000000000000..a4511df119f54
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,169 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +#include "chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h"
 +
-+#include <iterator>
 +#include <string>
-+#include <utility>
 +
 +#include "base/functional/bind.h"
-+#include "base/strings/utf_string_conversions.h"
 +#include "chrome/browser/browser_process.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/profiles/profile_attributes_entry.h"
++#include "chrome/browser/profiles/profile_avatar_icon_util.h"
 +#include "chrome/browser/profiles/profile_manager.h"
 +#include "chrome/browser/ui/browser_commands.h"
 +#include "chrome/browser/ui/browser_element_identifiers.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
++#include "chrome/browser/ui/layout_constants.h"
 +#include "ui/base/metadata/metadata_impl_macros.h"
-+#include "chrome/browser/ui/views/app_swap/app_swap_badge_style.h"
-+#include "ui/color/color_id.h"
-+#include "ui/color/color_provider.h"
-+#include "ui/gfx/color_utils.h"
++#include "ui/base/models/image_model.h"
++#include "ui/gfx/image/image.h"
++#include "ui/views/accessibility/view_accessibility.h"
 +#include "ui/views/view_class_properties.h"
-+
-+namespace {
-+
-+
-+}  // namespace
 +
 +AppSwapProjectSelectorButton::AppSwapProjectSelectorButton(
 +    BrowserWindowInterface* browser)
-+    : views::MenuButton(base::BindRepeating(
-+          &AppSwapProjectSelectorButton::ButtonPressed,
-+          base::Unretained(this))),
-+      browser_(browser) {
-+  // Claims the anchor identity ProfileMenuCoordinator looks for -- see the
-+  // class comment. The real AvatarToolbarButton had this cleared off of it
-+  // in ToolbarView's constructor, so there's exactly one view carrying it.
-+  SetProperty(views::kElementIdentifierKey, kToolbarAvatarButtonElementId);
++    : browser_(browser) {
++  SetCallback(base::BindRepeating(&AppSwapProjectSelectorButton::ButtonPressed,
++                                  base::Unretained(this)));
++  // Unlike its two neighbours, which the vertical strip labels and the
++  // horizontal one does not, this segment names something and so carries its
++  // name in both. Whether there is room is a separate question, settled by
++  // SetSizeToContents(), which TabStripComboButton drives off its
++  // orientation.
++  SetShouldShowLabel(true);
++  // What TabStripComboButton::CreateFlatEdgeButtonFor() does for the two
++  // segments it builds itself. This one is built here instead, and without
++  // it the button keeps views::LabelButton's left-aligned default: the
++  // avatar then sat against the segment's leading edge rather than in the
++  // middle of it, everywhere the segment is wider than its icon.
++  SetHorizontalAlignment(gfx::HorizontalAlignment::ALIGN_CENTER);
 +  profile_attributes_observation_.Observe(
 +      &g_browser_process->profile_manager()->GetProfileAttributesStorage());
-+  UpdateLabel();
++  UpdateProject();
 +}
 +
 +AppSwapProjectSelectorButton::~AppSwapProjectSelectorButton() = default;
@@ -396,34 +398,113 @@ index 0000000000000..fe5ca19eeabc6
 +    const base::FilePath& profile_path,
 +    const std::u16string& old_name) {
 +  if (profile_path == browser_->GetProfile()->GetPath()) {
-+    UpdateLabel();
++    UpdateProject();
 +  }
 +}
 +
-+void AppSwapProjectSelectorButton::UpdateLabel() {
++void AppSwapProjectSelectorButton::OnProfileAvatarChanged(
++    const base::FilePath& profile_path) {
++  if (profile_path == browser_->GetProfile()->GetPath()) {
++    UpdateProject();
++  }
++}
++
++void AppSwapProjectSelectorButton::OnProfileThemeColorsChanged(
++    const base::FilePath& profile_path) {
++  // A placeholder avatar is drawn in the project's own theme colors, so it
++  // has to be re-fetched when those change even though the avatar itself did
++  // not.
++  if (profile_path == browser_->GetProfile()->GetPath()) {
++    UpdateProject();
++  }
++}
++
++void AppSwapProjectSelectorButton::UpdateProject() {
 +  ProfileAttributesEntry* entry =
 +      g_browser_process->profile_manager()
 +          ->GetProfileAttributesStorage()
 +          .GetProfileAttributesWithPath(browser_->GetProfile()->GetPath());
-+  const std::string name =
-+      entry ? base::UTF16ToUTF8(entry->GetName()) : "Project";
-+  SetText(base::UTF8ToUTF16(name));
-+  ApplyBadgeStyle(name);
++  const std::u16string name = entry ? entry->GetName() : u"Project";
++  SetLabelText(name);
++  // Explicit, not inherited from the label: the label is dropped whenever
++  // this segment is icon-only, which is how the collapsed vertical strip
++  // draws it, and a focusable view painting with no accessible name fails
++  // views::RunAccessibilityPaintChecks() outright.
++  SetTooltipText(name);
++  GetViewAccessibility().SetName(name);
++
++  // The project's own avatar rather than a generic glyph. It is the only
++  // thing left when the vertical strip collapses to icons, and one shared
++  // glyph there would say nothing about which project this window is.
++  //
++  // Set through SetImageModel() rather than TabStripFlatEdgeButton::
++  // UpdateIcon(), which takes vector icons only: an avatar is a bitmap, and
++  // being a bitmap it also needs no recoloring when the theme changes.
++  if (entry) {
++    const int size = GetLayoutConstant(
++        LayoutConstant::kVerticalTabStripComboButtonIconSize);
++    // Resized explicitly. GetAvatarIcon()'s size argument applies only to the
++    // placeholder silhouette; a real avatar comes back at its own resolution,
++    // which is far larger than an icon slot and overflowed the segment as a
++    // pale square hanging out of its corner.
++    const ui::ImageModel avatar =
++        ui::ImageModel::FromImage(profiles::GetSizedAvatarIcon(
++            entry->GetAvatarIcon(size, /*use_high_res_file=*/true), size, size,
++            profiles::AvatarShape::SHAPE_CIRCLE));
++    SetImageModel(views::Button::STATE_NORMAL, avatar);
++    SetImageModel(views::Button::STATE_HOVERED, avatar);
++    SetImageModel(views::Button::STATE_PRESSED, avatar);
++    SetImageModel(views::Button::STATE_DISABLED, avatar);
++  }
 +}
 +
-+void AppSwapProjectSelectorButton::ApplyBadgeStyle(
-+    const std::string& project_name) {
-+  bool dark_theme = false;
-+  if (const ui::ColorProvider* color_provider = GetColorProvider()) {
-+    dark_theme = color_utils::IsDark(
-+        color_provider->GetColor(ui::kColorWindowBackground));
++void AppSwapProjectSelectorButton::AddedToWidget() {
++  TabStripFlatEdgeButton::AddedToWidget();
++  UpdateAnchorIdentifier();
++}
++
++void AppSwapProjectSelectorButton::VisibilityChanged(views::View* starting_from,
++                                                     bool is_visible) {
++  TabStripFlatEdgeButton::VisibilityChanged(starting_from, is_visible);
++  UpdateAnchorIdentifier();
++}
++
++void AppSwapProjectSelectorButton::UpdateAnchorIdentifier() {
++  // See the header. The real AvatarToolbarButton had this cleared off of it
++  // in ToolbarView's constructor, so the only competition is the button in
++  // the other tab strip, and exactly one of the two is drawn at a time.
++  if (IsDrawn()) {
++    SetProperty(views::kElementIdentifierKey, kToolbarAvatarButtonElementId);
++  } else {
++    ClearProperty(views::kElementIdentifierKey);
 +  }
-+  ApplyAppSwapBadgeStyle(this, project_name, dark_theme);
 +}
 +
 +void AppSwapProjectSelectorButton::OnThemeChanged() {
-+  views::MenuButton::OnThemeChanged();
-+  UpdateLabel();
++  TabStripFlatEdgeButton::OnThemeChanged();
++  UpdateProject();
++}
++
++void AppSwapProjectSelectorButton::OnViewPropertyChanged(
++    views::View* observed_view,
++    const void* key,
++    int64_t old_value) {
++  if (key != views::kAnchoredDialogKey) {
++    return;
++  }
++
++  // The profile bubble just anchored itself here, or just let go. Hold the
++  // strip at the size it was for as long as it is up -- see the header.
++  if (!GetProperty(views::kAnchoredDialogKey)) {
++    expand_on_hover_lock_.reset();
++    return;
++  }
++  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
++  if (browser_view && browser_view->tab_strip_view()) {
++    expand_on_hover_lock_ =
++        browser_view->tab_strip_view()->GetExpandOnHoverLock(
++            ExpandOnHoverLockType::kKeepCurrentState);
++  }
 +}
 +
 +void AppSwapProjectSelectorButton::ButtonPressed() {
@@ -434,10 +515,10 @@ index 0000000000000..fe5ca19eeabc6
 +END_METADATA
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h
 new file mode 100644
-index 0000000000000..f888618363810
+index 0000000000000..85eb969ae68fb
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,118 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -445,22 +526,37 @@ index 0000000000000..f888618363810
 +#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROJECT_SELECTOR_BUTTON_H_
 +#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROJECT_SELECTOR_BUTTON_H_
 +
-+#include <string>
++#include <memory>
 +
 +#include "base/memory/raw_ptr.h"
 +#include "base/scoped_observation.h"
 +#include "chrome/browser/profiles/profile_attributes_storage.h"
 +#include "chrome/browser/profiles/profile_attributes_storage_observer.h"
++#include "chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h"
 +#include "ui/base/metadata/metadata_header_macros.h"
-+#include "ui/views/controls/button/menu_button.h"
 +
 +class BrowserWindowInterface;
++class ExpandOnHoverLock;
 +
-+// A leading tab-strip button (sits where the Tab Search button lives, before
-+// the first tab) showing the Project (== Chromium Profile, see the
-+// "Projects" plan) this window belongs to. This is a real per-window
-+// identity -- always visible, unlike the location-bar AppSwap Profile/Route
-+// Group chips, which only show up on relevant pages.
++// The leading segment of the tab strip's combo button, showing the Project
++// (== Chromium Profile, see the "Projects" plan) this window belongs to as
++// its avatar plus its name. This is a real per-window identity -- always
++// visible, unlike the location-bar AppSwap Profile/Route Group chips, which
++// only show up on relevant pages.
++//
++// A TabStripFlatEdgeButton rather than a chip of its own, so it joins the
++// tab-groups and tab-search buttons into one group of three instead of
++// floating beside them: TabStripComboButton::SetLeadingButton() adopts it and
++// gives all three their flat edges. It is built by whoever builds the tab
++// strip region (see HorizontalTabStripRegionView and
++// VerticalTabStripRegionView) rather than by the combo button, because the
++// profile menu below lives in //chrome/browser/ui, which depends on the combo
++// button's own target and so cannot be depended on from it.
++//
++// It carries only the avatar when the combo button is laid out vertically,
++// which is what the vertical tab strip does while collapsed -- there is no
++// room for a name in a strip that narrow, and the avatar alone still says
++// which project this window is.
 +//
 +// Clicking it reuses Chromium's own native profile-switcher bubble
 +// (BrowserWindowFeatures::profile_menu_coordinator()/ProfileMenuView)
@@ -483,9 +579,9 @@ index 0000000000000..f888618363810
 +// ProfileMenuCoordinator are only reachable from within that target, which
 +// depends on (not from) app_swap, so pulling this button in the other
 +// direction would be circular.
-+class AppSwapProjectSelectorButton : public views::MenuButton,
++class AppSwapProjectSelectorButton : public TabStripFlatEdgeButton,
 +                                     public ProfileAttributesStorageObserver {
-+  METADATA_HEADER(AppSwapProjectSelectorButton, views::MenuButton)
++  METADATA_HEADER(AppSwapProjectSelectorButton, TabStripFlatEdgeButton)
 +
 + public:
 +  explicit AppSwapProjectSelectorButton(BrowserWindowInterface* browser);
@@ -497,22 +593,43 @@ index 0000000000000..f888618363810
 +  // ProfileAttributesStorageObserver:
 +  void OnProfileNameChanged(const base::FilePath& profile_path,
 +                            const std::u16string& old_name) override;
++  void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
++  void OnProfileThemeColorsChanged(const base::FilePath& profile_path) override;
++
++  // views::ViewObserver, which views::Button already is (through
++  // AnimationDelegateViews) and already has observing this very view, so
++  // overriding is all it takes to hear about this button's own properties.
++  void OnViewPropertyChanged(views::View* observed_view,
++                             const void* key,
++                             int64_t old_value) override;
 +
 +  // views::View:
 +  void OnThemeChanged() override;
++  void AddedToWidget() override;
++  void VisibilityChanged(views::View* starting_from, bool is_visible) override;
 +
 + private:
-+  // Recomputes the button's label/badge from the current window's own
++  // Recomputes the name and avatar from the current window's own
 +  // ProfileAttributesEntry.
-+  void UpdateLabel();
++  void UpdateProject();
 +
-+  // Same badge-coloring approach as AppSwapProfileTabStripButton::
-+  // ApplyBadgeStyle -- see its comment.
-+  void ApplyBadgeStyle(const std::string& project_name);
++  // Claims kToolbarAvatarButtonElementId while this button is on screen and
++  // gives it up otherwise. Both tab strips are built for every window and
++  // only one of them is ever shown, so both hold one of these buttons -- and
++  // the profile bubble anchors to whichever view the identifier resolves to,
++  // which has to be the one the user can actually see.
++  void UpdateAnchorIdentifier();
 +
 +  void ButtonPressed();
 +
 +  raw_ptr<BrowserWindowInterface> browser_;
++
++  // Held for as long as the profile bubble is open, so the vertical tab
++  // strip stays the size it was while the user is in the bubble. The two
++  // segments beside this one do the same for their own bubble and menu (see
++  // TabStripComboButton::OnBubbleInitializing); without it, every click in
++  // the collapsed strip played the expand animation.
++  std::unique_ptr<ExpandOnHoverLock> expand_on_hover_lock_;
 +
 +  base::ScopedObservation<ProfileAttributesStorage,
 +                          ProfileAttributesStorageObserver>
@@ -520,6 +637,63 @@ index 0000000000000..f888618363810
 +};
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROJECT_SELECTOR_BUTTON_H_
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 0b50610b32de8..a4fed377b13fb 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -47,6 +47,8 @@
+ #include "chrome/browser/ui/views/tabs/common/tab_view.h"
+ #include "chrome/browser/ui/views/tabs/common/unpinned_tab_container_view.h"
+ #include "chrome/browser/ui/views/tabs/shared/drop_arrow.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h"
++#include "chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h"
+ #include "chrome/browser/ui/views/tabs/vertical/top_container_button.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_focus_swipe_controller.h"
+@@ -134,6 +136,24 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   top_button_container_->SetProperty(
+       views::kMarginsKey, gfx::Insets::VH(0, region_horizontal_padding));
+ 
++  // The project segment, joined to the tab-groups and tab-search buttons the
++  // same way the horizontal strip joins it to tab search -- see
++  // HorizontalTabStripRegionViewOld's constructor. Built here rather than
++  // inside the combo button because it needs the profile menu; the combo
++  // button's own target cannot reach that. Both strips exist at once and
++  // both carry a button claiming kToolbarAvatarButtonElementId, which is
++  // fine for the same reason the two tab-search buttons may both claim
++  // kTabSearchButtonElementId: only the visible one is a live element.
++  BrowserWindowInterface* const browser = browser_view->browser();
++  if (browser &&
++      browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
++    if (TabStripComboButton* combo_button =
++            top_button_container_->GetComboButton()) {
++      combo_button->SetLeadingButton(
++          std::make_unique<AppSwapProjectSelectorButton>(browser));
++    }
++  }
++
+   top_button_separator_ = AddChildView(std::make_unique<views::Separator>());
+   // The TopContainer handles the padding distance to the separator so that we
+   // can control how far it is in the various states.
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index 76f8e997d61b2..76ce81f3abb2c 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -62,7 +62,13 @@ class VerticalTabStripRegionView final
+ 
+   // TODO(crbug.com/465833741): Replace constant with derived value based on
+   // caption buttons.
+-  static constexpr int kUncollapsedMinWidth = 126;
++  //
++  // Raised from 126 by one combo-button segment (its 28px square plus the 2px
++  // that separates it from its neighbour) when AppSwap added the project
++  // segment ahead of the pair. At the old value the narrowest uncollapsed
++  // pane could no longer fit the row, and the three icons ended up crammed
++  // against the collapse button.
++  static constexpr int kUncollapsedMinWidth = 156;
+   // TODO(crbug.com/465832180): Replace constant based width final max width for
+   // view.
+   static constexpr int kUncollapsedMaxWidth = 400;
 diff --git a/chrome/browser/ui/views/profiles/profile_menu_view.cc b/chrome/browser/ui/views/profiles/profile_menu_view.cc
 index 90dd03863bbbe..86958f9627508 100644
 --- a/chrome/browser/ui/views/profiles/profile_menu_view.cc
@@ -554,6 +728,428 @@ index 90dd03863bbbe..86958f9627508 100644
  
    AddProfileManagementFeatureButton(
        features::IsRoundedIconsEnabled() ? kManageAccountsIcon
+diff --git a/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.cc b/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.cc
+index ffb1fdda20d8f..986ba304fb7f6 100644
+--- a/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.cc
++++ b/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.cc
+@@ -4,6 +4,11 @@
+ 
+ #include "chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h"
+ 
++#include <memory>
++#include <optional>
++#include <utility>
++#include <vector>
++
+ #include "base/i18n/rtl.h"
+ #include "base/metrics/user_metrics.h"
+ #include "base/metrics/user_metrics_action.h"
+@@ -162,6 +167,10 @@ void TabStripComboButton::SetOrientation(views::LayoutOrientation orientation) {
+   }
+   orientation_ = orientation;
+ 
++  if (leading_button_) {
++    leading_button_->SetExpansionOrientation(orientation_);
++    ApplyLeadingButtonWidthMode();
++  }
+   if (start_button_) {
+     start_button_->SetExpansionOrientation(orientation_);
+   }
+@@ -220,39 +229,84 @@ TabStripComboButton::CreateFlatEdgeButtonFor(actions::ActionId action_id,
+ }
+ 
+ void TabStripComboButton::UpdateStyles() {
+-  const bool both_visible = start_button_ && start_button_->GetVisible() &&
+-                            end_button_ && end_button_->GetVisible();
+-  const bool is_vertical = orientation_ == views::LayoutOrientation::kVertical;
+-
+-  if (start_button_) {
+-    TabStripFlatEdgeButton::FlatEdge flat_edge =
+-        TabStripFlatEdgeButton::FlatEdge::kNone;
+-    if (both_visible) {
+-      if (is_vertical) {
+-        flat_edge = TabStripFlatEdgeButton::FlatEdge::kBottom;
+-      } else {
+-        flat_edge = base::i18n::IsRTL()
+-                        ? TabStripFlatEdgeButton::FlatEdge::kLeft
+-                        : TabStripFlatEdgeButton::FlatEdge::kRight;
+-      }
++  // Which segments are actually on screen, in the order they are laid out.
++  // Driven off the list rather than off each button in turn: with a third
++  // segment the answer for any one of them depends on what is beside it on
++  // *both* sides, which the old pairwise "are they both visible" test could
++  // not express.
++  std::vector<TabStripFlatEdgeButton*> visible;
++  for (TabStripFlatEdgeButton* button :
++       {leading_button_.get(), start_button_.get(), end_button_.get()}) {
++    if (button && button->GetVisible()) {
++      visible.push_back(button);
+     }
+-    start_button_->SetFlatEdge(flat_edge);
+   }
+ 
+-  if (end_button_) {
+-    TabStripFlatEdgeButton::FlatEdge flat_edge =
+-        TabStripFlatEdgeButton::FlatEdge::kNone;
+-    if (both_visible) {
+-      if (is_vertical) {
+-        flat_edge = TabStripFlatEdgeButton::FlatEdge::kTop;
+-      } else {
+-        flat_edge = base::i18n::IsRTL()
+-                        ? TabStripFlatEdgeButton::FlatEdge::kRight
+-                        : TabStripFlatEdgeButton::FlatEdge::kLeft;
+-      }
++  const bool is_vertical = orientation_ == views::LayoutOrientation::kVertical;
++  const bool rtl = base::i18n::IsRTL();
++  using FlatEdge = TabStripFlatEdgeButton::FlatEdge;
++
++  for (size_t i = 0; i < visible.size(); ++i) {
++    const bool flat_before = i > 0;
++    const bool flat_after = i + 1 < visible.size();
++
++    FlatEdge edge = FlatEdge::kNone;
++    if (flat_before && flat_after) {
++      edge = is_vertical ? FlatEdge::kTopAndBottom : FlatEdge::kLeftAndRight;
++    } else if (flat_before) {
++      edge = is_vertical ? FlatEdge::kTop
++                         : (rtl ? FlatEdge::kRight : FlatEdge::kLeft);
++    } else if (flat_after) {
++      edge = is_vertical ? FlatEdge::kBottom
++                         : (rtl ? FlatEdge::kLeft : FlatEdge::kRight);
+     }
+-    end_button_->SetFlatEdge(flat_edge);
++    visible[i]->SetFlatEdge(edge);
++  }
++}
++
++void TabStripComboButton::SetLeadingButton(
++    std::unique_ptr<TabStripFlatEdgeButton> button) {
++  CHECK(!leading_button_);
++  button->SetExpansionOrientation(orientation_);
++  leading_button_ = AddChildViewAt(std::move(button), 0);
++  ApplyLeadingButtonWidthMode();
++  UpdateStyles();
++}
++
++void TabStripComboButton::FitLeadingButtonTo(int available_width) {
++  if (available_width_ == available_width) {
++    return;
++  }
++  available_width_ = available_width;
++  ApplyLeadingButtonWidthMode();
++}
++
++void TabStripComboButton::ApplyLeadingButtonWidthMode() {
++  if (!leading_button_) {
++    return;
+   }
++
++  // The leading segment carries a label, so it wants the width its text
++  // needs -- except in two cases, where it falls back to the same square its
++  // neighbours are and shows its icon alone.
++  //
++  // The first is a group stacked vertically, which is what the vertical tab
++  // strip does once collapsed: a strip that narrow has no room for a name.
++  bool labelled = orientation_ == views::LayoutOrientation::kHorizontal;
++
++  // The second is a group that would not fit across the room it has. Asked
++  // for more width than exists, the vertical strip's top container gives up
++  // on a row and stacks instead, which left the name ellipsized and its two
++  // neighbours squeezed to nothing. Measured rather than estimated, because
++  // the name is the user's own project name and can be any length.
++  if (labelled && available_width_.has_value()) {
++    leading_button_->SetSizeToContents(true);
++    labelled =
++        GetPreferredSizeForOrientation(views::LayoutOrientation::kHorizontal)
++            .width() <= available_width_.value();
++  }
++
++  leading_button_->SetSizeToContents(labelled);
+ }
+ 
+ void TabStripComboButton::ShowContextMenuForViewImpl(
+diff --git a/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h b/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h
+index 9849f665562e7..578fd0423ff17 100644
+--- a/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h
++++ b/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h
+@@ -5,6 +5,9 @@
+ #ifndef CHROME_BROWSER_UI_VIEWS_TABS_SHARED_TAB_STRIP_COMBO_BUTTON_H_
+ #define CHROME_BROWSER_UI_VIEWS_TABS_SHARED_TAB_STRIP_COMBO_BUTTON_H_
+ 
++#include <memory>
++#include <optional>
++
+ #include "base/memory/raw_ptr.h"
+ #include "base/scoped_observation.h"
+ #include "base/timer/timer.h"
+@@ -35,8 +38,9 @@ class TabSearchBubbleHost;
+ class TabStripFlatEdgeButton;
+ class ExpandOnHoverLock;
+ 
+-// A container for two TabStripFlatEdgeButtons that manages their flat edges
+-// based on visibility and the combo button's orientation.
++// A container for TabStripFlatEdgeButtons that manages their flat edges based
++// on visibility and the combo button's orientation. It builds a pair of its
++// own; SetLeadingButton() adds a third segment ahead of them.
+ class TabStripComboButton : public views::View,
+                             public views::ContextMenuController,
+                             public ui::SimpleMenuModel::Delegate,
+@@ -62,6 +66,20 @@ class TabStripComboButton : public views::View,
+ 
+   TabStripFlatEdgeButton* start_button() { return start_button_; }
+   TabStripFlatEdgeButton* end_button() { return end_button_; }
++  TabStripFlatEdgeButton* leading_button() { return leading_button_; }
++
++  // Adopts `button` as a third segment ahead of the pair, joined to them the
++  // way they are joined to each other. Handed in rather than built here
++  // because AppSwap's project segment needs the profile menu, which lives in
++  // //chrome/browser/ui -- a target that depends on this one. Whoever builds
++  // the tab strip region owns that dependency already and passes the button
++  // down. Call at most once, before the first layout.
++  void SetLeadingButton(std::unique_ptr<TabStripFlatEdgeButton> button);
++
++  // Tells this group how much room it has, so the leading segment can drop
++  // its label and fall back to its icon when the labelled group would not
++  // fit. Call before asking for a preferred size; the answer depends on it.
++  void FitLeadingButtonTo(int available_width);
+ 
+   // views::ContextMenuController:
+   void ShowContextMenuForViewImpl(
+@@ -104,6 +122,13 @@ class TabStripComboButton : public views::View,
+ 
+   void UpdateStyles();
+ 
++  // Decides whether the leading segment shows its label, from this group's
++  // orientation and the room it was last told it has.
++  void ApplyLeadingButtonWidthMode();
++
++  // The width this group has to lay out in, or nullopt when nobody has said.
++  std::optional<int> available_width_;
++
+   void OnMenuClosed();
+ 
+   void MaybeHideTabSearchButton();
+@@ -115,6 +140,7 @@ class TabStripComboButton : public views::View,
+ 
+   const raw_ptr<BrowserWindowInterface> browser_;
+   const Context context_;
++  raw_ptr<TabStripFlatEdgeButton> leading_button_ = nullptr;
+   raw_ptr<TabStripFlatEdgeButton> start_button_ = nullptr;
+   raw_ptr<TabStripFlatEdgeButton> end_button_ = nullptr;
+ 
+diff --git a/chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.cc b/chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.cc
+index 52dd469d6d3c7..d5db9562f18a9 100644
+--- a/chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.cc
++++ b/chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.cc
+@@ -87,6 +87,15 @@ gfx::Size TabStripFlatEdgeButton::CalculatePreferredSize(
+       LayoutConstant::kVerticalTabStripTopContainerButtonSize);
+   gfx::Size size(raw_button_size, raw_button_size);
+ 
++  if (size_to_contents_) {
++    // Wide enough for the label, never shorter than the square the other
++    // segments are, so all three line up.
++    gfx::Size contents =
++        views::LabelButton::CalculatePreferredSize(available_size);
++    contents.SetToMax(size);
++    size = contents;
++  }
++
+   if (expansion_orientation_ == views::LayoutOrientation::kHorizontal) {
+     size.set_width(size.width() * expansion_factor_);
+   } else {
+@@ -153,6 +162,15 @@ void TabStripFlatEdgeButton::SetFlatEdgeFactor(float factor) {
+   UpdateHighlightPathAndInkDrop();
+ }
+ 
++void TabStripFlatEdgeButton::SetSizeToContents(bool size_to_contents) {
++  if (size_to_contents_ == size_to_contents) {
++    return;
++  }
++  size_to_contents_ = size_to_contents;
++  RefreshLabelVisibility();
++  PreferredSizeChanged();
++}
++
+ void TabStripFlatEdgeButton::SetShouldShowLabel(bool show_label) {
+   should_show_label_ = show_label;
+   if (should_show_label_) {
+@@ -262,11 +280,20 @@ void TabStripFlatEdgeButton::SetLabelText(const std::u16string& text) {
+     return;
+   }
+   label_text_ = text;
+-  UpdateLabel(width() > CalculatePreferredSize({}).width());
++  RefreshLabelVisibility();
+ }
+ 
+ void TabStripFlatEdgeButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+-  UpdateLabel(width() > CalculatePreferredSize({}).width());
++  RefreshLabelVisibility();
++}
++
++void TabStripFlatEdgeButton::RefreshLabelVisibility() {
++  // A size-to-contents button asked for room for its label, so it shows the
++  // label unconditionally. Testing the width here instead would oscillate:
++  // hiding the label shrinks the preferred width, which makes the test pass,
++  // which shows it again.
++  UpdateLabel(size_to_contents_ ||
++              width() > CalculatePreferredSize({}).width());
+ }
+ 
+ void TabStripFlatEdgeButton::AddedToWidget() {
+@@ -313,6 +340,12 @@ gfx::RoundedCornersF TabStripFlatEdgeButton::GetButtonCornerRadii() const {
+     case FlatEdge::kRight:
+       return gfx::RoundedCornersF(rounded_radius, flat_radius, flat_radius,
+                                   rounded_radius);
++    case FlatEdge::kLeftAndRight:
++      return gfx::RoundedCornersF(flat_radius, flat_radius, flat_radius,
++                                  flat_radius);
++    case FlatEdge::kTopAndBottom:
++      return gfx::RoundedCornersF(flat_radius, flat_radius, flat_radius,
++                                  flat_radius);
+   }
+ }
+ 
+diff --git a/chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h b/chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h
+index 125f2eed7c3a2..12f13770dd666 100644
+--- a/chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h
++++ b/chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h
+@@ -22,6 +22,12 @@ class TabStripFlatEdgeButton : public views::LabelButton,
+     kLeft,
+     kBottom,
+     kRight,
++    // Both ends flat: the middle segment of a group of three. A group of two
++    // only ever needs one flat end per button, which is why the four
++    // single-edge values above were enough until AppSwap added the project
++    // segment ahead of the pair.
++    kLeftAndRight,
++    kTopAndBottom,
+   };
+   TabStripFlatEdgeButton();
+   ~TabStripFlatEdgeButton() override;
+@@ -54,6 +60,14 @@ class TabStripFlatEdgeButton : public views::LabelButton,
+ 
+   void SetShouldShowLabel(bool show_label);
+ 
++  // Makes this button ask for the width its icon and label actually need,
++  // instead of the fixed square every other segment asks for. The square is
++  // right for an icon-only button whose parent stretches it -- which is how
++  // the label normally appears, see UpdateLabel() -- but a segment naming
++  // something, like the project, has to carry its name at whatever width
++  // that name takes.
++  void SetSizeToContents(bool size_to_contents);
++
+   // Sets the text that will be displayed when the label is shown.
+   void SetLabelText(const std::u16string& text);
+ 
+@@ -69,12 +83,14 @@ class TabStripFlatEdgeButton : public views::LabelButton,
+     return paint_transparent_for_glass_;
+   }
+ 
+- private:
++ protected:
+   // views::View:
+   void AddedToWidget() override;
+   void RemovedFromWidget() override;
+   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+ 
++ private:
++
+   ui::ColorId GetForegroundColor() const;
+   ui::ColorId GetBackgroundColor() const;
+   SkRRect GetButtonShape() const;
+@@ -83,11 +99,15 @@ class TabStripFlatEdgeButton : public views::LabelButton,
+   // Updates the label visibility and padding based on whether it should be
+   // shown.
+   void UpdateLabel(bool should_show);
++
++  // Applies the one rule for whether the label is currently showing.
++  void RefreshLabelVisibility();
+   void UpdateLabelColor();
+   void UpdateHighlightPathAndInkDrop();
+ 
+   // Whether the label should be shown, if there is space.
+   bool should_show_label_ = false;
++  bool size_to_contents_ = false;
+   std::u16string label_text_;
+   int icon_size_ = 0;
+   float expansion_factor_ = 1.0f;
+diff --git a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
+index d69e4dd30f732..3259723463ac3 100644
+--- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
++++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
+@@ -70,6 +70,19 @@ VerticalTabStripTopContainer::~VerticalTabStripTopContainer() = default;
+ void VerticalTabStripTopContainer::Layout(PassKey) {
+   LayoutSuperclass<views::View>(this);
+   combo_button_->SetOrientation(combo_button_orientation_);
++  // What is left for the combo button once the rest of this row has taken
++  // its share. Its leading segment drops the project name and falls back to
++  // its icon when the name would not fit -- without that the row asks for
++  // more width than exists, CalculateProposedLayout() gives up on a row and
++  // stacks instead, and the name ends up ellipsized beside two neighbours
++  // squeezed out of existence.
++  //
++  // Done here rather than in CalculateProposedLayout(), which runs inside
++  // the layout manager: changing a child's preferred size from there
++  // re-enters it, which LayoutManagerBase forbids outright. The cost is that
++  // the decision lands one pass late, exactly like combo_button_orientation_
++  // above, and the preferred-size change it causes drives that next pass.
++  combo_button_->FitLeadingButtonTo(width() - GetNonComboPreferredWidth());
+ }
+ 
+ views::ProposedLayout VerticalTabStripTopContainer::CalculateProposedLayout(
+@@ -426,16 +439,19 @@ void VerticalTabStripTopContainer::OnCollapseButtonContextMenuClosed() {
+ }
+ 
+ int VerticalTabStripTopContainer::GetPreferredWidth() const {
++  // Combo Button
++  return GetNonComboPreferredWidth() +
++         combo_button_
++             ->GetPreferredSizeForOrientation(
++                 views::LayoutOrientation::kHorizontal)
++             .width();
++}
++
++int VerticalTabStripTopContainer::GetNonComboPreferredWidth() const {
+   int total_width = 0;
+-  int padding =
++  const int padding =
+       GetLayoutConstant(LayoutConstant::kVerticalTabStripTopButtonPadding);
+ 
+-  // Combo Button
+-  total_width += combo_button_
+-                     ->GetPreferredSizeForOrientation(
+-                         views::LayoutOrientation::kHorizontal)
+-                     .width();
+-
+   // Collapse Button
+   if (collapse_button_ && collapse_button_->GetVisible()) {
+     total_width += collapse_button_->GetPreferredSize().width() + padding;
+@@ -446,6 +462,9 @@ int VerticalTabStripTopContainer::GetPreferredWidth() const {
+     total_width += unfocus_button_->GetPreferredSize().width() + padding;
+   }
+ 
++  // Caption buttons share this row when they are leading.
++  total_width += caption_button_width_;
++
+   return total_width;
+ }
+ 
+diff --git a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h
+index 27763751c72b7..7f40dd895d146 100644
+--- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h
++++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h
+@@ -92,6 +92,11 @@ class VerticalTabStripTopContainer : public views::View,
+   // the padding between them.
+   int GetPreferredWidth() const;
+ 
++  // GetPreferredWidth() without the combo button -- what this row costs
++  // before the combo button gets its share. Used to tell the combo button
++  // how much room is left for it.
++  int GetNonComboPreferredWidth() const;
++
+   // Returns the minimum height required for the top container to display all
+   // its buttons at their baseline positions.
+   int GetBaselineMinHeight() const;
 diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 index 7d68719289103..505b2b2545c50 100644
 --- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc

@@ -808,7 +808,7 @@ index 0000000000000..852a232574e1d
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_PROFILE_TAB_STRIP_BUTTON_H_
 diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
-index 96f2b99affa07..b1c9d0f930ef6 100644
+index 96f2b99affa07..feedd21851b03 100644
 --- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
 +++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
 @@ -24,6 +24,7 @@
@@ -819,119 +819,61 @@ index 96f2b99affa07..b1c9d0f930ef6 100644
  #include "chrome/browser/ui/views/frame/browser_view.h"
  #include "chrome/browser/ui/views/tab_search_bubble_host.h"
  #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
-@@ -169,6 +170,26 @@ HorizontalTabStripRegionViewOld::HorizontalTabStripRegionViewOld(
- 
-   if (browser &&
-       (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
-+    // Added before the combo button (Tab Search's leading position) so it
-+    // renders as the outermost leading element, before Tab Search -- a
-+    // regular (non-layout-ignored) FlexLayout child, unlike combo_button_
-+    // below, which paints to its own layer and overlaps the tab strip's
-+    // corner radius (see UpdateTabStripMargin()). AppSwapProjectSelectorButton
-+    // is a plain rounded chip, not a flat-edge button meant to blend into
-+    // that corner, so it doesn't need or want that treatment.
-+    project_selector_button_ = AddChildView(
-+        std::make_unique<AppSwapProjectSelectorButton>(browser));
-+    project_selector_button_->SetProperty(
-+        views::kCrossAxisAlignmentKey, views::LayoutAlignment::kCenter);
-+    // Symmetric: this is the outermost leading element in the tab strip
-+    // region, and on Windows and Linux that region starts at the window
-+    // edge, so a zero leading margin left the chip flush against it. macOS
-+    // hid the problem behind the traffic-light inset it already has.
-+    project_selector_button_->SetProperty(
-+        views::kMarginsKey,
-+        gfx::Insets::VH(0,
-+                        GetLayoutConstant(LayoutConstant::kTabStripPadding)));
-+
-     combo_button_ = AddChildView(std::make_unique<TabStripComboButton>(
+@@ -173,6 +174,13 @@ HorizontalTabStripRegionViewOld::HorizontalTabStripRegionViewOld(
          browser, TabStripComboButton::Context::kHorizontalTabStrip));
      combo_button_->SetProperty(views::kCrossAxisAlignmentKey,
-@@ -280,6 +301,9 @@ HorizontalTabStripRegionViewOld::~HorizontalTabStripRegionViewOld() {
-   if (combo_button_) {
-     RemoveChildViewT(std::exchange(combo_button_, nullptr));
-   }
-+  if (project_selector_button_) {
-+    RemoveChildViewT(std::exchange(project_selector_button_, nullptr));
-+  }
-   if (new_tab_button_) {
-     RemoveChildViewT(std::exchange(new_tab_button_, nullptr));
-   }
-@@ -340,6 +364,10 @@ views::View::Views HorizontalTabStripRegionViewOld::GetChildrenInZOrder() {
-     children.emplace_back(combo_button_.get());
+                                views::LayoutAlignment::kCenter);
++    // Inside the combo button rather than beside it, so the project reads as
++    // the first of three joined segments instead of a separate chip. It used
++    // to be a standalone rounded chip added just ahead of the combo button.
++    auto project_button =
++        std::make_unique<AppSwapProjectSelectorButton>(browser);
++    project_selector_button_ = project_button.get();
++    combo_button_->SetLeadingButton(std::move(project_button));
+     combo_button_->MaybeShowIPH();
    }
  
-+  if (project_selector_button_) {
-+    children.emplace_back(project_selector_button_.get());
-+  }
-+
-   if (unfocus_button_) {
-     children.emplace_back(unfocus_button_.get());
+@@ -278,6 +286,8 @@ HorizontalTabStripRegionViewOld::~HorizontalTabStripRegionViewOld() {
+     RemoveChildViewT(std::exchange(tab_strip_action_container_, nullptr));
    }
-@@ -778,6 +806,24 @@ HorizontalTabStripRegionViewNew::HorizontalTabStripRegionViewNew(
-   std::unique_ptr<TabStripActionContainer> tab_strip_action_container;
-   if (browser &&
-       (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
-+    // Added before the combo button (Tab Search's leading position) so it
-+    // renders as the outermost leading element, before Tab Search. See the
-+    // matching comment in HorizontalTabStripRegionViewOld's constructor for
-+    // why this is a plain FlexLayout child rather than sharing
-+    // combo_button_'s corner-overlap treatment.
-+    project_selector_button_ = AddChildView(
-+        std::make_unique<AppSwapProjectSelectorButton>(browser));
-+    project_selector_button_->SetProperty(
-+        views::kCrossAxisAlignmentKey, views::LayoutAlignment::kCenter);
-+    // Symmetric: this is the outermost leading element in the tab strip
-+    // region, and on Windows and Linux that region starts at the window
-+    // edge, so a zero leading margin left the chip flush against it. macOS
-+    // hid the problem behind the traffic-light inset it already has.
-+    project_selector_button_->SetProperty(
-+        views::kMarginsKey,
-+        gfx::Insets::VH(0,
-+                        GetLayoutConstant(LayoutConstant::kTabStripPadding)));
-+
-     combo_button_ = AddChildView(std::make_unique<TabStripComboButton>(
-         browser, TabStripComboButton::Context::kHorizontalTabStrip));
-     combo_button_->SetProperty(views::kCrossAxisAlignmentKey,
-@@ -827,6 +873,9 @@ HorizontalTabStripRegionViewNew::~HorizontalTabStripRegionViewNew() {
    if (combo_button_) {
++    // Owns the project segment, so this destroys that too.
++    project_selector_button_ = nullptr;
      RemoveChildViewT(std::exchange(combo_button_, nullptr));
    }
-+  if (project_selector_button_) {
-+    RemoveChildViewT(std::exchange(project_selector_button_, nullptr));
-+  }
    if (new_tab_button_) {
-     RemoveChildViewT(std::exchange(new_tab_button_, nullptr));
+@@ -782,6 +792,12 @@ HorizontalTabStripRegionViewNew::HorizontalTabStripRegionViewNew(
+         browser, TabStripComboButton::Context::kHorizontalTabStrip));
+     combo_button_->SetProperty(views::kCrossAxisAlignmentKey,
+                                views::LayoutAlignment::kCenter);
++    // See the matching comment in HorizontalTabStripRegionViewOld's
++    // constructor.
++    auto project_button =
++        std::make_unique<AppSwapProjectSelectorButton>(browser);
++    project_selector_button_ = project_button.get();
++    combo_button_->SetLeadingButton(std::move(project_button));
+ 
+     if (glic::GlicEnabling::IsProfileEligible(browser_view->GetProfile())) {
+       tab_strip_action_container =
+@@ -825,6 +841,8 @@ HorizontalTabStripRegionViewNew::~HorizontalTabStripRegionViewNew() {
+     RemoveChildViewT(std::exchange(tab_strip_action_container_, nullptr));
    }
-@@ -840,6 +889,9 @@ bool HorizontalTabStripRegionViewNew::IsPositionInWindowCaption(
-   if (combo_button_ && IsHitInView(combo_button_, point)) {
-     return false;
-   }
-+  if (project_selector_button_ && IsHitInView(project_selector_button_, point)) {
-+    return false;
-+  }
-   if (tab_strip_view() && IsHitInView(tab_strip_view(), point)) {
-     gfx::Point point_in_tab_strip = point;
-     views::View::ConvertPointToTarget(this, tab_strip_view(),
-@@ -865,6 +917,9 @@ views::View::Views HorizontalTabStripRegionViewNew::GetChildrenInZOrder() {
    if (combo_button_) {
-     children.emplace_back(combo_button_.get());
++    // Owns the project segment, so this destroys that too.
++    project_selector_button_ = nullptr;
+     RemoveChildViewT(std::exchange(combo_button_, nullptr));
    }
-+  if (project_selector_button_) {
-+    children.emplace_back(project_selector_button_.get());
-+  }
-   if (reserved_grab_handle_space_) {
-     children.emplace_back(reserved_grab_handle_space_.get());
-   }
-@@ -984,7 +1039,8 @@ gfx::Point HorizontalTabStripRegionViewNew::GetLinkDropArrowPosition(
+   if (new_tab_button_) {
+@@ -984,6 +1002,9 @@ gfx::Point HorizontalTabStripRegionViewNew::GetLinkDropArrowPosition(
  }
  
  void HorizontalTabStripRegionViewNew::OnTabStripViewSet() {
--  const size_t index = combo_button_ ? 1 : 0;
-+  const size_t index = (project_selector_button_ ? 1 : 0) +
-+                      (combo_button_ ? 1 : 0);
++  // The tab strip goes after the combo button, which is this view's only
++  // leading child -- the project segment used to be a second one, and is now
++  // inside the combo button rather than beside it.
+   const size_t index = combo_button_ ? 1 : 0;
    ReorderChildView(tab_strip_view(), index);
  }
- 
 diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
 index 3860b6181381b..48a534b38840c 100644
 --- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h

@@ -508,6 +508,14 @@ gen 0016-project-selector-and-terminology.patch \
   chrome/browser/resources/settings/people_page/manage_profile.html.ts \
   chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc \
   chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h \
+  chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc \
+  chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h \
+  chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.cc \
+  chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h \
+  chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.cc \
+  chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h \
+  chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc \
+  chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h \
   chrome/browser/ui/views/profiles/profile_menu_view.cc \
   chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc \
   chrome/browser/ui/webui/settings/settings_ui.h \
