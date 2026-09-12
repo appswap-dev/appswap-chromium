@@ -322,7 +322,12 @@ def cmd_write(args):
         # on write (Windows), turning every line into a diff and bloating
         # the patch by tens of thousands of lines for a handful of real
         # additions.
-        text = xtb_path.read_text(encoding='utf-8', newline='')
+        # open(newline='') rather than Path.read_text(newline=...), which
+        # only exists on Python 3.13+. These files are LF-only and the
+        # point is to keep them that way (see the CRLF pitfall in the
+        # skill notes), which this does on every version.
+        with open(xtb_path, encoding='utf-8', newline='') as f:
+            text = f.read()
         existing_ids = existing_translation_ids(xtb_path)
         new_entries = []
         seen = {}  # fp -> translation already queued this run (different message
@@ -345,7 +350,8 @@ def cmd_write(args):
             print(f"  ! {xtb_relpath} has no </translationbundle>, skipping")
             continue
         text = text.replace("</translationbundle>", insertion + "</translationbundle>")
-        xtb_path.write_text(text, encoding='utf-8', newline='')
+        with open(xtb_path, 'w', encoding='utf-8', newline='') as f:
+            f.write(text)
         print(f"  wrote {len(new_entries)} translation(s) to {xtb_relpath}")
 
 

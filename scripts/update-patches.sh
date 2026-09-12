@@ -506,6 +506,8 @@ gen 0016-project-selector-and-terminology.patch \
   chrome/browser/resources/settings/people_page/people_page_index.html.ts \
   chrome/browser/resources/settings/people_page/manage_profile.ts \
   chrome/browser/resources/settings/people_page/manage_profile.html.ts \
+  components/vector_icons/BUILD.gn \
+  components/vector_icons/work_add.icon \
   chrome/browser/ui/views/app_swap/app_swap_project_selector_button.cc \
   chrome/browser/ui/views/app_swap/app_swap_project_selector_button.h \
   chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc \

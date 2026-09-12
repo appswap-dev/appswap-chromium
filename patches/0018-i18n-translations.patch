@@ -1,8 +1,8 @@
 diff --git a/chrome/app/resources/chromium_strings_es.xtb b/chrome/app/resources/chromium_strings_es.xtb
-index 6fdeb414bed8a..5850a751a85a7 100644
+index 6fdeb414bed8a..1b0efcf680e67 100644
 --- a/chrome/app/resources/chromium_strings_es.xtb
 +++ b/chrome/app/resources/chromium_strings_es.xtb
-@@ -806,4 +806,564 @@ Chromium no puede recuperar tu configuración.</translation>
+@@ -806,4 +806,569 @@ Chromium no puede recuperar tu configuración.</translation>
  <translation id="985602178874221306">Los creadores de Chromium</translation>
  <translation id="989970834842471429">Selecciona cualquier texto o imagen para buscar con la búsqueda por imágenes</translation>
  <translation id="992780518932311116">Para usar tu ubicación, da acceso a Chromium en la <ph name="BEGIN_LINK" />configuración del sistema<ph name="END_LINK" /></translation>
@@ -566,10 +566,15 @@ index 6fdeb414bed8a..5850a751a85a7 100644
 +<translation id="4710843796621727456">Para obtener futuras actualizaciones de AppSwap, necesitarás Windows 10 o una versión posterior. Esta computadora usa Windows 8.</translation>
 +<translation id="8600411056854958817">Ir a la configuración de notificaciones de AppSwap</translation>
 +<translation id="9127154435941147531">Es posible que AppSwap no funcione correctamente porque ya no es compatible con Windows XP o Windows Vista</translation>
++<translation id="1650774894283316527">Agregar proyecto</translation>
++<translation id="113956510024672338">Administrar proyectos</translation>
++<translation id="7037286865955758415">Otros proyectos</translation>
++<translation id="2197677855202317890">Agregar proyecto</translation>
++<translation id="8586054144306877145">Administrar proyectos</translation>
  </translationbundle>
 \ No newline at end of file
 diff --git a/chrome/app/resources/chromium_strings_ru.xtb b/chrome/app/resources/chromium_strings_ru.xtb
-index 1094087f5b38c..fc0bfd33aa040 100644
+index 1094087f5b38c..c92cb38d9f944 100644
 --- a/chrome/app/resources/chromium_strings_ru.xtb
 +++ b/chrome/app/resources/chromium_strings_ru.xtb
 @@ -1,112 +1,126 @@
@@ -766,7 +771,7 @@ index 1094087f5b38c..fc0bfd33aa040 100644
  <translation id="2190166659037789668">Ошибка проверки обновлений: <ph name="UPDATE_CHECK_ERROR" />.</translation>
  <translation id="2199210295479376551">Удалить аккаунт из Chromium</translation>
  <translation id="2201788217099588893">Лучшие инструменты для покупок всегда под рукой в приложении Chromium.</translation>
-@@ -792,4 +806,554 @@
+@@ -792,4 +806,559 @@
  <translation id="985602178874221306">Авторы Chromium</translation>
  <translation id="989970834842471429">Выберите текст или картинку для поиска по изображениям.</translation>
  <translation id="992780518932311116">Чтобы использовать свои геоданные, предоставьте Chromium доступ к ним в <ph name="BEGIN_LINK" />системных настройках<ph name="END_LINK" /></translation>
@@ -1320,6 +1325,11 @@ index 1094087f5b38c..fc0bfd33aa040 100644
 +<translation id="4710843796621727456">Для получения будущих обновлений AppSwap потребуется Windows 10 или более поздняя версия. На этом компьютере используется Windows 8.</translation>
 +<translation id="8600411056854958817">Перейти к настройкам уведомлений AppSwap</translation>
 +<translation id="9127154435941147531">AppSwap может работать некорректно, так как Windows XP и Windows Vista больше не поддерживаются</translation>
++<translation id="1650774894283316527">Добавить проект</translation>
++<translation id="113956510024672338">Управление проектами</translation>
++<translation id="7037286865955758415">Другие проекты</translation>
++<translation id="2197677855202317890">Добавить проект</translation>
++<translation id="8586054144306877145">Управление проектами</translation>
  </translationbundle>
 \ No newline at end of file
 diff --git a/chrome/app/resources/generated_resources_es.xtb b/chrome/app/resources/generated_resources_es.xtb
