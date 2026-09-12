@@ -1,0 +1,1349 @@
+diff --git a/chrome/browser/app_swap/app_swap_devtools_client.cc b/chrome/browser/app_swap/app_swap_devtools_client.cc
+new file mode 100644
+index 0000000000000..a9d424ec6b900
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_devtools_client.cc
+@@ -0,0 +1,125 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_devtools_client.h"
++
++#include <string_view>
++#include <utility>
++
++#include "base/containers/span.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/strings/string_view_util.h"
++#include "content/public/browser/web_contents.h"
++
++AppSwapDevToolsClient::AppSwapDevToolsClient(
++    content::WebContents* web_contents) {
++  scoped_refptr<content::DevToolsAgentHost> agent_host =
++      content::DevToolsAgentHost::GetOrCreateFor(web_contents);
++  if (agent_host && agent_host->AttachClient(this)) {
++    agent_host_ = std::move(agent_host);
++  }
++  // Otherwise agent_host_ stays null and this client is inert -- attaching
++  // can legitimately be refused (see DevToolsAgentHost::AttachClient), and
++  // the features built on this are all optional extras, so this is not
++  // treated as an error.
++}
++
++AppSwapDevToolsClient::~AppSwapDevToolsClient() {
++  Detach();
++}
++
++void AppSwapDevToolsClient::SendCommand(const std::string& method,
++                                        base::DictValue params,
++                                        CommandCallback callback) {
++  if (!agent_host_) {
++    if (callback) {
++      std::move(callback).Run(std::nullopt);
++    }
++    return;
++  }
++
++  const int command_id = ++last_command_id_;
++  base::DictValue command;
++  command.Set("id", command_id);
++  command.Set("method", method);
++  command.Set("params", std::move(params));
++
++  if (callback) {
++    pending_commands_[command_id] = std::move(callback);
++  }
++
++  const std::string json = base::WriteJson(command).value_or("");
++  agent_host_->DispatchProtocolMessage(this, base::as_byte_span(json));
++}
++
++void AppSwapDevToolsClient::DispatchProtocolMessage(
++    content::DevToolsAgentHost* agent_host,
++    base::span<const uint8_t> message) {
++  std::optional<base::Value> parsed =
++      base::JSONReader::Read(base::as_string_view(message),
++                             base::JSON_REPLACE_INVALID_CHARACTERS);
++  if (!parsed || !parsed->is_dict()) {
++    return;
++  }
++  base::DictValue& dict = parsed->GetDict();
++
++  // A message carrying an id is a reply to one of our own commands;
++  // anything else with a method is an unsolicited event.
++  const std::optional<int> id = dict.FindInt("id");
++  if (!id.has_value()) {
++    const std::string* method = dict.FindString("method");
++    if (method && event_callback_) {
++      // DictValue is move-only, so a ternary over "the params we have" and
++      // "an empty one" can't share a type -- hence the empty local.
++      const base::DictValue empty_params;
++      const base::DictValue* params = dict.FindDict("params");
++      event_callback_.Run(*method, params ? *params : empty_params);
++    }
++    return;
++  }
++
++  auto it = pending_commands_.find(*id);
++  if (it == pending_commands_.end()) {
++    return;
++  }
++  CommandCallback callback = std::move(it->second);
++  pending_commands_.erase(it);
++
++  if (dict.FindDict("error")) {
++    std::move(callback).Run(std::nullopt);
++    return;
++  }
++  base::DictValue* result = dict.FindDict("result");
++  std::move(callback).Run(result ? std::make_optional(result->Clone())
++                                 : std::make_optional(base::DictValue()));
++}
++
++void AppSwapDevToolsClient::AgentHostClosed(
++    content::DevToolsAgentHost* agent_host) {
++  // The host is already gone, so DetachClient() would be both unnecessary
++  // and wrong -- drop it first, then let Detach() fail the pending
++  // commands that will now never be answered.
++  agent_host_ = nullptr;
++  Detach();
++}
++
++std::string AppSwapDevToolsClient::GetTypeForMetrics() {
++  return "Other";
++}
++
++void AppSwapDevToolsClient::Detach() {
++  if (agent_host_) {
++    agent_host_->DetachClient(this);
++    agent_host_ = nullptr;
++  }
++
++  // Moved out first: a callback is free to destroy this object, and
++  // iterating the member map across that would be a use-after-free.
++  std::map<int, CommandCallback> pending = std::move(pending_commands_);
++  pending_commands_.clear();
++  for (auto& [id, callback] : pending) {
++    std::move(callback).Run(std::nullopt);
++  }
++}
+diff --git a/chrome/browser/app_swap/app_swap_devtools_client.h b/chrome/browser/app_swap/app_swap_devtools_client.h
+new file mode 100644
+index 0000000000000..7d9a8128a596a
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_devtools_client.h
+@@ -0,0 +1,85 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_DEVTOOLS_CLIENT_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_DEVTOOLS_CLIENT_H_
++
++#include <map>
++#include <optional>
++#include <string>
++
++#include "base/functional/callback.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/values.h"
++#include "content/public/browser/devtools_agent_host.h"
++#include "content/public/browser/devtools_agent_host_client.h"
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++// Talks the Chrome DevTools Protocol to one WebContents from the browser
++// process, with no DevTools frontend involved. Send commands, receive
++// replies, subscribe to events; what to say is left to whoever owns one.
++//
++// AppSwap uses the protocol as a general lever on a page from the browser
++// side -- device emulation for Responsive Lab's cells, a clock override for
++// time travel -- so this holds the plumbing every such feature needs and
++// nothing about any of them. Modelled on
++// ExtensionDevToolsClientHost::SendMessageToBackend, which is the same job
++// for the debugger extension API.
++//
++// Attaching costs the user nothing and coexists with them opening real
++// DevTools on the same page: a DevToolsAgentHost supports several attached
++// clients at once.
++class AppSwapDevToolsClient : public content::DevToolsAgentHostClient {
++ public:
++  // A command's reply, or nullopt if it failed, the protocol reported an
++  // error, or the agent host went away before it arrived.
++  using CommandCallback =
++      base::OnceCallback<void(std::optional<base::DictValue> result)>;
++
++  // Every protocol event this client receives, by method name. Repeating,
++  // and may fire at any time while attached.
++  using EventCallback =
++      base::RepeatingCallback<void(const std::string& method,
++                                   const base::DictValue& params)>;
++
++  // Attaches to `web_contents`'s agent host immediately. attached() is
++  // false if that failed (e.g. an embedder policy refused it), in which
++  // case every method below is a safe no-op.
++  explicit AppSwapDevToolsClient(content::WebContents* web_contents);
++  AppSwapDevToolsClient(const AppSwapDevToolsClient&) = delete;
++  AppSwapDevToolsClient& operator=(const AppSwapDevToolsClient&) = delete;
++  ~AppSwapDevToolsClient() override;
++
++  bool attached() const { return agent_host_ != nullptr; }
++
++  void set_event_callback(EventCallback callback) {
++    event_callback_ = std::move(callback);
++  }
++
++  // Sends one protocol command. `callback` may be null for fire-and-forget.
++  void SendCommand(const std::string& method,
++                   base::DictValue params,
++                   CommandCallback callback);
++
++  // content::DevToolsAgentHostClient:
++  void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
++                               base::span<const uint8_t> message) override;
++  void AgentHostClosed(content::DevToolsAgentHost* agent_host) override;
++  std::string GetTypeForMetrics() override;
++
++ private:
++  // Detaches from agent_host_ (if attached) and fails every still-pending
++  // command, so no caller is left waiting on a reply that can't arrive.
++  void Detach();
++
++  scoped_refptr<content::DevToolsAgentHost> agent_host_;
++  int last_command_id_ = 0;
++  std::map<int, CommandCallback> pending_commands_;
++  EventCallback event_callback_;
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_DEVTOOLS_CLIENT_H_
+diff --git a/chrome/browser/app_swap/app_swap_time_travel_session.cc b/chrome/browser/app_swap/app_swap_time_travel_session.cc
+new file mode 100644
+index 0000000000000..899827a9e8f1a
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_time_travel_session.cc
+@@ -0,0 +1,351 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_time_travel_session.h"
++
++#include <string>
++#include <utility>
++
++#include "base/json/json_writer.h"
++#include "base/strings/strcat.h"
++#include "chrome/browser/app_swap/app_swap_devtools_client.h"
++#include "content/public/browser/web_contents.h"
++
++namespace {
++
++// The clock patch, injected into every document of the tab before its own
++// scripts run.
++//
++// Installed once per document and then reconfigured in place: the tail of
++// the injected source is a configure() call carrying the current override,
++// so re-injecting with new numbers costs nothing and the captured originals
++// are never captured twice.
++//
++// What it does not do is worth stating. A timer already scheduled keeps the
++// delay it was given, so a rate change only reaches timers created after
++// it. And the whole patch is ordinary JavaScript in the page's own world:
++// a page that squirrels away Date before this runs, or reads the clock from
++// its own server, is not fooled. Both are inherent to patching from inside
++// the page, and the reason the alternative is overriding the renderer's own
++// clock.
++constexpr char kClockScript[] = R"JS(
++(function() {
++  'use strict';
++  if (globalThis.__appSwapClock) { return; }
++
++  const OriginalDate = Date;
++  const originalNow = Date.now.bind(Date);
++  const originalSetTimeout = globalThis.setTimeout.bind(globalThis);
++  const originalSetInterval = globalThis.setInterval.bind(globalThis);
++  const originalPerfNow = performance.now.bind(performance);
++  const originalRaf = globalThis.requestAnimationFrame
++      ? globalThis.requestAnimationFrame.bind(globalThis) : null;
++  const originalCancelRaf = globalThis.cancelAnimationFrame
++      ? globalThis.cancelAnimationFrame.bind(globalThis) : null;
++
++  // config.date is epoch milliseconds whose date part is shown; config.time
++  // is milliseconds since midnight; config.rate scales elapsed time.
++  let config = { date: null, time: null, rate: 1 };
++  let configured = false;
++
++  // Wall clock. anchorFake is what the page should have believed at the
++  // instant anchorReal was taken, so elapsed time is simply scaled from
++  // there and a rate change never makes the clock jump.
++  let anchorReal = originalNow();
++  let anchorFake = anchorReal;
++
++  // Monotonic clock, same shape. Seeded from the real one so installing the
++  // patch does not send performance.now() backwards.
++  let perfAnchorReal = originalPerfNow();
++  let perfAnchorFake = perfAnchorReal;
++
++  // Where the page's clock should read at real time `real`, before any
++  // elapsed time is added. The two overrides compose: with both set you get
++  // that date at that time of day.
++  function baseAt(real) {
++    if (config.date === null && config.time === null) { return real; }
++    const now = new OriginalDate(real);
++    const day = config.date === null ? now : new OriginalDate(config.date);
++    let h = now.getHours(), m = now.getMinutes();
++    let s = now.getSeconds(), ms = now.getMilliseconds();
++    if (config.time !== null) {
++      let rest = config.time;
++      h = Math.floor(rest / 3600000); rest -= h * 3600000;
++      m = Math.floor(rest / 60000); rest -= m * 60000;
++      s = Math.floor(rest / 1000); ms = rest - s * 1000;
++    }
++    return new OriginalDate(day.getFullYear(), day.getMonth(), day.getDate(),
++                            h, m, s, ms).getTime();
++  }
++
++  function fakeNow() {
++    return anchorFake + (originalNow() - anchorReal) * config.rate;
++  }
++
++  function fakePerfNow() {
++    return perfAnchorFake + (originalPerfNow() - perfAnchorReal) * config.rate;
++  }
++
++  const FakeDate = new Proxy(OriginalDate, {
++    construct(target, args, newTarget) {
++      if (args.length === 0) {
++        return Reflect.construct(target, [fakeNow()], newTarget);
++      }
++      return Reflect.construct(target, args, newTarget);
++    },
++    apply(target, thisArg, args) {
++      if (args.length === 0) { return new OriginalDate(fakeNow()).toString(); }
++      return Reflect.apply(target, thisArg, args);
++    },
++    get(target, prop, receiver) {
++      if (prop === 'now') { return () => fakeNow(); }
++      return Reflect.get(target, prop, receiver);
++    },
++  });
++  globalThis.Date = FakeDate;
++
++  globalThis.setTimeout = function(handler, delay, ...args) {
++    const scaled = typeof delay === 'number' ? delay / config.rate : delay;
++    return originalSetTimeout(handler, scaled, ...args);
++  };
++  globalThis.setInterval = function(handler, delay, ...args) {
++    const scaled = typeof delay === 'number' ? delay / config.rate : delay;
++    return originalSetInterval(handler, scaled, ...args);
++  };
++
++  performance.now = function() { return fakePerfNow(); };
++
++  if (originalRaf) {
++    // Real frames, faked timestamps: the callback runs when the compositor
++    // says so, and only the number it is handed is on the page's clock.
++    const pending = new Map();
++    let nextId = 0;
++    globalThis.requestAnimationFrame = function(callback) {
++      const id = ++nextId;
++      const realId = originalRaf(() => {
++        pending.delete(id);
++        callback(fakePerfNow());
++      });
++      pending.set(id, realId);
++      return id;
++    };
++    globalThis.cancelAnimationFrame = function(id) {
++      const realId = pending.get(id);
++      if (realId !== undefined) { originalCancelRaf(realId); pending.delete(id); }
++    };
++  }
++
++  if (globalThis.document && document.timeline) {
++    Object.defineProperty(document.timeline, 'currentTime', {
++      get: () => fakePerfNow(),
++      configurable: true,
++    });
++  }
++
++  Object.defineProperty(performance, 'timeOrigin', {
++    get: () => fakeNow() - fakePerfNow(),
++    configurable: true,
++  });
++
++  const timeStamp = Object.getOwnPropertyDescriptor(Event.prototype, 'timeStamp');
++  if (timeStamp && timeStamp.get) {
++    Object.defineProperty(Event.prototype, 'timeStamp', {
++      get: function() {
++        // Scaled onto the same monotonic clock performance.now() reports,
++        // so the two agree. An event stamped before the patch was installed
++        // lands before the anchor and simply reads earlier, which is true.
++        const real = timeStamp.get.call(this);
++        return perfAnchorFake + (real - perfAnchorReal) * config.rate;
++      },
++      configurable: true,
++    });
++  }
++
++  globalThis.__appSwapClock = {
++    configure(next) {
++      // Re-anchor both clocks on the values the page can currently see, so
++      // whatever changes here takes effect from now on rather than being
++      // applied retroactively to time already elapsed.
++      const fakeWall = fakeNow();
++      const fakePerf = fakePerfNow();
++
++      // Only a new date or time of day moves the clock. A rate change must
++      // leave it reading exactly what it reads now and simply run on at the
++      // new speed -- otherwise setting the date, letting an hour of page
++      // time pass and then slowing down would throw that hour away and snap
++      // back to the moment the override was set.
++      const jump = !configured || next.date !== config.date ||
++                   next.time !== config.time;
++
++      anchorReal = originalNow();
++      perfAnchorReal = originalPerfNow();
++      perfAnchorFake = fakePerf;
++      config = next;
++      anchorFake = jump ? baseAt(anchorReal) : fakeWall;
++      configured = true;
++    },
++  };
++})();
++)JS";
++
++}  // namespace
++
++bool AppSwapTimeTravelSession::Override::IsIdentity() const {
++  return !date.has_value() && !time_of_day.has_value() && rate == 1.0;
++}
++
++AppSwapTimeTravelSession::AppSwapTimeTravelSession(
++    content::WebContents* web_contents)
++    : content::WebContentsUserData<AppSwapTimeTravelSession>(*web_contents),
++      content::WebContentsObserver(web_contents) {}
++
++AppSwapTimeTravelSession::~AppSwapTimeTravelSession() = default;
++
++void AppSwapTimeTravelSession::AddObserver(Observer* observer) {
++  observers_.AddObserver(observer);
++}
++
++void AppSwapTimeTravelSession::RemoveObserver(Observer* observer) {
++  observers_.RemoveObserver(observer);
++}
++
++void AppSwapTimeTravelSession::SetOverride(const Override& next) {
++  if (override_ == next) {
++    return;
++  }
++  override_ = next;
++  Apply();
++  for (Observer& observer : observers_) {
++    observer.OnTimeTravelChanged();
++  }
++}
++
++void AppSwapTimeTravelSession::Reset() {
++  SetOverride(Override());
++}
++
++base::WeakPtr<AppSwapTimeTravelSession>
++AppSwapTimeTravelSession::GetWeakPtr() {
++  return weak_factory_.GetWeakPtr();
++}
++
++void AppSwapTimeTravelSession::PrimaryPageChanged(content::Page& page) {
++  // The injected script re-runs on its own for each new document, but the
++  // animation playback rate is per-page state the new page does not
++  // inherit, so it has to be re-sent.
++  if (client_ && !override_.IsIdentity()) {
++    Apply();
++  }
++}
++
++std::string AppSwapTimeTravelSession::BuildClockScript() const {
++  base::DictValue config;
++  if (override_.date.has_value()) {
++    config.Set("date", override_.date->InMillisecondsFSinceUnixEpoch());
++  } else {
++    config.Set("date", base::Value());
++  }
++  if (override_.time_of_day.has_value()) {
++    config.Set("time", override_.time_of_day->InMillisecondsF());
++  } else {
++    config.Set("time", base::Value());
++  }
++  config.Set("rate", override_.rate);
++
++  return base::StrCat({kClockScript, "\n__appSwapClock.configure(",
++                       base::WriteJson(config).value_or("{}"), ");\n"});
++}
++
++void AppSwapTimeTravelSession::UpdateInjectedScript() {
++  if (registering_) {
++    // The reply carrying the identifier of the add already in flight will
++    // come back and start another round with whatever the override is then.
++    registration_stale_ = true;
++    return;
++  }
++
++  // Replace rather than add: without removing the previous registration the
++  // next document would install the patch several times over, and an older
++  // one could be the copy that configures it last.
++  if (injected_script_id_.has_value()) {
++    client_->SendCommand(
++        "Page.removeScriptToEvaluateOnNewDocument",
++        base::DictValue().Set("identifier", *injected_script_id_),
++        AppSwapDevToolsClient::CommandCallback());
++    injected_script_id_.reset();
++  }
++
++  registering_ = true;
++  client_->SendCommand(
++      "Page.addScriptToEvaluateOnNewDocument",
++      base::DictValue().Set("source", BuildClockScript()),
++      base::BindOnce(
++          [](base::WeakPtr<AppSwapTimeTravelSession> session,
++             std::optional<base::DictValue> result) {
++            if (!session) {
++              return;
++            }
++            session->registering_ = false;
++            if (result) {
++              if (const std::string* id = result->FindString("identifier")) {
++                session->injected_script_id_ = *id;
++              }
++            }
++            if (std::exchange(session->registration_stale_, false) &&
++                session->client_) {
++              session->UpdateInjectedScript();
++            }
++          },
++          GetWeakPtr()));
++}
++
++void AppSwapTimeTravelSession::Apply() {
++  if (override_.IsIdentity()) {
++    // Nothing to say any more. Dropping the client detaches it, which is
++    // also what clears the animation playback rate and stops the script
++    // being injected into the next document; the current document keeps its
++    // patch until it navigates, so the page is told to stand still first.
++    if (client_) {
++      client_->SendCommand(
++          "Runtime.evaluate",
++          base::DictValue().Set(
++              "expression",
++              "globalThis.__appSwapClock && "
++              "__appSwapClock.configure({date:null,time:null,rate:1})"),
++          AppSwapDevToolsClient::CommandCallback());
++      client_->SendCommand("Animation.setPlaybackRate",
++                           base::DictValue().Set("playbackRate", 1.0),
++                           AppSwapDevToolsClient::CommandCallback());
++      client_.reset();
++      injected_script_id_.reset();
++      registering_ = false;
++      registration_stale_ = false;
++    }
++    return;
++  }
++
++  if (!client_) {
++    client_ = std::make_unique<AppSwapDevToolsClient>(web_contents());
++    client_->SendCommand("Page.enable", base::DictValue(),
++                         AppSwapDevToolsClient::CommandCallback());
++    client_->SendCommand("Animation.enable", base::DictValue(),
++                         AppSwapDevToolsClient::CommandCallback());
++  }
++
++  UpdateInjectedScript();
++
++  // The document already on screen never sees the registration above, so it
++  // is told separately. The script is written to be safe to run twice.
++  client_->SendCommand("Runtime.evaluate",
++                       base::DictValue().Set("expression", BuildClockScript()),
++                       AppSwapDevToolsClient::CommandCallback());
++
++  // Animations are driven by the animation timeline rather than by anything
++  // the script above patches, so the rate has to be set on that too.
++  client_->SendCommand("Animation.setPlaybackRate",
++                       base::DictValue().Set("playbackRate", override_.rate),
++                       AppSwapDevToolsClient::CommandCallback());
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapTimeTravelSession);
+diff --git a/chrome/browser/app_swap/app_swap_time_travel_session.h b/chrome/browser/app_swap/app_swap_time_travel_session.h
+new file mode 100644
+index 0000000000000..4b010765667a3
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_time_travel_session.h
+@@ -0,0 +1,135 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_TIME_TRAVEL_SESSION_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_TIME_TRAVEL_SESSION_H_
++
++#include <memory>
++#include <optional>
++
++#include "base/memory/weak_ptr.h"
++#include "base/observer_list.h"
++#include "base/observer_list_types.h"
++#include "base/time/time.h"
++#include "content/public/browser/web_contents_observer.h"
++#include "content/public/browser/web_contents_user_data.h"
++
++class AppSwapDevToolsClient;
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++// What clock one tab's page is being shown, and the machinery that makes it
++// believe it.
++//
++// An app under development often behaves differently on a particular date
++// or at a particular hour, and waiting for either is not a debugging
++// strategy. This lets the user move the page's clock and run it faster or
++// slower, per tab, without touching the machine's real clock.
++//
++// The override is applied by patching the page's own clock APIs from the
++// browser process, over the DevTools protocol -- see
++// AppSwapTimeTravelSession::Apply(). That is a deliberate limit: only what
++// JavaScript can see moves. Anything the browser times in C++ (cookie and
++// cache expiry, response dates, storage and worker lifetimes) keeps running
++// on the real clock, so a page that reads its clock from a server, or from
++// a header, will disagree with one that reads Date.now(). Moving those too
++// means overriding the renderer's own clock, which is process-wide and a
++// much larger change.
++class AppSwapTimeTravelSession
++    : public content::WebContentsUserData<AppSwapTimeTravelSession>,
++      public content::WebContentsObserver {
++ public:
++  // The three independent knobs, matching what the page is told.
++  struct Override {
++    friend bool operator==(const Override&, const Override&) = default;
++
++    bool IsIdentity() const;
++
++    // The date to show, keeping the real time of day. Null for "today".
++    std::optional<base::Time> date;
++
++    // The time of day to show, as a duration since midnight, keeping the
++    // real date. Null for "now".
++    std::optional<base::TimeDelta> time_of_day;
++
++    // How fast the page's clock runs relative to the real one. 1.0 is
++    // normal; the UI offers a fixed set of steps either side of it.
++    double rate = 1.0;
++  };
++
++  ~AppSwapTimeTravelSession() override;
++
++  AppSwapTimeTravelSession(const AppSwapTimeTravelSession&) = delete;
++  AppSwapTimeTravelSession& operator=(const AppSwapTimeTravelSession&) =
++      delete;
++
++  class Observer : public base::CheckedObserver {
++   public:
++    // The override changed. Observers re-read current() -- it is three
++    // fields, and everything that watches it rebuilds wholesale anyway.
++    virtual void OnTimeTravelChanged() {}
++  };
++
++  void AddObserver(Observer* observer);
++  void RemoveObserver(Observer* observer);
++
++  const Override& current() const { return override_; }
++
++  // Applies `next` to the page and remembers it. Cheap to call with an
++  // unchanged value; that is a no-op.
++  void SetOverride(const Override& next);
++
++  // Back to the machine's own clock at normal speed.
++  void Reset();
++
++  base::WeakPtr<AppSwapTimeTravelSession> GetWeakPtr();
++
++  // content::WebContentsObserver:
++  void PrimaryPageChanged(content::Page& page) override;
++
++ private:
++  friend class content::WebContentsUserData<AppSwapTimeTravelSession>;
++  explicit AppSwapTimeTravelSession(content::WebContents* web_contents);
++
++  // Pushes override_ to the page: the clock patch for what JavaScript
++  // reads, and the animation playback rate for what the compositor drives.
++  // Attaches the protocol client on first use and drops it once the
++  // override is back to the identity, so a tab nobody has time-shifted
++  // carries no protocol client at all.
++  void Apply();
++
++  // The clock patch, as the script source injected into every document.
++  std::string BuildClockScript() const;
++
++  // Re-registers the injected script so the next document gets the current
++  // override. Serialized against itself: the identifier needed to remove the
++  // previous registration only arrives in a reply, so overlapping calls --
++  // which typing a date produces one per keystroke -- would leave several
++  // registrations alive and let an older one win on the next load.
++  void UpdateInjectedScript();
++
++  Override override_;
++
++  // Null until something is actually overridden. See Apply().
++  std::unique_ptr<AppSwapDevToolsClient> client_;
++
++  // What Page.addScriptToEvaluateOnNewDocument handed back, so the previous
++  // patch can be removed before a new one is added. Without this every
++  // change would stack another copy onto the next navigation.
++  std::optional<std::string> injected_script_id_;
++
++  // Whether an add is waiting for its identifier, and whether the override
++  // changed again while it was.
++  bool registering_ = false;
++  bool registration_stale_ = false;
++
++  base::ObserverList<Observer> observers_;
++  base::WeakPtrFactory<AppSwapTimeTravelSession> weak_factory_{this};
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_TIME_TRAVEL_SESSION_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.cc b/chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.cc
+new file mode 100644
+index 0000000000000..7f9e9cf3020b0
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.cc
+@@ -0,0 +1,304 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.h"
++
++#include <array>
++#include <memory>
++#include <optional>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/containers/span.h"
++#include "base/functional/bind.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/stringprintf.h"
++#include "base/strings/utf_string_conversions.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/models/simple_combobox_model.h"
++#include "ui/base/mojom/dialog_button.mojom.h"
++#include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/controls/button/md_text_button.h"
++#include "ui/views/controls/combobox/combobox.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/controls/textfield/textfield.h"
++#include "ui/views/layout/box_layout.h"
++#include "ui/views/layout/layout_provider.h"
++#include "ui/views/view.h"
++
++namespace {
++
++// What the speed control offers. Matches the steps a video player would
++// show, which is the closest thing most people have used to this control.
++constexpr auto kSpeeds = std::to_array<double>(
++    {0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0, 10.0, 60.0});
++
++// Indexed through a span so the reads below are bounds-checked, which
++// -Wunsafe-buffer-usage requires of anything that is not.
++constexpr base::span<const double> Speeds() {
++  return base::span<const double>(kSpeeds);
++}
++
++constexpr int kFieldWidthChars = 12;
++
++std::u16string SpeedLabel(double speed) {
++  if (speed == 1.0) {
++    return u"Normal";
++  }
++  // Trailing zeros read badly on a speed dial: "x1.5", not "x1.500000".
++  return u"x" + base::UTF8ToUTF16(base::StringPrintf("%g", speed));
++}
++
++// "YYYY-MM-DD", the one date format that is unambiguous everywhere.
++std::optional<base::Time> ParseDate(const std::u16string& text) {
++  const std::vector<std::string> parts =
++      base::SplitString(base::UTF16ToUTF8(text), "-", base::TRIM_WHITESPACE,
++                        base::SPLIT_WANT_ALL);
++  if (parts.size() != 3) {
++    return std::nullopt;
++  }
++  base::Time::Exploded exploded = {};
++  if (!base::StringToInt(parts[0], &exploded.year) ||
++      !base::StringToInt(parts[1], &exploded.month) ||
++      !base::StringToInt(parts[2], &exploded.day_of_month)) {
++    return std::nullopt;
++  }
++  // Noon, not midnight: only the date part is ever read back out, and noon
++  // is the hour that survives every daylight-saving transition.
++  exploded.hour = 12;
++  base::Time parsed;
++  if (!base::Time::FromLocalExploded(exploded, &parsed)) {
++    return std::nullopt;
++  }
++  return parsed;
++}
++
++std::u16string FormatDate(base::Time time) {
++  base::Time::Exploded exploded;
++  time.LocalExplode(&exploded);
++  return base::UTF8ToUTF16(base::StringPrintf(
++      "%04d-%02d-%02d", exploded.year, exploded.month, exploded.day_of_month));
++}
++
++// "HH:MM" or "HH:MM:SS", as a duration since midnight.
++std::optional<base::TimeDelta> ParseTimeOfDay(const std::u16string& text) {
++  const std::vector<std::string> parts =
++      base::SplitString(base::UTF16ToUTF8(text), ":", base::TRIM_WHITESPACE,
++                        base::SPLIT_WANT_ALL);
++  if (parts.size() != 2 && parts.size() != 3) {
++    return std::nullopt;
++  }
++  int hours = 0;
++  int minutes = 0;
++  int seconds = 0;
++  if (!base::StringToInt(parts[0], &hours) ||
++      !base::StringToInt(parts[1], &minutes) ||
++      (parts.size() == 3 && !base::StringToInt(parts[2], &seconds))) {
++    return std::nullopt;
++  }
++  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 ||
++      seconds > 59) {
++    return std::nullopt;
++  }
++  return base::Hours(hours) + base::Minutes(minutes) + base::Seconds(seconds);
++}
++
++std::u16string FormatTimeOfDay(base::TimeDelta time_of_day) {
++  const int total = static_cast<int>(time_of_day.InSeconds());
++  return base::UTF8ToUTF16(base::StringPrintf(
++      "%02d:%02d:%02d", total / 3600, (total / 60) % 60, total % 60));
++}
++
++}  // namespace
++
++AppSwapTimeTravelBubble::AppSwapTimeTravelBubble(
++    views::View* anchor,
++    content::WebContents* web_contents)
++    : views::BubbleDialogDelegate(anchor, views::BubbleBorder::TOP_RIGHT) {
++  SetTitle(u"Time travel");
++  SetButtons(static_cast<int>(ui::mojom::DialogButton::kNone));
++
++  AppSwapTimeTravelSession::CreateForWebContents(web_contents);
++  session_ =
++      AppSwapTimeTravelSession::FromWebContents(web_contents)->GetWeakPtr();
++
++  const views::LayoutProvider* provider = views::LayoutProvider::Get();
++  auto contents = std::make_unique<views::View>();
++  contents->SetLayoutManager(std::make_unique<views::BoxLayout>(
++      views::BoxLayout::Orientation::kVertical, gfx::Insets(),
++      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL)));
++
++  const int row_spacing =
++      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL);
++
++  // Each row is a label, a control, and where it can be switched off, the
++  // control that switches it off.
++  auto add_row = [&](const std::u16string& label) {
++    views::View* row = contents->AddChildView(std::make_unique<views::View>());
++    row->SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kHorizontal, gfx::Insets(),
++        row_spacing));
++    row->AddChildView(std::make_unique<views::Label>(label));
++    return row;
++  };
++
++  views::View* date_row = add_row(u"Date");
++  date_field_ = date_row->AddChildView(std::make_unique<views::Textfield>());
++  date_field_->SetDefaultWidthInChars(kFieldWidthChars);
++  date_field_->SetPlaceholderText(u"YYYY-MM-DD");
++  date_field_->set_controller(this);
++  date_field_->GetViewAccessibility().SetName(u"Date shown to the page");
++  date_row->AddChildView(std::make_unique<views::MdTextButton>(
++      base::BindRepeating(&AppSwapTimeTravelBubble::OnClearDatePressed,
++                          base::Unretained(this)),
++      u"Clear"));
++
++  views::View* time_row = add_row(u"Time");
++  time_field_ = time_row->AddChildView(std::make_unique<views::Textfield>());
++  time_field_->SetDefaultWidthInChars(kFieldWidthChars);
++  time_field_->SetPlaceholderText(u"HH:MM");
++  time_field_->set_controller(this);
++  time_field_->GetViewAccessibility().SetName(
++      u"Time of day shown to the page");
++  time_row->AddChildView(std::make_unique<views::MdTextButton>(
++      base::BindRepeating(&AppSwapTimeTravelBubble::OnClearTimePressed,
++                          base::Unretained(this)),
++      u"Clear"));
++
++  views::View* speed_row = add_row(u"Speed");
++  std::vector<ui::SimpleComboboxModel::Item> items;
++  for (double speed : kSpeeds) {
++    items.emplace_back(SpeedLabel(speed));
++  }
++  speed_ = speed_row->AddChildView(std::make_unique<views::Combobox>(
++      std::make_unique<ui::SimpleComboboxModel>(std::move(items))));
++  speed_->SetCallback(base::BindRepeating(
++      &AppSwapTimeTravelBubble::OnSpeedChanged, base::Unretained(this)));
++  speed_->GetViewAccessibility().SetName(u"How fast the page's clock runs");
++
++  summary_ = contents->AddChildView(std::make_unique<views::Label>());
++  summary_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  summary_->SetMultiLine(true);
++
++  contents->AddChildView(std::make_unique<views::MdTextButton>(
++      base::BindRepeating(&AppSwapTimeTravelBubble::OnResetPressed,
++                          base::Unretained(this)),
++      u"Back to the real clock"));
++
++  SetContentsView(std::move(contents));
++  SyncFromSession();
++}
++
++AppSwapTimeTravelBubble::~AppSwapTimeTravelBubble() = default;
++
++void AppSwapTimeTravelBubble::WindowClosing() {
++  date_field_ = nullptr;
++  time_field_ = nullptr;
++  speed_ = nullptr;
++  summary_ = nullptr;
++}
++
++void AppSwapTimeTravelBubble::ContentsChanged(
++    views::Textfield* sender,
++    const std::u16string& new_contents) {
++  Commit();
++}
++
++void AppSwapTimeTravelBubble::OnSpeedChanged() {
++  Commit();
++}
++
++void AppSwapTimeTravelBubble::OnClearDatePressed() {
++  date_field_->SetText(std::u16string());
++  Commit();
++}
++
++void AppSwapTimeTravelBubble::OnClearTimePressed() {
++  time_field_->SetText(std::u16string());
++  Commit();
++}
++
++void AppSwapTimeTravelBubble::OnResetPressed() {
++  if (session_) {
++    session_->Reset();
++  }
++  updating_ = true;
++  date_field_->SetText(std::u16string());
++  time_field_->SetText(std::u16string());
++  updating_ = false;
++  SyncFromSession();
++}
++
++void AppSwapTimeTravelBubble::Commit() {
++  if (updating_ || !session_ || !date_field_) {
++    return;
++  }
++
++  AppSwapTimeTravelSession::Override next;
++  // An empty field means "leave this alone". A field mid-edit that does not
++  // parse yet keeps whatever it had, rather than snapping the page back to
++  // real time on the way to a valid value.
++  const std::u16string date_text(date_field_->GetText());
++  next.date = date_text.empty() ? std::nullopt : ParseDate(date_text);
++  if (!date_text.empty() && !next.date.has_value()) {
++    next.date = session_->current().date;
++  }
++
++  const std::u16string time_text(time_field_->GetText());
++  next.time_of_day =
++      time_text.empty() ? std::nullopt : ParseTimeOfDay(time_text);
++  if (!time_text.empty() && !next.time_of_day.has_value()) {
++    next.time_of_day = session_->current().time_of_day;
++  }
++
++  const std::optional<size_t> index = speed_->GetSelectedIndex();
++  next.rate = index.has_value() ? Speeds()[*index] : 1.0;
++
++  session_->SetOverride(next);
++  SyncFromSession();
++}
++
++void AppSwapTimeTravelBubble::SyncFromSession() {
++  if (!session_ || !date_field_) {
++    return;
++  }
++  const AppSwapTimeTravelSession::Override& current = session_->current();
++
++  updating_ = true;
++  size_t selected = 0;
++  for (size_t i = 0; i < Speeds().size(); ++i) {
++    if (Speeds()[i] == current.rate) {
++      selected = i;
++      break;
++    }
++  }
++  speed_->SetSelectedIndex(selected);
++  // The text fields are only filled in when they are empty. Rewriting them
++  // otherwise would fight the caret while the user is still typing.
++  if (date_field_->GetText().empty() && current.date.has_value()) {
++    date_field_->SetText(FormatDate(*current.date));
++  }
++  if (time_field_->GetText().empty() && current.time_of_day.has_value()) {
++    time_field_->SetText(FormatTimeOfDay(*current.time_of_day));
++  }
++  updating_ = false;
++
++  if (current.IsIdentity()) {
++    summary_->SetText(u"This tab is on the real clock.");
++    return;
++  }
++  std::u16string summary = u"This tab sees ";
++  summary += current.date.has_value() ? FormatDate(*current.date) : u"today";
++  summary += u" at ";
++  summary += current.time_of_day.has_value()
++                 ? FormatTimeOfDay(*current.time_of_day)
++                 : u"the real time";
++  if (current.rate != 1.0) {
++    summary += u", running " + SpeedLabel(current.rate);
++  }
++  summary += u".";
++  summary_->SetText(summary);
++}
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.h b/chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.h
+new file mode 100644
+index 0000000000000..2c618f93a46e9
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.h
+@@ -0,0 +1,86 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_TIME_TRAVEL_BUBBLE_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_TIME_TRAVEL_BUBBLE_H_
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/app_swap/app_swap_time_travel_session.h"
++#include "ui/views/bubble/bubble_dialog_delegate_view.h"
++#include "ui/views/controls/textfield/textfield_controller.h"
++
++namespace content {
++class WebContents;
++}  // namespace content
++
++namespace views {
++class Combobox;
++class Label;
++class Textfield;
++}  // namespace views
++
++// The controls behind the toolbar's time travel button: a date, a time of
++// day, and how fast the page's clock runs.
++//
++// Each field is independent and each may be left alone. Setting only the
++// date keeps the real time of day and vice versa, which is what makes "the
++// same afternoon, but on the first of the month" expressible without also
++// having to decide what o'clock it is.
++//
++// Edits apply as they are typed, once what is typed parses. There is no OK
++// button on purpose: the whole point is to watch the page react, and a
++// dialog that only commits on close hides exactly that.
++//
++// A BubbleDialogDelegate holding its controls rather than a
++// BubbleDialogDelegateView, which is deprecated and whose friend list is
++// closed to new callers. Whoever creates one owns it and the widget it
++// makes -- see AppSwapTimeTravelButton, which does both.
++class AppSwapTimeTravelBubble : public views::BubbleDialogDelegate,
++                                public views::TextfieldController {
++ public:
++  AppSwapTimeTravelBubble(views::View* anchor,
++                          content::WebContents* web_contents);
++  AppSwapTimeTravelBubble(const AppSwapTimeTravelBubble&) = delete;
++  AppSwapTimeTravelBubble& operator=(const AppSwapTimeTravelBubble&) = delete;
++  ~AppSwapTimeTravelBubble() override;
++
++  // views::WidgetDelegate:
++  //
++  // The widget owns the controls below, and this delegate outlives it by a
++  // turn (see AppSwapTimeTravelButton::OnBubbleClosed). Letting the raw_ptrs
++  // survive the views they point at is a dangling pointer, and the checker
++  // says so; this is the hook that runs while they are still valid.
++  void WindowClosing() override;
++
++  // views::TextfieldController:
++  void ContentsChanged(views::Textfield* sender,
++                       const std::u16string& new_contents) override;
++
++ private:
++  // Reads every control and hands the result to the session.
++  void Commit();
++
++  // Writes the session's current override back into the controls, for when
++  // something other than typing changed it.
++  void SyncFromSession();
++
++  void OnSpeedChanged();
++  void OnClearDatePressed();
++  void OnClearTimePressed();
++  void OnResetPressed();
++
++  base::WeakPtr<AppSwapTimeTravelSession> session_;
++
++  raw_ptr<views::Textfield> date_field_ = nullptr;
++  raw_ptr<views::Textfield> time_field_ = nullptr;
++  raw_ptr<views::Combobox> speed_ = nullptr;
++  raw_ptr<views::Label> summary_ = nullptr;
++
++  // Set while SyncFromSession() is writing the controls, so the changes it
++  // makes are not read straight back out as if the user had typed them.
++  bool updating_ = false;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_TIME_TRAVEL_BUBBLE_H_
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.cc b/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.cc
+new file mode 100644
+index 0000000000000..27d28d180ae92
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.cc
+@@ -0,0 +1,126 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_time_travel_button.h"
++
++#include "base/functional/bind.h"
++#include "chrome/app/vector_icons/vector_icons.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
++#include "base/task/single_thread_task_runner.h"
++#include "ui/views/background.h"
++#include "ui/views/bubble/bubble_dialog_delegate_view.h"
++
++namespace {
++
++constexpr float kActiveBadgeCornerRadius = 4.0f;
++
++}  // namespace
++
++AppSwapTimeTravelButton::AppSwapTimeTravelButton(
++    BrowserWindowInterface* browser)
++    : ToolbarButton(base::BindRepeating(
++          &AppSwapTimeTravelButton::ButtonPressed,
++          base::Unretained(this))),
++      browser_(browser) {
++  SetVectorIcon(kTimerIcon);
++  SetTooltipText(u"Change this tab's clock");
++  SetAccessibleName(u"Time travel");
++  SetVisible(false);
++  browser_->GetTabStripModel()->AddObserver(this);
++  UpdateForActiveTab();
++}
++
++AppSwapTimeTravelButton::~AppSwapTimeTravelButton() {
++  browser_->GetTabStripModel()->RemoveObserver(this);
++}
++
++void AppSwapTimeTravelButton::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  if (selection.active_tab_changed()) {
++    UpdateForActiveTab();
++  }
++}
++
++void AppSwapTimeTravelButton::OnTabChangedAt(tabs::TabInterface* tab,
++                                             TabChangeType change_type) {
++  UpdateForActiveTab();
++}
++
++void AppSwapTimeTravelButton::OnTimeTravelChanged() {
++  UpdateForActiveTab();
++}
++
++void AppSwapTimeTravelButton::UpdateForActiveTab() {
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  if (!web_contents) {
++    session_observation_.Reset();
++    SetVisible(false);
++    return;
++  }
++
++  SetVisible(web_contents->GetLastCommittedURL().SchemeIsHTTPOrHTTPS());
++
++  AppSwapTimeTravelSession* session =
++      AppSwapTimeTravelSession::FromWebContents(web_contents);
++  // Re-subscribed rather than left alone even when it is the same session,
++  // because this also runs for a plain tab change and the cheapest correct
++  // thing is to point at whatever the active tab has now.
++  session_observation_.Reset();
++  if (session) {
++    session_observation_.Observe(session);
++  }
++  SetActiveVisual(session && !session->current().IsIdentity());
++}
++
++void AppSwapTimeTravelButton::SetActiveVisual(bool active) {
++  if (active) {
++    SetBackground(views::CreateRoundedRectBackground(
++        ui::kColorSysNeutralContainer, kActiveBadgeCornerRadius));
++  } else {
++    SetBackground(nullptr);
++  }
++}
++
++void AppSwapTimeTravelButton::ButtonPressed() {
++  if (bubble_widget_ && !bubble_widget_->IsClosed()) {
++    bubble_widget_->CloseWithReason(views::Widget::ClosedReason::kUnspecified);
++    return;
++  }
++  content::WebContents* web_contents =
++      browser_->GetTabStripModel()->GetActiveWebContents();
++  if (!web_contents) {
++    return;
++  }
++  bubble_ = std::make_unique<AppSwapTimeTravelBubble>(this, web_contents);
++  bubble_widget_ = views::BubbleDialogDelegate::CreateBubble(
++      bubble_.get(),
++      base::BindOnce(&AppSwapTimeTravelButton::OnBubbleClosed,
++                     weak_factory_.GetWeakPtr()));
++  bubble_widget_->Show();
++}
++
++void AppSwapTimeTravelButton::OnBubbleClosed(
++    views::Widget::ClosedReason reason) {
++  // Deleted next turn rather than here: this runs from inside the widget's
++  // own close, and the delegate has to outlive it.
++  if (bubble_widget_) {
++    base::SingleThreadTaskRunner::GetCurrentDefault()->DeleteSoon(
++        FROM_HERE, std::move(bubble_widget_));
++  }
++  if (bubble_) {
++    base::SingleThreadTaskRunner::GetCurrentDefault()->DeleteSoon(
++        FROM_HERE, std::move(bubble_));
++  }
++}
++
++BEGIN_METADATA(AppSwapTimeTravelButton)
++END_METADATA
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.h b/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.h
+new file mode 100644
+index 0000000000000..e830cc1bd48d2
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.h
+@@ -0,0 +1,89 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_TIME_TRAVEL_BUTTON_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_TIME_TRAVEL_BUTTON_H_
++
++#include <memory>
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
++#include "chrome/browser/app_swap/app_swap_time_travel_session.h"
++#include "chrome/browser/ui/tabs/tab_change_type.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "chrome/browser/ui/views/toolbar/toolbar_button.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/views/widget/widget.h"
++
++class AppSwapTimeTravelBubble;
++class BrowserWindowInterface;
++class TabStripModel;
++
++namespace views {
++class Widget;
++}  // namespace views
++
++namespace tabs {
++class TabInterface;
++}  // namespace tabs
++
++// The toolbar entry point for moving the active tab's clock. Opens
++// AppSwapTimeTravelBubbleView, and carries a highlight for as long as that
++// tab is being shown a clock other than the machine's own -- the page gives
++// no other sign, and a tab quietly running an hour ahead is exactly the
++// kind of thing to forget about and then debug for twenty minutes.
++//
++// Sits next to the Responsive Lab button and follows the same rule for when
++// it is useful: only an http(s) page has a clock worth overriding.
++class AppSwapTimeTravelButton : public ToolbarButton,
++                                public TabStripModelObserver,
++                                public AppSwapTimeTravelSession::Observer {
++  METADATA_HEADER(AppSwapTimeTravelButton, ToolbarButton)
++
++ public:
++  explicit AppSwapTimeTravelButton(BrowserWindowInterface* browser);
++  AppSwapTimeTravelButton(const AppSwapTimeTravelButton&) = delete;
++  AppSwapTimeTravelButton& operator=(const AppSwapTimeTravelButton&) = delete;
++  ~AppSwapTimeTravelButton() override;
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      TabChangeType change_type) override;
++
++  // AppSwapTimeTravelSession::Observer:
++  void OnTimeTravelChanged() override;
++
++ private:
++  // Re-points this button at the active tab's session and refreshes how it
++  // looks. The session is created on demand by the bubble, so this may find
++  // none, which reads the same as an untouched clock.
++  void UpdateForActiveTab();
++
++  void SetActiveVisual(bool active);
++
++  void ButtonPressed();
++
++  // views::BubbleDialogDelegate::CreateBubble() hands back a widget the
++  // caller owns, and the delegate has to outlive it, so this button holds
++  // both and lets go of them together once the bubble closes.
++  void OnBubbleClosed(views::Widget::ClosedReason reason);
++
++  raw_ptr<BrowserWindowInterface> browser_;
++
++  std::unique_ptr<AppSwapTimeTravelBubble> bubble_;
++  std::unique_ptr<views::Widget> bubble_widget_;
++
++  base::ScopedObservation<AppSwapTimeTravelSession,
++                          AppSwapTimeTravelSession::Observer>
++      session_observation_{this};
++
++  base::WeakPtrFactory<AppSwapTimeTravelButton> weak_factory_{this};
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_TIME_TRAVEL_BUTTON_H_

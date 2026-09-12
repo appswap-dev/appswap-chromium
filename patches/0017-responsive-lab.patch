@@ -1427,24 +1427,18 @@ index 0000000000000..bd727dcfceb7d
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_TYPES_H_
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.cc b/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.cc
 new file mode 100644
-index 0000000000000..cedca24ab69fc
+index 0000000000000..4a80e3156b969
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.cc
-@@ -0,0 +1,192 @@
+@@ -0,0 +1,81 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +#include "chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.h"
 +
-+#include <string_view>
 +#include <utility>
 +
-+#include "base/containers/span.h"
-+#include "base/json/json_reader.h"
-+#include "base/json/json_writer.h"
-+#include "base/strings/string_view_util.h"
-+#include "content/public/browser/web_contents.h"
 +#include "ui/gfx/geometry/size.h"
 +
 +namespace {
@@ -1457,46 +1451,11 @@ index 0000000000000..cedca24ab69fc
 +}  // namespace
 +
 +AppSwapResponsiveLabViewportClient::AppSwapResponsiveLabViewportClient(
-+    content::WebContents* web_contents) {
-+  scoped_refptr<content::DevToolsAgentHost> agent_host =
-+      content::DevToolsAgentHost::GetOrCreateFor(web_contents);
-+  if (agent_host && agent_host->AttachClient(this)) {
-+    agent_host_ = std::move(agent_host);
-+  }
-+  // Otherwise agent_host_ stays null and this client is inert -- attaching
-+  // can legitimately be refused (see DevToolsAgentHost::AttachClient), and
-+  // a lab cell without emulation is still a usable cell, so this is not
-+  // treated as an error.
-+}
++    content::WebContents* web_contents)
++    : AppSwapDevToolsClient(web_contents) {}
 +
-+AppSwapResponsiveLabViewportClient::~AppSwapResponsiveLabViewportClient() {
-+  Detach();
-+}
-+
-+void AppSwapResponsiveLabViewportClient::SendCommand(
-+    const std::string& method,
-+    base::DictValue params,
-+    CommandCallback callback) {
-+  if (!agent_host_) {
-+    if (callback) {
-+      std::move(callback).Run(std::nullopt);
-+    }
-+    return;
-+  }
-+
-+  const int command_id = ++last_command_id_;
-+  base::DictValue command;
-+  command.Set("id", command_id);
-+  command.Set("method", method);
-+  command.Set("params", std::move(params));
-+
-+  if (callback) {
-+    pending_commands_[command_id] = std::move(callback);
-+  }
-+
-+  const std::string json = base::WriteJson(command).value_or("");
-+  agent_host_->DispatchProtocolMessage(this, base::as_byte_span(json));
-+}
++AppSwapResponsiveLabViewportClient::~AppSwapResponsiveLabViewportClient() =
++    default;
 +
 +void AppSwapResponsiveLabViewportClient::ApplyPreset(
 +    const AppSwapDevicePreset& preset,
@@ -1553,82 +1512,12 @@ index 0000000000000..cedca24ab69fc
 +  SendCommand("Emulation.setUserAgentOverride",
 +              base::DictValue().Set("userAgent", ""), CommandCallback());
 +}
-+
-+void AppSwapResponsiveLabViewportClient::DispatchProtocolMessage(
-+    content::DevToolsAgentHost* agent_host,
-+    base::span<const uint8_t> message) {
-+  std::optional<base::Value> parsed =
-+      base::JSONReader::Read(base::as_string_view(message),
-+                             base::JSON_REPLACE_INVALID_CHARACTERS);
-+  if (!parsed || !parsed->is_dict()) {
-+    return;
-+  }
-+  base::DictValue& dict = parsed->GetDict();
-+
-+  // A message carrying an id is a reply to one of our own commands;
-+  // anything else with a method is an unsolicited event.
-+  const std::optional<int> id = dict.FindInt("id");
-+  if (!id.has_value()) {
-+    const std::string* method = dict.FindString("method");
-+    if (method && event_callback_) {
-+      // DictValue is move-only, so a ternary over "the params we have" and
-+      // "an empty one" can't share a type -- hence the empty local.
-+      const base::DictValue empty_params;
-+      const base::DictValue* params = dict.FindDict("params");
-+      event_callback_.Run(*method, params ? *params : empty_params);
-+    }
-+    return;
-+  }
-+
-+  auto it = pending_commands_.find(*id);
-+  if (it == pending_commands_.end()) {
-+    return;
-+  }
-+  CommandCallback callback = std::move(it->second);
-+  pending_commands_.erase(it);
-+
-+  if (dict.FindDict("error")) {
-+    std::move(callback).Run(std::nullopt);
-+    return;
-+  }
-+  base::DictValue* result = dict.FindDict("result");
-+  std::move(callback).Run(result ? std::make_optional(result->Clone())
-+                                 : std::make_optional(base::DictValue()));
-+}
-+
-+void AppSwapResponsiveLabViewportClient::AgentHostClosed(
-+    content::DevToolsAgentHost* agent_host) {
-+  // The host is already gone, so DetachClient() would be both unnecessary
-+  // and wrong -- drop it first, then let Detach() fail the pending
-+  // commands that will now never be answered.
-+  agent_host_ = nullptr;
-+  Detach();
-+}
-+
-+std::string AppSwapResponsiveLabViewportClient::GetTypeForMetrics() {
-+  return "Other";
-+}
-+
-+void AppSwapResponsiveLabViewportClient::Detach() {
-+  if (agent_host_) {
-+    agent_host_->DetachClient(this);
-+    agent_host_ = nullptr;
-+  }
-+
-+  // Moved out first: a callback is free to destroy this object, and
-+  // iterating the member map across that would be a use-after-free.
-+  std::map<int, CommandCallback> pending = std::move(pending_commands_);
-+  pending_commands_.clear();
-+  for (auto& [id, callback] : pending) {
-+    std::move(callback).Run(std::nullopt);
-+  }
-+}
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.h b/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.h
 new file mode 100644
-index 0000000000000..e874ab7e43b06
+index 0000000000000..f5bc458cfe7db
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_viewport_client.h
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,68 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1636,41 +1525,28 @@ index 0000000000000..e874ab7e43b06
 +#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_VIEWPORT_CLIENT_H_
 +#define CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_VIEWPORT_CLIENT_H_
 +
-+#include <map>
-+#include <optional>
-+#include <string>
-+
-+#include "base/functional/callback.h"
-+#include "base/memory/scoped_refptr.h"
-+#include "base/memory/weak_ptr.h"
-+#include "base/values.h"
++#include "chrome/browser/app_swap/app_swap_devtools_client.h"
 +#include "chrome/browser/app_swap/app_swap_responsive_lab_types.h"
-+#include "content/public/browser/devtools_agent_host.h"
-+#include "content/public/browser/devtools_agent_host_client.h"
 +
 +namespace content {
 +class WebContents;
 +}  // namespace content
 +
-+// A Chrome DevTools Protocol client for one Responsive Lab viewport, run
-+// from the browser process with no DevTools frontend involved.
++// The protocol client for one Responsive Lab viewport: an
++// AppSwapDevToolsClient that knows what to say to make a lab cell an
++// emulated device.
 +//
-+// This is the piece that makes a lab cell an actual emulated device rather
-+// than a narrow desktop window: ApplyPreset() is what supplies the
-+// devicePixelRatio, mobile screen type, touch input and user agent that
-+// sizing a views::WebView can't. It is also the seam the shared panel is
-+// built on -- one client per viewport, so a single panel action can fan out
-+// to every viewport at once (see AppSwapResponsiveLabSession, which owns
-+// these).
++// ApplyPreset() supplies the devicePixelRatio, mobile screen type, touch
++// input and user agent that sizing a views::WebView cannot. It is also the
++// seam the shared panel is built on -- one client per viewport, so a single
++// panel action can fan out to every viewport at once (see
++// AppSwapResponsiveLabSession, which owns these).
 +//
 +// Deliberately a protocol client rather than a DevTools window: the
 +// DevTools frontend binds to exactly one primary page target, chosen for it
 +// at startup with no switcher, and each lab cell is its own WebContents and
 +// therefore its own target -- so one frontend can't span the grid. Docking
 +// is refused for a non-tab WebContents as well (see DevToolsWindow::Create).
-+// Attaching here costs neither, and coexists with the user opening real
-+// DevTools on a single cell: a DevToolsAgentHost supports several attached
-+// clients at once.
 +//
 +// One protocol caveat is load-bearing and is enforced in ApplyPreset():
 +// Emulation.setDeviceMetricsOverride must be sent with dontSetVisibleSize
@@ -1678,23 +1554,8 @@ index 0000000000000..e874ab7e43b06
 +// which resizes the RenderWidgetHostView directly and fights both
 +// PinnedSizeWebView and NativeViewHost::Layout() for control of the cell's
 +// native surface size.
-+class AppSwapResponsiveLabViewportClient
-+    : public content::DevToolsAgentHostClient {
++class AppSwapResponsiveLabViewportClient : public AppSwapDevToolsClient {
 + public:
-+  // A command's reply, or nullopt if it failed, the protocol reported an
-+  // error, or the agent host went away before it arrived.
-+  using CommandCallback =
-+      base::OnceCallback<void(std::optional<base::DictValue> result)>;
-+
-+  // Every protocol event this client receives, by method name. Repeating,
-+  // and may fire at any time while attached.
-+  using EventCallback =
-+      base::RepeatingCallback<void(const std::string& method,
-+                                   const base::DictValue& params)>;
-+
-+  // Attaches to `web_contents`'s agent host immediately. attached() is
-+  // false if that failed (e.g. an embedder policy refused it), in which
-+  // case every method below is a safe no-op.
 +  explicit AppSwapResponsiveLabViewportClient(
 +      content::WebContents* web_contents);
 +  AppSwapResponsiveLabViewportClient(
@@ -1702,17 +1563,6 @@ index 0000000000000..e874ab7e43b06
 +  AppSwapResponsiveLabViewportClient& operator=(
 +      const AppSwapResponsiveLabViewportClient&) = delete;
 +  ~AppSwapResponsiveLabViewportClient() override;
-+
-+  bool attached() const { return agent_host_ != nullptr; }
-+
-+  void set_event_callback(EventCallback callback) {
-+    event_callback_ = std::move(callback);
-+  }
-+
-+  // Sends one protocol command. `callback` may be null for fire-and-forget.
-+  void SendCommand(const std::string& method,
-+                   base::DictValue params,
-+                   CommandCallback callback);
 +
 +  // Applies `preset`'s emulation parameters, rendered at `canvas_scale`.
 +  //
@@ -1733,22 +1583,6 @@ index 0000000000000..e874ab7e43b06
 +  // Drops every override ApplyPreset() installed, returning the page to the
 +  // host's own metrics and user agent.
 +  void ClearEmulation();
-+
-+  // content::DevToolsAgentHostClient:
-+  void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
-+                               base::span<const uint8_t> message) override;
-+  void AgentHostClosed(content::DevToolsAgentHost* agent_host) override;
-+  std::string GetTypeForMetrics() override;
-+
-+ private:
-+  // Detaches from agent_host_ (if attached) and fails every still-pending
-+  // command, so no caller is left waiting on a reply that can't arrive.
-+  void Detach();
-+
-+  scoped_refptr<content::DevToolsAgentHost> agent_host_;
-+  int last_command_id_ = 0;
-+  std::map<int, CommandCallback> pending_commands_;
-+  EventCallback event_callback_;
 +};
 +
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_VIEWPORT_CLIENT_H_

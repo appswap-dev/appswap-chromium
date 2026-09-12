@@ -639,6 +639,32 @@ gen 0020-project-cli-switch.patch \
   chrome/common/chrome_switches.h \
   chrome/browser/ui/startup/startup_browser_creator.cc
 
+# Time travel: a per-tab clock override, reachable from a toolbar button
+# next to Responsive Lab. The page can be shown a different date, a
+# different time of day, and a clock that runs faster or slower than the
+# real one.
+#
+# Applied by patching the page's own clock APIs from the browser process
+# over the DevTools protocol -- Page.addScriptToEvaluateOnNewDocument for
+# every document, plus Animation.setPlaybackRate for what the animation
+# timeline drives rather than JavaScript. No preload script and no
+# renderer-side change, at the cost of only moving what JavaScript can
+# see: anything the browser itself times in C++ still runs on the real
+# clock. See AppSwapTimeTravelSession for the full list of caveats.
+#
+# AppSwapDevToolsClient is the protocol plumbing, lifted out of Responsive
+# Lab's viewport client (0017) so both features share one implementation;
+# that file stays with 0017, which owns it.
+gen 0021-time-travel.patch \
+  chrome/browser/app_swap/app_swap_devtools_client.cc \
+  chrome/browser/app_swap/app_swap_devtools_client.h \
+  chrome/browser/app_swap/app_swap_time_travel_session.cc \
+  chrome/browser/app_swap/app_swap_time_travel_session.h \
+  chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.cc \
+  chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.h \
+  chrome/browser/ui/views/app_swap/app_swap_time_travel_button.cc \
+  chrome/browser/ui/views/app_swap/app_swap_time_travel_button.h
+
 # Whether `f` (a path relative to src/) is one of the images tracked under
 # resources/ instead of as a patch -- sync_binary_resources() above already
 # copied it there, so it's covered even though it won't appear in any

@@ -12,10 +12,10 @@ index bde7030b6eeb6..0b76382b548ff 100644
      ":primitives",
 diff --git a/chrome/browser/app_swap/BUILD.gn b/chrome/browser/app_swap/BUILD.gn
 new file mode 100644
-index 0000000000000..884b8c0ef492c
+index 0000000000000..4163a76fcdc4f
 --- /dev/null
 +++ b/chrome/browser/app_swap/BUILD.gn
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,103 @@
 +# Copyright 2026 The AppSwap Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -30,6 +30,8 @@ index 0000000000000..884b8c0ef492c
 +    "app_swap_artifact_provider.h",
 +    "app_swap_config_store.cc",
 +    "app_swap_config_store.h",
++    "app_swap_devtools_client.cc",
++    "app_swap_devtools_client.h",
 +    "app_swap_prefs.cc",
 +    "app_swap_prefs.h",
 +    "app_swap_profile_pin_tab_helper.cc",
@@ -59,6 +61,8 @@ index 0000000000000..884b8c0ef492c
 +    "app_swap_route_matcher.cc",
 +    "app_swap_route_matcher.h",
 +    "app_swap_source.h",
++    "app_swap_time_travel_session.cc",
++    "app_swap_time_travel_session.h",
 +    "app_swap_update_available_tab_helper.cc",
 +    "app_swap_update_available_tab_helper.h",
 +    "app_swap_update_checker.cc",
