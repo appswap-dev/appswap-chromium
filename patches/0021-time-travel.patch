@@ -1122,10 +1122,10 @@ index 0000000000000..2c618f93a46e9
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_TIME_TRAVEL_BUBBLE_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.cc b/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.cc
 new file mode 100644
-index 0000000000000..27d28d180ae92
+index 0000000000000..bdff4329a677f
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.cc
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,184 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1133,20 +1133,26 @@ index 0000000000000..27d28d180ae92
 +#include "chrome/browser/ui/views/app_swap/app_swap_time_travel_button.h"
 +
 +#include "base/functional/bind.h"
++#include "base/strings/stringprintf.h"
++#include "base/strings/utf_string_conversions.h"
 +#include "chrome/app/vector_icons/vector_icons.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
 +#include "chrome/browser/ui/views/app_swap/app_swap_time_travel_bubble.h"
 +#include "content/public/browser/web_contents.h"
 +#include "ui/base/metadata/metadata_impl_macros.h"
-+#include "ui/color/color_id.h"
 +#include "base/task/single_thread_task_runner.h"
-+#include "ui/views/background.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
 +#include "ui/views/bubble/bubble_dialog_delegate_view.h"
 +
 +namespace {
 +
-+constexpr float kActiveBadgeCornerRadius = 4.0f;
++// "x60", "x0.1". %g rather than a fixed precision because the dial offers
++// both whole and fractional steps and "x1.500000" reads badly.
++std::u16string RateLabel(double rate) {
++  return u"x" + base::UTF8ToUTF16(base::StringPrintf("%g", rate));
++}
 +
 +}  // namespace
 +
@@ -1197,25 +1203,77 @@ index 0000000000000..27d28d180ae92
 +
 +  SetVisible(web_contents->GetLastCommittedURL().SchemeIsHTTPOrHTTPS());
 +
++  // Created here rather than waited for. The bubble used to be what brought
++  // a session into existence, which left this button observing nothing until
++  // the user had already opened it once -- so the first speed they picked
++  // never reached the toolbar. A session nobody has touched holds an
++  // identity override, attaches no protocol client and does nothing.
++  AppSwapTimeTravelSession::CreateForWebContents(web_contents);
 +  AppSwapTimeTravelSession* session =
 +      AppSwapTimeTravelSession::FromWebContents(web_contents);
-+  // Re-subscribed rather than left alone even when it is the same session,
-+  // because this also runs for a plain tab change and the cheapest correct
-+  // thing is to point at whatever the active tab has now.
-+  session_observation_.Reset();
-+  if (session) {
-+    session_observation_.Observe(session);
++  // Only re-subscribed when the session actually changed. This method runs
++  // as the session's own observer callback, so unconditionally dropping and
++  // re-adding the subscription mutated the observer list mid-notification
++  // and called straight back into here -- the browser hung and then died the
++  // first time a multiplier was picked.
++  if (!session_observation_.IsObservingSource(session)) {
++    session_observation_.Reset();
++    if (session) {
++      session_observation_.Observe(session);
++    }
 +  }
-+  SetActiveVisual(session && !session->current().IsIdentity());
++  ApplyHighlight(session);
 +}
 +
-+void AppSwapTimeTravelButton::SetActiveVisual(bool active) {
-+  if (active) {
-+    SetBackground(views::CreateRoundedRectBackground(
-+        ui::kColorSysNeutralContainer, kActiveBadgeCornerRadius));
-+  } else {
-+    SetBackground(nullptr);
++std::optional<SkColor> AppSwapTimeTravelButton::HighlightColor() const {
++  const ui::ColorProvider* colors = GetColorProvider();
++  if (!colors) {
++    return std::nullopt;
 +  }
++  return colors->GetColor(ui::kColorSysPrimary);
++}
++
++std::optional<SkColor> AppSwapTimeTravelButton::GetHighlightTextColor() const {
++  const ui::ColorProvider* colors = GetColorProvider();
++  if (!colors) {
++    return ToolbarButton::GetHighlightTextColor();
++  }
++  return colors->GetColor(ui::kColorSysOnPrimary);
++}
++
++SkColor AppSwapTimeTravelButton::GetForegroundColor(ButtonState state) const {
++  if (pill_showing_) {
++    if (const ui::ColorProvider* colors = GetColorProvider()) {
++      return colors->GetColor(ui::kColorSysOnPrimary);
++    }
++  }
++  return ToolbarButton::GetForegroundColor(state);
++}
++
++void AppSwapTimeTravelButton::ApplyHighlight(
++    const AppSwapTimeTravelSession* session) {
++  if (!session || session->current().IsIdentity()) {
++    pill_showing_ = false;
++    SetHighlight(std::u16string(), std::nullopt);
++    // SetHighlight() does not touch the icon: ToolbarButton bakes the icon
++    // color in at UpdateIcon() time rather than recomputing it per paint, so
++    // it has to be asked again whenever GetForegroundColor()'s answer
++    // changes -- in both directions.
++    UpdateIcon();
++    return;
++  }
++  // No color of its own: the default highlight is the neutral toolbar pill,
++  // which says "this tab is not on the real clock" without competing with
++  // the reload button's own pill for attention.
++  // A color, not nullopt: the default highlight leaves the pill invisible
++  // here, and passing one is also what makes the label paint. Empty text
++  // still gets the pill, which is the signal for a date or time override
++  // with the clock running at normal speed.
++  const double rate = session->current().rate;
++  pill_showing_ = true;
++  SetHighlight(rate == 1.0 ? std::u16string() : RateLabel(rate),
++               HighlightColor());
++  UpdateIcon();
 +}
 +
 +void AppSwapTimeTravelButton::ButtonPressed() {
@@ -1254,10 +1312,10 @@ index 0000000000000..27d28d180ae92
 +END_METADATA
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.h b/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.h
 new file mode 100644
-index 0000000000000..e830cc1bd48d2
+index 0000000000000..6935ca0be0d51
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_time_travel_button.h
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,115 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1266,6 +1324,7 @@ index 0000000000000..e830cc1bd48d2
 +#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_TIME_TRAVEL_BUTTON_H_
 +
 +#include <memory>
++#include <optional>
 +
 +#include "base/memory/raw_ptr.h"
 +#include "base/memory/weak_ptr.h"
@@ -1319,13 +1378,33 @@ index 0000000000000..e830cc1bd48d2
 +  // AppSwapTimeTravelSession::Observer:
 +  void OnTimeTravelChanged() override;
 +
++  // ToolbarButton:
++  // Overridden because the default highlight text color is the highlight
++  // color itself, which would paint the multiplier in the same color as the
++  // pill behind it.
++  std::optional<SkColor> GetHighlightTextColor() const override;
++
++  // ToolbarButton:
++  // Overridden so the stopwatch is painted in the same color as the
++  // multiplier beside it. Left alone it keeps the ordinary toolbar icon
++  // color, which all but disappears against the pill.
++  SkColor GetForegroundColor(ButtonState state) const override;
++
 + private:
 +  // Re-points this button at the active tab's session and refreshes how it
 +  // looks. The session is created on demand by the bubble, so this may find
 +  // none, which reads the same as an untouched clock.
 +  void UpdateForActiveTab();
 +
-+  void SetActiveVisual(bool active);
++  // Puts the tab's clock state on the button: a pill whenever anything is
++  // overridden, carrying the multiplier when the clock is not running at
++  // normal speed. Speed is the part that keeps changing while you watch a
++  // page, and the only part a glance at the toolbar can report.
++  void ApplyHighlight(const AppSwapTimeTravelSession* session);
++
++  // The pill's own color, or nullopt before this button has a color
++  // provider.
++  std::optional<SkColor> HighlightColor() const;
 +
 +  void ButtonPressed();
 +
@@ -1335,6 +1414,11 @@ index 0000000000000..e830cc1bd48d2
 +  void OnBubbleClosed(views::Widget::ClosedReason reason);
 +
 +  raw_ptr<BrowserWindowInterface> browser_;
++
++  // Whether the pill is currently drawn, which is what decides the icon's
++  // color. Kept rather than re-derived, because GetForegroundColor() is
++  // called during painting and has no session to hand.
++  bool pill_showing_ = false;
 +
 +  std::unique_ptr<AppSwapTimeTravelBubble> bubble_;
 +  std::unique_ptr<views::Widget> bubble_widget_;
