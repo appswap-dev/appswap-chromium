@@ -377,10 +377,10 @@ index 0000000000000..732081c51250c
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_APPS_SERVICE_H_
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.cc b/chrome/browser/app_swap/app_swap_artifact_provider.cc
 new file mode 100644
-index 0000000000000..76da11307260d
+index 0000000000000..4bdfffe431aba
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.cc
-@@ -0,0 +1,651 @@
+@@ -0,0 +1,669 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -649,7 +649,7 @@ index 0000000000000..76da11307260d
 +    base::OnceCallback<void(std::optional<std::string>)> callback) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 +  FetchMetadata(
-+      source, &loaders_for_checks_,
++      source, &check_fetches_,
 +      base::BindOnce(
 +          [](base::OnceCallback<void(std::optional<std::string>)> callback,
 +             std::string version, std::string error) {
@@ -727,7 +727,7 @@ index 0000000000000..76da11307260d
 +            base::Unretained(this), source, target_dir));
 +  } else {
 +    FetchMetadata(
-+        source, &loaders_,
++        source, &metadata_fetches_,
 +        base::BindOnce(
 +            [](AppSwapArtifactProvider* self, const AppSwapSource& source,
 +               std::string version, std::string error) {
@@ -781,35 +781,12 @@ index 0000000000000..76da11307260d
 +    base::OnceCallback<void(std::optional<AppSwapPackageMetadata>)>
 +        callback) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-+
-+  auto resource_request = std::make_unique<network::ResourceRequest>();
-+  resource_request->url = GURL(MetadataUrl(source));
-+  resource_request->method = net::HttpRequestHeaders::kGetMethod;
-+  resource_request->headers.SetHeader(net::HttpRequestHeaders::kAccept,
-+                                      "application/json");
-+  if (!source.token.empty()) {
-+    resource_request->headers.SetHeader(net::HttpRequestHeaders::kAuthorization,
-+                                        base::StrCat({"Bearer ", source.token}));
-+  }
-+
-+  scoped_refptr<network::SharedURLLoaderFactory> factory =
-+      SystemNetworkContextManager::GetInstance()->GetSharedURLLoaderFactory();
-+
-+  auto loader =
-+      network::SimpleURLLoader::Create(std::move(resource_request),
-+                                       kArtifactTrafficAnnotation);
-+  network::SimpleURLLoader* raw_loader = loader.get();
-+  const std::string key = Key(source);
-+  metadata_query_loaders_[key] = std::move(loader);
-+
-+  raw_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-+      factory.get(),
++  FetchMetadataBody(
++      source, &package_metadata_fetches_,
 +      base::BindOnce(
-+          [](AppSwapArtifactProvider* self, std::string key,
-+             base::OnceCallback<void(std::optional<AppSwapPackageMetadata>)>
++          [](base::OnceCallback<void(std::optional<AppSwapPackageMetadata>)>
 +                 callback,
-+             std::optional<std::string> body) {
-+            self->metadata_query_loaders_.erase(key);
++             const std::optional<std::string>& body) {
 +            if (!body) {
 +              std::move(callback).Run(std::nullopt);
 +              return;
@@ -840,7 +817,7 @@ index 0000000000000..76da11307260d
 +            }
 +            std::move(callback).Run(std::move(metadata));
 +          },
-+          base::Unretained(this), key, std::move(callback)));
++          std::move(callback)));
 +}
 +
 +void AppSwapArtifactProvider::GetCachedVersions(
@@ -860,12 +837,28 @@ index 0000000000000..76da11307260d
 +      std::move(callback));
 +}
 +
-+void AppSwapArtifactProvider::FetchMetadata(
++AppSwapArtifactProvider::MetadataFetch::MetadataFetch() = default;
++AppSwapArtifactProvider::MetadataFetch::MetadataFetch(MetadataFetch&&) =
++    default;
++AppSwapArtifactProvider::MetadataFetch&
++AppSwapArtifactProvider::MetadataFetch::operator=(MetadataFetch&&) = default;
++AppSwapArtifactProvider::MetadataFetch::~MetadataFetch() = default;
++
++void AppSwapArtifactProvider::FetchMetadataBody(
 +    const AppSwapSource& source,
-+    std::map<std::string, std::unique_ptr<network::SimpleURLLoader>>*
-+        loader_map,
-+    base::OnceCallback<void(std::string /*version*/, std::string /*error*/)>
-+        callback) {
++    MetadataFetchMap* fetch_map,
++    base::OnceCallback<void(const std::optional<std::string>&)> callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  const std::string key = Key(source);
++  MetadataFetch& fetch = (*fetch_map)[key];
++  fetch.waiters.push_back(std::move(callback));
++  if (fetch.waiters.size() > 1) {
++    // Somebody is already asking the registry this exact question; wait for
++    // their answer instead of starting a second request that would cancel
++    // theirs. See MetadataFetch's comment for what that used to cost.
++    return;
++  }
++
 +  auto resource_request = std::make_unique<network::ResourceRequest>();
 +  resource_request->url = GURL(MetadataUrl(source));
 +  resource_request->method = net::HttpRequestHeaders::kGetMethod;
@@ -879,21 +872,46 @@ index 0000000000000..76da11307260d
 +  scoped_refptr<network::SharedURLLoaderFactory> factory =
 +      SystemNetworkContextManager::GetInstance()->GetSharedURLLoaderFactory();
 +
-+  auto loader =
-+      network::SimpleURLLoader::Create(std::move(resource_request),
-+                                       kArtifactTrafficAnnotation);
-+  network::SimpleURLLoader* raw_loader = loader.get();
-+  (*loader_map)[Key(source)] = std::move(loader);
++  fetch.loader = network::SimpleURLLoader::Create(std::move(resource_request),
++                                                  kArtifactTrafficAnnotation);
++  fetch.loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
++      factory.get(), base::BindOnce(&AppSwapArtifactProvider::OnMetadataBody,
++                                    base::Unretained(this), fetch_map, key));
++}
 +
-+  raw_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-+      factory.get(),
++void AppSwapArtifactProvider::OnMetadataBody(
++    MetadataFetchMap* fetch_map,
++    std::string key,
++    std::optional<std::string> body) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  auto it = fetch_map->find(key);
++  if (it == fetch_map->end()) {
++    return;
++  }
++  // Moved out and erased before a single waiter runs: a waiter is free to
++  // start the next query for this same key (a freshness check resolving into
++  // a download is exactly that), and it must not find this finished entry
++  // still sitting there and decide to wait on it forever.
++  std::vector<base::OnceCallback<void(const std::optional<std::string>&)>>
++      waiters = std::move(it->second.waiters);
++  fetch_map->erase(it);
++  for (auto& waiter : waiters) {
++    std::move(waiter).Run(body);
++  }
++}
++
++void AppSwapArtifactProvider::FetchMetadata(
++    const AppSwapSource& source,
++    MetadataFetchMap* fetch_map,
++    base::OnceCallback<void(std::string /*version*/, std::string /*error*/)>
++        callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  FetchMetadataBody(
++      source, fetch_map,
 +      base::BindOnce(
-+          [](std::map<std::string, std::unique_ptr<network::SimpleURLLoader>>*
-+                 loader_map,
-+             const AppSwapSource& source,
++          [](std::string tag,
 +             base::OnceCallback<void(std::string, std::string)> callback,
-+             std::optional<std::string> body) {
-+            loader_map->erase(Key(source));
++             const std::optional<std::string>& body) {
 +            if (!body) {
 +              std::move(callback).Run(std::string(), "metadata download failed");
 +              return;
@@ -907,15 +925,15 @@ index 0000000000000..76da11307260d
 +            const base::DictValue& root = parsed->GetDict();
 +            const base::DictValue* dist_tags = root.FindDict("dist-tags");
 +            const std::string* version =
-+                dist_tags ? dist_tags->FindString(source.version) : nullptr;
++                dist_tags ? dist_tags->FindString(tag) : nullptr;
 +            if (!version) {
 +              std::move(callback).Run(std::string(),
-+                                      "dist-tag not found: " + source.version);
++                                      "dist-tag not found: " + tag);
 +              return;
 +            }
 +            std::move(callback).Run(*version, std::string());
 +          },
-+          loader_map, source, std::move(callback)));
++          source.version, std::move(callback)));
 +}
 +
 +void AppSwapArtifactProvider::DownloadTarball(
@@ -1034,10 +1052,10 @@ index 0000000000000..76da11307260d
 +}
 diff --git a/chrome/browser/app_swap/app_swap_artifact_provider.h b/chrome/browser/app_swap/app_swap_artifact_provider.h
 new file mode 100644
-index 0000000000000..48f4e9eec3485
+index 0000000000000..7d48f54b33ace
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_artifact_provider.h
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,207 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1157,15 +1175,50 @@ index 0000000000000..48f4e9eec3485
 +      base::OnceCallback<void(std::vector<std::string>)> callback);
 +
 + private:
-+  // `loader_map` is the map to keep the in-flight SimpleURLLoader alive in
-+  // (and erase it from on completion) -- callers pick which one so an
-+  // update-availability check can never cancel, or be cancelled by, a real
-+  // GetOrDownload() resolution for the same "package@version" key sharing
-+  // one map would.
++  // One in-flight registry metadata GET, and everyone waiting on its body.
++  //
++  // The waiters are a list rather than a single callback because these maps
++  // are keyed by "package@version" and several callers legitimately ask the
++  // same question at the same time -- three Responsive Lab cells opening on
++  // the same app is what found this. Overwriting the map entry, which is
++  // what this replaced, destroys the SimpleURLLoader that was already in
++  // flight, and a destroyed SimpleURLLoader never runs its completion
++  // callback: the earlier caller's callback is silently dropped. When that
++  // callback owns a navigation's mojo pipes -- it does, see
++  // AppSwapProxyingURLLoaderFactory's ServeAfterResolve -- dropping it
++  // closes them, and the navigation dies with ERR_ABORTED and no error
++  // page. The cells simply stayed blank.
++  struct MetadataFetch {
++    MetadataFetch();
++    MetadataFetch(MetadataFetch&&);
++    MetadataFetch& operator=(MetadataFetch&&);
++    ~MetadataFetch();
++
++    std::unique_ptr<network::SimpleURLLoader> loader;
++    std::vector<base::OnceCallback<void(const std::optional<std::string>&)>>
++        waiters;
++  };
++  using MetadataFetchMap = std::map<std::string, MetadataFetch>;
++
++  // Issues the registry metadata GET for `source`, or joins the one already
++  // in flight for it in `fetch_map`. `callback` gets the raw response body,
++  // or nullopt if the request failed.
++  void FetchMetadataBody(
++      const AppSwapSource& source,
++      MetadataFetchMap* fetch_map,
++      base::OnceCallback<void(const std::optional<std::string>&)> callback);
++  void OnMetadataBody(MetadataFetchMap* fetch_map,
++                      std::string key,
++                      std::optional<std::string> body);
++
++  // `fetch_map` is which map to track the in-flight query in -- callers pick,
++  // so that a background update-availability check and a navigation asking
++  // the same question don't share one request. They resolve the same
++  // dist-tag, but the check runs on a timer with nobody waiting on it, and a
++  // navigation must not end up waiting for however long that one takes.
 +  void FetchMetadata(
 +      const AppSwapSource& source,
-+      std::map<std::string, std::unique_ptr<network::SimpleURLLoader>>*
-+          loader_map,
++      MetadataFetchMap* fetch_map,
 +      base::OnceCallback<void(std::string /*version*/,
 +                              std::string /*error*/)> callback);
 +  void DownloadTarball(const AppSwapSource& source,
@@ -1190,20 +1243,18 @@ index 0000000000000..48f4e9eec3485
 +  std::map<std::string, std::vector<base::OnceCallback<void(base::FilePath)>>>
 +      pending_;
 +
-+  // Active downloads keyed by "package@version", to keep the loader alive.
++  // Active tarball downloads keyed by "package@version", to keep the loader
++  // alive. One entry per key by construction, since `pending_` above is what
++  // serializes callers: nothing can start a second download for a key whose
++  // first one hasn't finished.
 +  std::map<std::string, std::unique_ptr<network::SimpleURLLoader>> loaders_;
 +
-+  // Active CheckForNewerVersion() requests, kept separate from `loaders_`
-+  // for the same reason `metadata_query_loaders_` is kept separate below.
-+  std::map<std::string, std::unique_ptr<network::SimpleURLLoader>>
-+      loaders_for_checks_;
-+
-+  // Active FetchPackageMetadata() requests, kept separate from `loaders_` --
-+  // sharing one map would let an unrelated in-flight request silently
-+  // cancel (or be cancelled by) a real GetOrDownload() for the same
-+  // "package@version" key.
-+  std::map<std::string, std::unique_ptr<network::SimpleURLLoader>>
-+      metadata_query_loaders_;
++  // In-flight registry queries, one map per caller -- see FetchMetadata()
++  // for why they aren't shared. Within a map, concurrent callers for the
++  // same key share one query rather than cancelling each other.
++  MetadataFetchMap metadata_fetches_;        // GetOrDownload() resolution.
++  MetadataFetchMap check_fetches_;           // CheckForNewerVersion().
++  MetadataFetchMap package_metadata_fetches_;  // FetchPackageMetadata().
 +
 +  // In-memory cache of resolved directories keyed by "package@version".
 +  std::map<std::string, base::FilePath> cache_;
