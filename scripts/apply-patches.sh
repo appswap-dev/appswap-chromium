@@ -13,6 +13,51 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# The patches carry exact context from one specific Chromium revision -- the
+# one pinned in chromium_version.txt. Against any other revision most hunks
+# still land, but upstream churn silently breaks the rest, and src/ is a
+# shallow (--no-history) checkout, so `git apply --3way` can't fall back to a
+# real merge: it lacks the pre-image blobs and degrades to strict context
+# matching. The result is a pile of per-hunk failures whose root cause (a
+# tree that was never synced to the pinned rev) is nowhere in the output. So
+# check the revision up front, before the reset below touches anything.
+# Set APPSWAP_SKIP_VERSION_CHECK=1 to apply anyway, e.g. when deliberately
+# rebasing the patch set onto a new revision with update-patches.sh.
+VERSION_FILE="$ROOT/chromium_version.txt"
+if [[ "${APPSWAP_SKIP_VERSION_CHECK:-0}" != "1" && -f "$VERSION_FILE" ]]; then
+  pinned_line="$(awk 'NF { print; exit }' "$VERSION_FILE")"
+  pinned_rev="${pinned_line%%[[:space:]]*}"
+  pinned_desc=""
+  if [[ "$pinned_line" == *"#"* ]]; then
+    pinned_desc="$(printf '%s' "${pinned_line#*#}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  fi
+  actual_rev="$(git -C "$ROOT/src" rev-parse HEAD 2>/dev/null || true)"
+  if [[ -z "$actual_rev" ]]; then
+    echo "error: $ROOT/src is not a git checkout -- run ./scripts/sync-chromium.sh first." >&2
+    exit 1
+  fi
+
+  if [[ -n "$pinned_rev" && "$actual_rev" != "$pinned_rev" ]]; then
+    actual_desc=""
+    if [[ -f "$ROOT/src/chrome/VERSION" ]]; then
+      actual_desc="$(awk -F= '{ v[$1] = $2 } END { print v["MAJOR"] "." v["MINOR"] "." v["BUILD"] "." v["PATCH"] }' "$ROOT/src/chrome/VERSION")"
+    fi
+    {
+      echo "error: src/ is not at the Chromium revision these patches were made against."
+      echo
+      echo "  pinned (chromium_version.txt): $pinned_rev${pinned_desc:+  # $pinned_desc}"
+      echo "  actual (src/ HEAD):            $actual_rev${actual_desc:+  # $actual_desc}"
+      echo
+      echo "Sync src/ to the pinned revision first:"
+      echo "  ./scripts/sync-chromium.sh"
+      echo
+      echo "To apply against the current tree anyway (expect context failures):"
+      echo "  APPSWAP_SKIP_VERSION_CHECK=1 ./scripts/apply-patches.sh"
+    } >&2
+    exit 1
+  fi
+fi
+
 echo "Resetting src/ to a clean checkout..."
 git -C "$ROOT/src" reset --hard HEAD
 git -C "$ROOT/src" clean -fd
