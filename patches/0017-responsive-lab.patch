@@ -3219,10 +3219,10 @@ index 0000000000000..89b505ea60255
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CANVAS_VIEW_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc
 new file mode 100644
-index 0000000000000..a62becabf4c7d
+index 0000000000000..ea2cf9e538452
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc
-@@ -0,0 +1,389 @@
+@@ -0,0 +1,396 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3240,6 +3240,7 @@ index 0000000000000..a62becabf4c7d
 +#include "base/strings/strcat.h"
 +#include "base/strings/string_number_conversions.h"
 +#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h"
 +#include "chrome/browser/profiles/profile.h"
 +#include "components/zoom/zoom_controller.h"
 +#include "content/public/browser/navigation_controller.h"
@@ -3421,6 +3422,12 @@ index 0000000000000..a62becabf4c7d
 +  // handed is the one this cell already holds, which is exactly the case
 +  // for a cell created while the canvas is at 100%.
 +  ApplyScale();
++
++  // What lets anything handed only this cell's WebContents find its way back
++  // to the lab -- the context menu's Inspect command, which routes into the
++  // lab's own DevTools window rather than opening a second one per cell.
++  AppSwapResponsiveLabCellTag::CreateForWebContents(
++      web_view_->web_contents(), session_, preset_.id);
 +
 +  // Last, and only once the WebContents actually exists: this is what
 +  // attaches the viewport's protocol client and applies its emulation.

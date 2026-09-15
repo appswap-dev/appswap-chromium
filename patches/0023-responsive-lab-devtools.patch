@@ -1,3 +1,97 @@
+diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.cc b/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.cc
+new file mode 100644
+index 0000000000000..8760ca9ff2d51
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.cc
+@@ -0,0 +1,25 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h"
++
++#include <utility>
++
++#include "chrome/browser/app_swap/app_swap_responsive_lab_session.h"
++
++AppSwapResponsiveLabCellTag::AppSwapResponsiveLabCellTag(
++    content::WebContents* web_contents,
++    base::WeakPtr<AppSwapResponsiveLabSession> session,
++    std::string viewport_id)
++    : content::WebContentsUserData<AppSwapResponsiveLabCellTag>(*web_contents),
++      session_(std::move(session)),
++      viewport_id_(std::move(viewport_id)) {}
++
++AppSwapResponsiveLabCellTag::~AppSwapResponsiveLabCellTag() = default;
++
++AppSwapResponsiveLabSession* AppSwapResponsiveLabCellTag::session() {
++  return session_.get();
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapResponsiveLabCellTag);
+diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h b/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h
+new file mode 100644
+index 0000000000000..cd39cc5083075
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h
+@@ -0,0 +1,57 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CELL_TAG_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CELL_TAG_H_
++
++#include <string>
++
++#include "base/memory/weak_ptr.h"
++#include "content/public/browser/web_contents_user_data.h"
++
++class AppSwapResponsiveLabSession;
++
++// Marks a WebContents as one Responsive Lab cell's page, and points back at
++// the lab that owns it.
++//
++// Exists because the pointer only runs the other way otherwise. A lab
++// session is a WebContentsUserData on the *host tab*, and it holds
++// non-owning pointers to each cell's WebContents; a cell's WebContents is
++// created by its views::WebView and is not nested inside the host tab, so
++// from one there is no way back to the other. Anything handed a cell's
++// WebContents and nothing else -- the context menu's Inspect command is the
++// case this was added for -- needs this to tell that it is looking at a lab
++// cell at all.
++//
++// The session pointer is weak because a cell outlives its lab in a tab
++// close: both are WebContentsUserData on different WebContents, and nothing
++// orders their destruction.
++class AppSwapResponsiveLabCellTag
++    : public content::WebContentsUserData<AppSwapResponsiveLabCellTag> {
++ public:
++  ~AppSwapResponsiveLabCellTag() override;
++
++  AppSwapResponsiveLabCellTag(const AppSwapResponsiveLabCellTag&) = delete;
++  AppSwapResponsiveLabCellTag& operator=(const AppSwapResponsiveLabCellTag&) =
++      delete;
++
++  // Null once the lab this cell belonged to is gone.
++  AppSwapResponsiveLabSession* session();
++
++  const std::string& viewport_id() const { return viewport_id_; }
++
++ private:
++  friend class content::WebContentsUserData<AppSwapResponsiveLabCellTag>;
++  AppSwapResponsiveLabCellTag(
++      content::WebContents* web_contents,
++      base::WeakPtr<AppSwapResponsiveLabSession> session,
++      std::string viewport_id);
++
++  const base::WeakPtr<AppSwapResponsiveLabSession> session_;
++  const std::string viewport_id_;
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CELL_TAG_H_
 diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
 index 17226f93faf72..77ae75bef10a6 100644
 --- a/chrome/browser/devtools/devtools_ui_bindings.cc
@@ -183,6 +277,77 @@ index e44b0c31ee66d..694ecb18b6f68 100644
   private:
    friend class DevToolsWindowTesting;
    friend class DevToolsWindowCreationObserver;
+diff --git a/chrome/browser/renderer_context_menu/BUILD.gn b/chrome/browser/renderer_context_menu/BUILD.gn
+index b2e9ee838ff8c..a6e62f72a0ab3 100644
+--- a/chrome/browser/renderer_context_menu/BUILD.gn
++++ b/chrome/browser/renderer_context_menu/BUILD.gn
+@@ -116,6 +116,7 @@ source_set("impl") {
+       "//chrome/browser:browser_process",
+       "//chrome/browser:browser_public_dependencies",
+       "//chrome/browser/accessibility",
++      "//chrome/browser/app_swap",
+       "//chrome/browser/apps/app_service",
+       "//chrome/browser/apps/platform_apps",
+       "//chrome/browser/autocomplete",
+diff --git a/chrome/browser/renderer_context_menu/render_view_context_menu.cc b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+index c425c7abbf785..7a3879a52a864 100644
+--- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
++++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+@@ -53,6 +53,8 @@
+ #include "chrome/browser/context_hub/memory_bank/memory_bank.h"
+ #include "chrome/browser/context_hub/memory_bank/memory_bank_entry.h"
+ #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
++#include "chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h"
++#include "chrome/browser/app_swap/app_swap_responsive_lab_session.h"
+ #include "chrome/browser/devtools/devtools_window.h"
+ #include "chrome/browser/devtools/features.h"
+ #include "chrome/browser/dictation/features.h"
+@@ -235,6 +237,7 @@
+ #include "content/public/browser/render_widget_host_view.h"
+ #include "content/public/browser/spare_render_process_host_manager.h"
+ #include "content/public/browser/ssl_status.h"
++#include "content/public/browser/devtools_agent_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/buildflags.h"
+ #include "content/public/common/referrer.h"
+@@ -5032,6 +5035,37 @@ void RenderViewContextMenu::ExecInspectElement() {
+   if (!render_frame_host) {
+     return;
+   }
++
++  // AppSwap: a Responsive Lab cell is inspected in the lab's own DevTools
++  // window -- one for the whole grid, attached to every cell and retargeting
++  // as focus moves -- rather than in a second window of its own.
++  //
++  // Not merely to avoid a duplicate. A per-cell window breaks the cell it
++  // inspects: the cell is that frontend's primary page target, so its
++  // DeviceModeModel binds to the cell and, with device mode off, clears the
++  // device metrics override the lab put there. EmulationHandler answers that
++  // by disabling emulation on the widget and calling ClearDeviceEmulationSize
++  // -- resizing the cell's RenderWidgetHostView out from under the grid's
++  // NativeViewHost, which is exactly the fight
++  // AppSwapResponsiveLabViewportClient's dontSetVisibleSize comment is about.
++  content::WebContents* const contents =
++      content::WebContents::FromRenderFrameHost(render_frame_host);
++  AppSwapResponsiveLabCellTag* const cell =
++      contents ? AppSwapResponsiveLabCellTag::FromWebContents(contents)
++               : nullptr;
++  AppSwapResponsiveLabSession* const lab = cell ? cell->session() : nullptr;
++  if (lab) {
++    // Before the window opens, matching what DevToolsWindow::InspectElement
++    // does: the agent host holds the request until a session attaches, so
++    // the node is revealed whether the lab's window is already up or is
++    // being opened by the call below.
++    content::DevToolsAgentHost::GetOrCreateFor(contents)->InspectElement(
++        render_frame_host, params_.x, params_.y);
++    lab->SetFocusedViewport(cell->viewport_id());
++    lab->RequestDevTools();
++    return;
++  }
++
+   DevToolsWindow::InspectElement(render_frame_host, params_.x, params_.y);
+ }
+ 
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.cc
 new file mode 100644
 index 0000000000000..ad715b50daef3

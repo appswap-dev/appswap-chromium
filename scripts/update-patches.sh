@@ -684,12 +684,17 @@ gen_devtools 0022-devtools-frontend-lab-targets.patch \
 # files -- the session's focused viewport, the cell's focus reporting, the
 # panel's DevTools button -- is already covered by 0017 above, and
 # chrome/browser/ui/BUILD.gn by 0009, so re-running those picks it up.
-# Only genuinely new files, and //chrome/browser/devtools, are here.
+# Only genuinely new files, //chrome/browser/devtools, and the context
+# menu's Inspect command, are here.
 gen 0023-responsive-lab-devtools.patch \
+  chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.cc \
+  chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h \
   chrome/browser/devtools/devtools_ui_bindings.cc \
   chrome/browser/devtools/devtools_ui_bindings.h \
   chrome/browser/devtools/devtools_window.cc \
   chrome/browser/devtools/devtools_window.h \
+  chrome/browser/renderer_context_menu/BUILD.gn \
+  chrome/browser/renderer_context_menu/render_view_context_menu.cc \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.cc \
   chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.h
 
