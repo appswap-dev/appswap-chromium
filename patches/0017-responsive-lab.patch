@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_inspector.cc b/chrome/browser/app_swap/app_swap_responsive_lab_inspector.cc
 new file mode 100644
-index 0000000000000..6f105fe5f9186
+index 0000000000000..64a7eb754a398
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_inspector.cc
-@@ -0,0 +1,647 @@
+@@ -0,0 +1,658 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -391,6 +391,17 @@ index 0000000000000..6f105fe5f9186
 +
 +void AppSwapResponsiveLabInspector::OnNodePicked(const std::string& viewport_id,
 +                                                 int backend_node_id) {
++  // Only when this panel's own picker armed the overlay. Overlay.
++  // inspectNodeRequested goes to every session attached to the cell, so a
++  // DevTools window inspecting an element in that cell raises it too --
++  // and without this, that would hijack the pick: the panel would fan the
++  // selection out across all the viewports and start driving the same
++  // renderer's Overlay and CSS domains that DevTools is already driving,
++  // for a selection the user never made here.
++  if (!picking_) {
++    return;
++  }
++
 +  AppSwapResponsiveLabViewportClient* client = session_->ClientFor(viewport_id);
 +  if (!client) {
 +    return;
