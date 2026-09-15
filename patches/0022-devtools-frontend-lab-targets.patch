@@ -259,3 +259,24 @@ index d99d9c90e1..719d729e8a 100644
  export class ReloadActionDelegate implements UI.ActionRegistration.ActionDelegate {
    handleAction(_context: UI.Context.Context, actionId: string): boolean {
      switch (actionId) {
+diff --git a/front_end/models/emulation/DeviceModeModel.ts b/front_end/models/emulation/DeviceModeModel.ts
+index 17877d2726..84586452e4 100644
+--- a/front_end/models/emulation/DeviceModeModel.ts
++++ b/front_end/models/emulation/DeviceModeModel.ts
+@@ -485,6 +485,16 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
+   }
+ 
+   modelAdded(emulationModel: SDK.EmulationModel.EmulationModel): void {
++    // AppSwap: a Responsive Lab frontend is rooted at the browser target, so
++    // every cell fails the primaryPageTarget() test below and would take the
++    // else branch -- turning touch emulation off on every cell in the grid,
++    // undoing what AppSwapResponsiveLabViewportClient just set up for the
++    // mobile presets. The lab owns its own emulation end to end (it has to:
++    // its overrides carry dontSetVisibleSize, which DeviceModeModel only
++    // sends in device mode), so this model has nothing to contribute here.
++    if (this.#targetManager.browserTarget()) {
++      return;
++    }
+     if (emulationModel.target() === this.#targetManager.primaryPageTarget() &&
+         emulationModel.supportsDeviceEmulation()) {
+       this.#emulationModel = emulationModel;

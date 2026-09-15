@@ -677,7 +677,8 @@ gen_devtools 0022-devtools-frontend-lab-targets.patch \
   front_end/core/host/InspectorFrontendHostAPI.ts \
   front_end/core/host/InspectorFrontendHostStub.ts \
   front_end/devtools_compatibility.js \
-  front_end/entrypoints/inspector_main/InspectorMain.ts
+  front_end/entrypoints/inspector_main/InspectorMain.ts \
+  front_end/models/emulation/DeviceModeModel.ts
 
 # The browser half. Everything this feature adds to Responsive Lab's own
 # files -- the session's focused viewport, the cell's focus reporting, the
