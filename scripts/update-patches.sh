@@ -665,6 +665,39 @@ gen 0021-time-travel.patch \
   chrome/browser/ui/views/app_swap/app_swap_time_travel_button.cc \
   chrome/browser/ui/views/app_swap/app_swap_time_travel_button.h
 
+# One real DevTools frontend across Responsive Lab's cells. Split in two
+# the way every devtools-frontend change here has to be, since that tree is
+# a separate git checkout (see gen_devtools above).
+#
+# The frontend half teaches the devtools_app entrypoint to root itself at a
+# browser target: stock, only the worker entrypoint knows how, and this one
+# would otherwise invent a page target and then wait forever for a primary
+# page that a lab frontend never has.
+gen_devtools 0022-devtools-frontend-lab-targets.patch \
+  front_end/core/host/InspectorFrontendHostAPI.ts \
+  front_end/core/host/InspectorFrontendHostStub.ts \
+  front_end/devtools_compatibility.js \
+  front_end/entrypoints/inspector_main/InspectorMain.ts \
+  front_end/models/emulation/DeviceModeModel.ts
+
+# The browser half. Everything this feature adds to Responsive Lab's own
+# files -- the session's focused viewport, the cell's focus reporting, the
+# panel's DevTools button -- is already covered by 0017 above, and
+# chrome/browser/ui/BUILD.gn by 0009, so re-running those picks it up.
+# Only genuinely new files, //chrome/browser/devtools, and the context
+# menu's Inspect command, are here.
+gen 0023-responsive-lab-devtools.patch \
+  chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.cc \
+  chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h \
+  chrome/browser/devtools/devtools_ui_bindings.cc \
+  chrome/browser/devtools/devtools_ui_bindings.h \
+  chrome/browser/devtools/devtools_window.cc \
+  chrome/browser/devtools/devtools_window.h \
+  chrome/browser/renderer_context_menu/BUILD.gn \
+  chrome/browser/renderer_context_menu/render_view_context_menu.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.cc \
+  chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.h
+
 # Whether `f` (a path relative to src/) is one of the images tracked under
 # resources/ instead of as a patch -- sync_binary_resources() above already
 # copied it there, so it's covered even though it won't appear in any

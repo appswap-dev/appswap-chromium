@@ -1,0 +1,282 @@
+diff --git a/front_end/core/host/InspectorFrontendHostAPI.ts b/front_end/core/host/InspectorFrontendHostAPI.ts
+index 44b0a7fd7a..3f98d8eb79 100644
+--- a/front_end/core/host/InspectorFrontendHostAPI.ts
++++ b/front_end/core/host/InspectorFrontendHostAPI.ts
+@@ -12,6 +12,8 @@ import type * as Root from '../root/root.js';
+ export enum Events {
+   /* eslint-disable @typescript-eslint/naming-convention -- Accessed from web_tests */
+   AppendedToURL = 'appendedToURL',
++  AppSwapLabFocusedTargetChanged = 'appSwapLabFocusedTargetChanged',
++  AppSwapLabTargetsChanged = 'appSwapLabTargetsChanged',
+   CanceledSaveURL = 'canceledSaveURL',
+   ColorThemeChanged = 'colorThemeChanged',
+   ContextMenuCleared = 'contextMenuCleared',
+@@ -44,6 +46,8 @@ export enum Events {
+ 
+ export const EventDescriptors: ReadonlyArray<readonly[Events, readonly string[], boolean?]> = [
+   [Events.AppendedToURL, ['url']],
++  [Events.AppSwapLabFocusedTargetChanged, ['targetId']],
++  [Events.AppSwapLabTargetsChanged, ['targetIds']],
+   [Events.CanceledSaveURL, ['url']],
+   [Events.ColorThemeChanged, []],
+   [Events.ContextMenuCleared, []],
+@@ -229,6 +233,8 @@ export interface FunctionCallEvent {
+  **/
+ export interface EventTypes {
+   [Events.AppendedToURL]: Platform.DevToolsPath.RawPathString|Platform.DevToolsPath.UrlString;
++  [Events.AppSwapLabFocusedTargetChanged]: string;
++  [Events.AppSwapLabTargetsChanged]: string[];
+   [Events.CanceledSaveURL]: Platform.DevToolsPath.UrlString;
+   [Events.ColorThemeChanged]: void;
+   [Events.ContextMenuCleared]: void;
+@@ -258,6 +264,11 @@ export interface EventTypes {
+   [Events.ShowPanel]: string;
+ }
+ 
++export interface AppSwapLabState {
++  targetIds: string[];
++  focusedTargetId: string;
++}
++
+ export type DispatchHttpRequestRequest = {
+   service: string,
+   path: string,
+@@ -439,6 +450,14 @@ export interface InspectorFrontendHostAPI {
+ 
+   initialTargetId(): Promise<string|null>;
+ 
++  // AppSwap: the Responsive Lab target state pushed so far, for a caller
++  // that started listening too late to have seen it. The browser pushes it
++  // as soon as the frontend document loads, which is well before any module
++  // has had a chance to register for the events -- the same problem
++  // initialTargetId() solves with a promise, and solved the same way: the
++  // compatibility shim buffers it.
++  appSwapLabState(): AppSwapLabState;
++
+   doAidaConversation: (request: string, streamId: number, cb: (result: DoAidaConversationResult) => void) => void;
+   registerAidaClientEvent: (request: string, cb: (result: AidaClientResult) => void) => void;
+   aidaCodeComplete: (request: string, cb: (result: AidaCodeCompleteResult) => void) => void;
+diff --git a/front_end/core/host/InspectorFrontendHostStub.ts b/front_end/core/host/InspectorFrontendHostStub.ts
+index 601c181022..0bee7a5c2f 100644
+--- a/front_end/core/host/InspectorFrontendHostStub.ts
++++ b/front_end/core/host/InspectorFrontendHostStub.ts
+@@ -10,6 +10,7 @@ import type * as Root from '../root/root.js';
+ import {
+   type AidaClientResult,
+   type AidaCodeCompleteResult,
++  type AppSwapLabState,
+   type CanShowSurveyResult,
+   type ChangeEvent,
+   type ClickEvent,
+@@ -508,6 +509,10 @@ export class InspectorFrontendHostStub implements InspectorFrontendHostAPI {
+     return null;
+   }
+ 
++  appSwapLabState(): AppSwapLabState {
++    return {targetIds: [], focusedTargetId: ''};
++  }
++
+   doAidaConversation(_request: string, _streamId: number, callback: (result: DoAidaConversationResult) => void): void {
+     callback({
+       error: 'Not implemented',
+diff --git a/front_end/devtools_compatibility.js b/front_end/devtools_compatibility.js
+index d538759c60..18252f3eb7 100644
+--- a/front_end/devtools_compatibility.js
++++ b/front_end/devtools_compatibility.js
+@@ -57,6 +57,15 @@
+      */
+     _addExtensionCallback = null;
+ 
++    /**
++     * AppSwap: the last Responsive Lab target state pushed by the browser.
++     * Buffered here, rather than only dispatched, because the browser pushes
++     * it as the frontend document loads -- long before any module has
++     * registered for the events.
++     * @type {{targetIds: string[], focusedTargetId: string}}
++     */
++    _appSwapLabState = {targetIds: [], focusedTargetId: ''};
++
+     /**
+      * @type {Promise<string>}
+      */
+@@ -155,6 +164,28 @@
+       this._dispatchOnInspectorFrontendAPI('appendedToURL', [url]);
+     }
+ 
++    /**
++     * AppSwap: the page targets of every Responsive Lab cell this frontend
++     * should be attached to. Pushed whole rather than as a delta -- the list
++     * is short and only changes when a viewport is added or removed.
++     * @param {string[]} targetIds
++     */
++    appSwapLabTargetsChanged(targetIds) {
++      this._appSwapLabState.targetIds = targetIds;
++      this._dispatchOnInspectorFrontendAPI('appSwapLabTargetsChanged', [targetIds]);
++    }
++
++    /**
++     * AppSwap: the Responsive Lab cell the panels should follow. Separate from
++     * appSwapLabTargetsChanged because this changes on every click while the
++     * target list rarely changes at all.
++     * @param {string} targetId
++     */
++    appSwapLabFocusedTargetChanged(targetId) {
++      this._appSwapLabState.focusedTargetId = targetId;
++      this._dispatchOnInspectorFrontendAPI('appSwapLabFocusedTargetChanged', [targetId]);
++    }
++
+     /**
+      * @param {string} url
+      */
+@@ -1948,6 +1979,13 @@
+       return DevToolsAPI._initialTargetIdPromise;
+     }
+ 
++    /**
++     * @returns {{targetIds: string[], focusedTargetId: string}}
++     */
++    appSwapLabState() {
++      return DevToolsAPI._appSwapLabState;
++    }
++
+     /**
+      * @param request
+      * @param streamId
+diff --git a/front_end/entrypoints/inspector_main/InspectorMain.ts b/front_end/entrypoints/inspector_main/InspectorMain.ts
+index d99d9c90e1..719d729e8a 100644
+--- a/front_end/entrypoints/inspector_main/InspectorMain.ts
++++ b/front_end/entrypoints/inspector_main/InspectorMain.ts
+@@ -51,6 +51,21 @@ export class InspectorMainImpl implements Common.Runnable.Runnable {
+   async run(): Promise<void> {
+     let firstCall = true;
+     await SDK.Connections.initMainConnection(async () => {
++      // AppSwap: a Responsive Lab frontend is rooted at the browser target
++      // rather than at one page, because the lab shows N cells and each cell
++      // is its own WebContents and therefore its own page target. There is no
++      // single primary page to create a root target for, so bail out before
++      // the code below invents one -- maybeAttachInitialTarget() has already
++      // created the browser target and attached the first cell under it, and
++      // AppSwapLabTargetSwitcher brings in the rest.
++      //
++      // Only ever true for a Responsive Lab window: every other frontend that
++      // passes browserConnection=true (the dedicated-worker window) loads the
++      // worker_app entrypoint, not this one.
++      if (await SDK.TargetManager.TargetManager.instance().maybeAttachInitialTarget()) {
++        new AppSwapLabTargetSwitcher();
++        return;
++      }
+       const type = Root.Runtime.Runtime.queryParam('v8only') ?
+           SDK.Target.Type.NODE :
+           (Root.Runtime.Runtime.queryParam('targetType') === 'tab' || Root.Runtime.Runtime.isTraceApp() ?
+@@ -115,6 +130,90 @@ export class InspectorMainImpl implements Common.Runnable.Runnable {
+ 
+ Common.Runnable.registerEarlyInitializationRunnable(() => new InspectorMainImpl());
+ 
++/**
++ * AppSwap: keeps this frontend attached to every Responsive Lab cell, and
++ * scoped to whichever cell the user last focused.
++ *
++ * Retargeting is TargetManager's own scope mechanism, reached through the
++ * `SDK.Target.Target` UI context flavor that MainImpl listens for: setting the
++ * flavor calls setScopeTarget(), which replays targetRemoved/targetAdded
++ * across every scoped observer so the panels rebuild against the new cell.
++ * Panels need no changes; they already handle targets coming and going.
++ *
++ * Attaching is Target.autoAttachRelated on the browser target, once per cell.
++ * It accumulates (TargetHandler keeps a map of related auto-attachers), so
++ * repeating it for a cell that is already attached is harmless -- which is
++ * what lets this re-send the whole list rather than track a delta.
++ */
++class AppSwapLabTargetSwitcher implements SDK.TargetManager.Observer {
++  readonly #attachRequested = new Set<string>();
++  #pendingFocusId: string|null = null;
++
++  constructor() {
++    const host = Host.InspectorFrontendHost.InspectorFrontendHostInstance;
++    host.events.addEventListener(
++        Host.InspectorFrontendHostAPI.Events.AppSwapLabTargetsChanged, ({data}) => this.#attachAll(data));
++    host.events.addEventListener(
++        Host.InspectorFrontendHostAPI.Events.AppSwapLabFocusedTargetChanged, ({data}) => this.#focus(data));
++    SDK.TargetManager.TargetManager.instance().observeTargets(this);
++
++    // Whatever the browser pushed before this existed. It pushes as soon as
++    // the frontend document loads, which is several async hops before an
++    // early-initialization runnable gets to run, so without this the first
++    // window would attach nothing and scope to nothing.
++    const state = host.appSwapLabState();
++    this.#attachAll(state.targetIds);
++    if (state.focusedTargetId) {
++      this.#focus(state.focusedTargetId);
++    }
++  }
++
++  targetAdded(_target: SDK.Target.Target): void {
++    // A focus push can name a cell that has not finished attaching yet:
++    // autoAttachRelated round-trips through the renderer, so the browser
++    // knows the target id well before the frontend has the target. Re-apply
++    // the pending focus until it lands.
++    if (this.#pendingFocusId) {
++      this.#focus(this.#pendingFocusId);
++    }
++  }
++
++  targetRemoved(_target: SDK.Target.Target): void {
++  }
++
++  #attachAll(targetIds: string[]): void {
++    const browserTarget = SDK.TargetManager.TargetManager.instance().browserTarget();
++    if (!browserTarget) {
++      return;
++    }
++    for (const targetId of targetIds) {
++      if (this.#attachRequested.has(targetId)) {
++        continue;
++      }
++      this.#attachRequested.add(targetId);
++      void browserTarget.targetAgent().invoke_autoAttachRelated(
++          {targetId: targetId as Protocol.Target.TargetID, waitForDebuggerOnStart: false});
++    }
++    // Forget cells that are gone, so a viewport re-added under the same id is
++    // attached again. Their targets detach on the browser side on their own.
++    for (const targetId of this.#attachRequested) {
++      if (!targetIds.includes(targetId)) {
++        this.#attachRequested.delete(targetId);
++      }
++    }
++  }
++
++  #focus(targetId: string): void {
++    const target = SDK.TargetManager.TargetManager.instance().targetById(targetId);
++    if (!target) {
++      this.#pendingFocusId = targetId;
++      return;
++    }
++    this.#pendingFocusId = null;
++    UI.Context.Context.instance().setFlavor(SDK.Target.Target, target);
++  }
++}
++
+ export class ReloadActionDelegate implements UI.ActionRegistration.ActionDelegate {
+   handleAction(_context: UI.Context.Context, actionId: string): boolean {
+     switch (actionId) {
+diff --git a/front_end/models/emulation/DeviceModeModel.ts b/front_end/models/emulation/DeviceModeModel.ts
+index 17877d2726..84586452e4 100644
+--- a/front_end/models/emulation/DeviceModeModel.ts
++++ b/front_end/models/emulation/DeviceModeModel.ts
+@@ -485,6 +485,16 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
+   }
+ 
+   modelAdded(emulationModel: SDK.EmulationModel.EmulationModel): void {
++    // AppSwap: a Responsive Lab frontend is rooted at the browser target, so
++    // every cell fails the primaryPageTarget() test below and would take the
++    // else branch -- turning touch emulation off on every cell in the grid,
++    // undoing what AppSwapResponsiveLabViewportClient just set up for the
++    // mobile presets. The lab owns its own emulation end to end (it has to:
++    // its overrides carry dontSetVisibleSize, which DeviceModeModel only
++    // sends in device mode), so this model has nothing to contribute here.
++    if (this.#targetManager.browserTarget()) {
++      return;
++    }
+     if (emulationModel.target() === this.#targetManager.primaryPageTarget() &&
+         emulationModel.supportsDeviceEmulation()) {
+       this.#emulationModel = emulationModel;

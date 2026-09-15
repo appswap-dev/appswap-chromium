@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 4a223bd530cdb..0436c44c0cae3 100644
+index 4a223bd530cdb..be20f12fcce01 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
 @@ -810,6 +810,9 @@ static_library("ui") {
@@ -12,7 +12,7 @@ index 4a223bd530cdb..0436c44c0cae3 100644
      "//chrome/browser/ui/views/eye_dropper",
      "//chrome/browser/ui/views/file_system_access",
      "//chrome/browser/ui/views/file_system_access:impl",
-@@ -2173,6 +2176,26 @@ static_library("ui") {
+@@ -2173,6 +2176,34 @@ static_library("ui") {
  
    if (is_win || is_mac || is_linux || is_chromeos) {
      sources += [
@@ -36,6 +36,14 @@ index 4a223bd530cdb..0436c44c0cae3 100644
 +      "views/app_swap/app_swap_time_travel_button.h",
 +      "views/app_swap/app_swap_responsive_lab_button.cc",
 +      "views/app_swap/app_swap_responsive_lab_button.h",
++
++      # AppSwapResponsiveLabDevToolsHost is here rather than in
++      # //chrome/browser/ui/views/app_swap for a different reason than the
++      # buttons above: it opens a DevToolsWindow, and //chrome/browser/devtools
++      # is part of this target, so depending on it from that source_set would
++      # be circular.
++      "views/app_swap/app_swap_responsive_lab_devtools_host.cc",
++      "views/app_swap/app_swap_responsive_lab_devtools_host.h",
        "views/profiles/incognito_menu_view.cc",
        "views/profiles/incognito_menu_view.h",
        "views/profiles/isolated_mode_menu_view.cc",

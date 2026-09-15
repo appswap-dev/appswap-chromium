@@ -1,0 +1,585 @@
+diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.cc b/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.cc
+new file mode 100644
+index 0000000000000..8760ca9ff2d51
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.cc
+@@ -0,0 +1,25 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h"
++
++#include <utility>
++
++#include "chrome/browser/app_swap/app_swap_responsive_lab_session.h"
++
++AppSwapResponsiveLabCellTag::AppSwapResponsiveLabCellTag(
++    content::WebContents* web_contents,
++    base::WeakPtr<AppSwapResponsiveLabSession> session,
++    std::string viewport_id)
++    : content::WebContentsUserData<AppSwapResponsiveLabCellTag>(*web_contents),
++      session_(std::move(session)),
++      viewport_id_(std::move(viewport_id)) {}
++
++AppSwapResponsiveLabCellTag::~AppSwapResponsiveLabCellTag() = default;
++
++AppSwapResponsiveLabSession* AppSwapResponsiveLabCellTag::session() {
++  return session_.get();
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapResponsiveLabCellTag);
+diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h b/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h
+new file mode 100644
+index 0000000000000..cd39cc5083075
+--- /dev/null
++++ b/chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h
+@@ -0,0 +1,57 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CELL_TAG_H_
++#define CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CELL_TAG_H_
++
++#include <string>
++
++#include "base/memory/weak_ptr.h"
++#include "content/public/browser/web_contents_user_data.h"
++
++class AppSwapResponsiveLabSession;
++
++// Marks a WebContents as one Responsive Lab cell's page, and points back at
++// the lab that owns it.
++//
++// Exists because the pointer only runs the other way otherwise. A lab
++// session is a WebContentsUserData on the *host tab*, and it holds
++// non-owning pointers to each cell's WebContents; a cell's WebContents is
++// created by its views::WebView and is not nested inside the host tab, so
++// from one there is no way back to the other. Anything handed a cell's
++// WebContents and nothing else -- the context menu's Inspect command is the
++// case this was added for -- needs this to tell that it is looking at a lab
++// cell at all.
++//
++// The session pointer is weak because a cell outlives its lab in a tab
++// close: both are WebContentsUserData on different WebContents, and nothing
++// orders their destruction.
++class AppSwapResponsiveLabCellTag
++    : public content::WebContentsUserData<AppSwapResponsiveLabCellTag> {
++ public:
++  ~AppSwapResponsiveLabCellTag() override;
++
++  AppSwapResponsiveLabCellTag(const AppSwapResponsiveLabCellTag&) = delete;
++  AppSwapResponsiveLabCellTag& operator=(const AppSwapResponsiveLabCellTag&) =
++      delete;
++
++  // Null once the lab this cell belonged to is gone.
++  AppSwapResponsiveLabSession* session();
++
++  const std::string& viewport_id() const { return viewport_id_; }
++
++ private:
++  friend class content::WebContentsUserData<AppSwapResponsiveLabCellTag>;
++  AppSwapResponsiveLabCellTag(
++      content::WebContents* web_contents,
++      base::WeakPtr<AppSwapResponsiveLabSession> session,
++      std::string viewport_id);
++
++  const base::WeakPtr<AppSwapResponsiveLabSession> session_;
++  const std::string viewport_id_;
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CELL_TAG_H_
+diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
+index 17226f93faf72..77ae75bef10a6 100644
+--- a/chrome/browser/devtools/devtools_ui_bindings.cc
++++ b/chrome/browser/devtools/devtools_ui_bindings.cc
+@@ -3134,6 +3134,33 @@ void DevToolsUIBindings::AttachViaBrowserTarget(
+   InnerAttach();
+ }
+ 
++void DevToolsUIBindings::SetAppSwapLabTargets(
++    std::vector<std::string> target_ids,
++    std::string focused_target_id) {
++  app_swap_lab_target_ids_ = std::move(target_ids);
++  app_swap_lab_focused_target_id_ = std::move(focused_target_id);
++  SendAppSwapLabTargets();
++}
++
++void DevToolsUIBindings::SendAppSwapLabTargets() {
++  if (!frontend_loaded_) {
++    return;
++  }
++  base::ListValue target_ids;
++  for (const std::string& target_id : app_swap_lab_target_ids_) {
++    target_ids.Append(target_id);
++  }
++  CallClientMethod("DevToolsAPI", "appSwapLabTargetsChanged",
++                   base::Value(std::move(target_ids)));
++  // An empty focus is the state a lab starts in, before anything has been
++  // clicked into. Sending it would ask the frontend to scope to a target
++  // that does not exist, so leave the frontend where it is instead.
++  if (!app_swap_lab_focused_target_id_.empty()) {
++    CallClientMethod("DevToolsAPI", "appSwapLabFocusedTargetChanged",
++                     base::Value(app_swap_lab_focused_target_id_));
++  }
++}
++
+ void DevToolsUIBindings::Detach() {
+   if (agent_host_.get()) {
+     agent_host_->DetachClient(this);
+@@ -3277,6 +3304,7 @@ void DevToolsUIBindings::FrontendLoaded() {
+     CallClientMethod("DevToolsAPI", "setInitialTargetId",
+                      base::Value(initial_target_id_));
+   }
++  SendAppSwapLabTargets();
+   AddDevToolsExtensionsToClient();
+ }
+ 
+diff --git a/chrome/browser/devtools/devtools_ui_bindings.h b/chrome/browser/devtools/devtools_ui_bindings.h
+index 0b6b6d3642745..84c0f3b3c7495 100644
+--- a/chrome/browser/devtools/devtools_ui_bindings.h
++++ b/chrome/browser/devtools/devtools_ui_bindings.h
+@@ -152,6 +152,23 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
+   void AttachTo(const scoped_refptr<content::DevToolsAgentHost>& agent_host);
+   void AttachViaBrowserTarget(
+       const scoped_refptr<content::DevToolsAgentHost>& agent_host);
++
++  // AppSwap: the page targets of every Responsive Lab cell this frontend
++  // should attach to, and the one its panels should currently follow.
++  //
++  // A lab frontend is attached via AttachViaBrowserTarget() like the
++  // dedicated-worker one, but unlike that one it is not about a single
++  // target: the lab shows N cells, each its own WebContents and so its own
++  // page target, and the frontend retargets between them as the user clicks
++  // from cell to cell. The browser target is what makes the others reachable
++  // at all -- it is the only session Target.autoAttachRelated is allowed on.
++  //
++  // Both values are remembered and re-sent from FrontendLoaded(), because
++  // the lab opens the window and pushes into it in the same turn, long
++  // before the frontend is up.
++  void SetAppSwapLabTargets(std::vector<std::string> target_ids,
++                            std::string focused_target_id);
++
+   void Detach();
+   bool IsAttachedTo(content::DevToolsAgentHost* agent_host);
+ 
+@@ -199,6 +216,11 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
+ 
+   void HandleMessageFromDevToolsFrontend(base::DictValue message);
+ 
++  // Pushes app_swap_lab_target_ids_ / app_swap_lab_focused_target_id_ to the
++  // frontend. Does nothing until the frontend has loaded; FrontendLoaded()
++  // calls this so nothing pushed before then is lost.
++  void SendAppSwapLabTargets();
++
+   // content::DevToolsAgentHostClient implementation.
+   void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
+                                base::span<const uint8_t> message) override;
+@@ -501,6 +523,8 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
+   using ExtensionsAPIs = std::map<std::string, std::string>;
+   ExtensionsAPIs extensions_api_;
+   std::string initial_target_id_;
++  std::vector<std::string> app_swap_lab_target_ids_;
++  std::string app_swap_lab_focused_target_id_;
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+   base::ScopedObservation<extensions::ExtensionRegistry,
+                           extensions::ExtensionRegistryObserver>
+diff --git a/chrome/browser/devtools/devtools_window.cc b/chrome/browser/devtools/devtools_window.cc
+index fcdf9aaf1c135..c615a77c1acfb 100644
+--- a/chrome/browser/devtools/devtools_window.cc
++++ b/chrome/browser/devtools/devtools_window.cc
+@@ -680,6 +680,40 @@ void DevToolsWindow::OpenDevToolsWindowForWorker(
+   window->ScheduleShow(DevToolsToggleAction::Show());
+ }
+ 
++// static
++DevToolsWindow* DevToolsWindow::OpenDevToolsWindowForAppSwapLab(
++    Profile* profile,
++    const scoped_refptr<DevToolsAgentHost>& first_cell_agent) {
++  DevToolsWindow* window = FindDevToolsWindow(first_cell_agent.get());
++  if (!window) {
++    window = Create(profile, /*inspected_web_contents=*/nullptr,
++                    kFrontendDefault, std::string(), /*can_dock=*/false, "", "",
++                    first_cell_agent->IsAttached(),
++                    /* browser_connection */ true,
++                    DevToolsOpenedByAction::kUnknown);
++    if (!window) {
++      return nullptr;
++    }
++    window->bindings_->AttachViaBrowserTarget(first_cell_agent);
++  }
++  window->ScheduleShow(DevToolsToggleAction::Show());
++  return window;
++}
++
++void DevToolsWindow::SetAppSwapLabTargets(std::vector<std::string> target_ids,
++                                          std::string focused_target_id) {
++  bindings_->SetAppSwapLabTargets(std::move(target_ids),
++                                  std::move(focused_target_id));
++}
++
++void DevToolsWindow::ShowForAppSwapLab() {
++  ScheduleShow(DevToolsToggleAction::Show());
++}
++
++void DevToolsWindow::SetCloseCallback(base::OnceClosure callback) {
++  close_callback_ = std::move(callback);
++}
++
+ // static
+ void DevToolsWindow::OpenDevToolsWindow(
+     content::WebContents* inspected_web_contents,
+diff --git a/chrome/browser/devtools/devtools_window.h b/chrome/browser/devtools/devtools_window.h
+index e44b0c31ee66d..694ecb18b6f68 100644
+--- a/chrome/browser/devtools/devtools_window.h
++++ b/chrome/browser/devtools/devtools_window.h
+@@ -7,6 +7,7 @@
+ 
+ #include <memory>
+ #include <string>
++#include <vector>
+ 
+ #include "base/callback_list.h"
+ #include "base/memory/raw_ptr.h"
+@@ -322,6 +323,32 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
+   // Attaches this devtools window to the given browser.
+   void AttachToBrowser(BrowserWindowInterface* browser);
+ 
++  // AppSwap: opens an undocked DevTools window for a Responsive Lab, rooted
++  // at the browser target with `first_cell_agent` as its initial target.
++  // Returns the window, so the caller can keep pushing the rest of the lab's
++  // cells into it with SetAppSwapLabTargets().
++  //
++  // Undocked is not a preference: docking resolves through
++  // FindBrowserWithTab(inspected_web_contents), and a lab cell lives in a
++  // views::WebView on the lab canvas rather than in a tab, so there is no
++  // browser to dock to. Passing no inspected WebContents at all says so
++  // directly instead of relying on that lookup failing.
++  static DevToolsWindow* OpenDevToolsWindowForAppSwapLab(
++      Profile* profile,
++      const scoped_refptr<content::DevToolsAgentHost>& first_cell_agent);
++
++  // AppSwap: forwards to DevToolsUIBindings::SetAppSwapLabTargets().
++  void SetAppSwapLabTargets(std::vector<std::string> target_ids,
++                            std::string focused_target_id);
++
++  // AppSwap: raises this window, for a lab whose DevTools is already open
++  // and whose user pressed the button again.
++  void ShowForAppSwapLab();
++
++  // Runs when this window closes. The lab uses it to drop its pointer here;
++  // a DevTools window is closed by the user, not by whoever opened it.
++  void SetCloseCallback(base::OnceClosure callback);
++
+  private:
+   friend class DevToolsWindowTesting;
+   friend class DevToolsWindowCreationObserver;
+diff --git a/chrome/browser/renderer_context_menu/BUILD.gn b/chrome/browser/renderer_context_menu/BUILD.gn
+index b2e9ee838ff8c..a6e62f72a0ab3 100644
+--- a/chrome/browser/renderer_context_menu/BUILD.gn
++++ b/chrome/browser/renderer_context_menu/BUILD.gn
+@@ -116,6 +116,7 @@ source_set("impl") {
+       "//chrome/browser:browser_process",
+       "//chrome/browser:browser_public_dependencies",
+       "//chrome/browser/accessibility",
++      "//chrome/browser/app_swap",
+       "//chrome/browser/apps/app_service",
+       "//chrome/browser/apps/platform_apps",
+       "//chrome/browser/autocomplete",
+diff --git a/chrome/browser/renderer_context_menu/render_view_context_menu.cc b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+index c425c7abbf785..7a3879a52a864 100644
+--- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
++++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+@@ -53,6 +53,8 @@
+ #include "chrome/browser/context_hub/memory_bank/memory_bank.h"
+ #include "chrome/browser/context_hub/memory_bank/memory_bank_entry.h"
+ #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
++#include "chrome/browser/app_swap/app_swap_responsive_lab_cell_tag.h"
++#include "chrome/browser/app_swap/app_swap_responsive_lab_session.h"
+ #include "chrome/browser/devtools/devtools_window.h"
+ #include "chrome/browser/devtools/features.h"
+ #include "chrome/browser/dictation/features.h"
+@@ -235,6 +237,7 @@
+ #include "content/public/browser/render_widget_host_view.h"
+ #include "content/public/browser/spare_render_process_host_manager.h"
+ #include "content/public/browser/ssl_status.h"
++#include "content/public/browser/devtools_agent_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/buildflags.h"
+ #include "content/public/common/referrer.h"
+@@ -5032,6 +5035,37 @@ void RenderViewContextMenu::ExecInspectElement() {
+   if (!render_frame_host) {
+     return;
+   }
++
++  // AppSwap: a Responsive Lab cell is inspected in the lab's own DevTools
++  // window -- one for the whole grid, attached to every cell and retargeting
++  // as focus moves -- rather than in a second window of its own.
++  //
++  // Not merely to avoid a duplicate. A per-cell window breaks the cell it
++  // inspects: the cell is that frontend's primary page target, so its
++  // DeviceModeModel binds to the cell and, with device mode off, clears the
++  // device metrics override the lab put there. EmulationHandler answers that
++  // by disabling emulation on the widget and calling ClearDeviceEmulationSize
++  // -- resizing the cell's RenderWidgetHostView out from under the grid's
++  // NativeViewHost, which is exactly the fight
++  // AppSwapResponsiveLabViewportClient's dontSetVisibleSize comment is about.
++  content::WebContents* const contents =
++      content::WebContents::FromRenderFrameHost(render_frame_host);
++  AppSwapResponsiveLabCellTag* const cell =
++      contents ? AppSwapResponsiveLabCellTag::FromWebContents(contents)
++               : nullptr;
++  AppSwapResponsiveLabSession* const lab = cell ? cell->session() : nullptr;
++  if (lab) {
++    // Before the window opens, matching what DevToolsWindow::InspectElement
++    // does: the agent host holds the request until a session attaches, so
++    // the node is revealed whether the lab's window is already up or is
++    // being opened by the call below.
++    content::DevToolsAgentHost::GetOrCreateFor(contents)->InspectElement(
++        render_frame_host, params_.x, params_.y);
++    lab->SetFocusedViewport(cell->viewport_id());
++    lab->RequestDevTools();
++    return;
++  }
++
+   DevToolsWindow::InspectElement(render_frame_host, params_.x, params_.y);
+ }
+ 
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.cc
+new file mode 100644
+index 0000000000000..ad715b50daef3
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.cc
+@@ -0,0 +1,134 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.h"
++
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "chrome/browser/devtools/devtools_window.h"
++#include "chrome/browser/profiles/profile.h"
++#include "content/public/browser/devtools_agent_host.h"
++#include "content/public/browser/web_contents.h"
++
++AppSwapResponsiveLabDevToolsHost::AppSwapResponsiveLabDevToolsHost(
++    content::WebContents* web_contents)
++    : content::WebContentsUserData<AppSwapResponsiveLabDevToolsHost>(
++          *web_contents),
++      session_(AppSwapResponsiveLabSession::GetOrCreateForWebContents(
++          web_contents)) {
++  session_observation_.Observe(session_);
++}
++
++AppSwapResponsiveLabDevToolsHost::~AppSwapResponsiveLabDevToolsHost() = default;
++
++void AppSwapResponsiveLabDevToolsHost::OnResponsiveLabDevToolsRequested() {
++  if (!session_ || !session_->inspection_allowed()) {
++    return;
++  }
++  if (window_) {
++    // Already open on this lab. PushTargets() re-sends focus, which is what
++    // the user is usually after when they ask a second time, and raising it
++    // is what they asked for literally.
++    PushTargets();
++    window_->ShowForAppSwapLab();
++    return;
++  }
++
++  content::WebContents* contents = ContentsToOpenOn();
++  if (!contents) {
++    return;
++  }
++  // The page target rather than the tab target: a page target is its own
++  // outermost target, which is what SDK.Target.outermostTarget() -- and
++  // therefore the frontend's scope -- resolves to per cell. Going through
++  // the tab target would attach a second, useless target per cell and put a
++  // shared ancestor in the way.
++  scoped_refptr<content::DevToolsAgentHost> agent_host =
++      content::DevToolsAgentHost::GetOrCreateFor(contents);
++  if (!agent_host) {
++    return;
++  }
++
++  window_ = DevToolsWindow::OpenDevToolsWindowForAppSwapLab(
++      Profile::FromBrowserContext(GetWebContents().GetBrowserContext()),
++      agent_host);
++  if (!window_) {
++    return;
++  }
++  window_->SetCloseCallback(base::BindOnce(
++      [](base::WeakPtr<AppSwapResponsiveLabDevToolsHost> host) {
++        if (host) {
++          host->window_ = nullptr;
++        }
++      },
++      weak_factory_.GetWeakPtr()));
++  PushTargets();
++}
++
++void AppSwapResponsiveLabDevToolsHost::OnResponsiveLabViewportsChanged() {
++  PushTargets();
++}
++
++void AppSwapResponsiveLabDevToolsHost::
++    OnResponsiveLabViewportContentsChanged() {
++  PushTargets();
++}
++
++void AppSwapResponsiveLabDevToolsHost::OnResponsiveLabFocusedViewportChanged() {
++  PushTargets();
++}
++
++void AppSwapResponsiveLabDevToolsHost::OnResponsiveLabSessionDestroying() {
++  session_observation_.Reset();
++  session_ = nullptr;
++  // Deliberately leaves the window open: it belongs to the user now, and
++  // closing it out from under them on a tab close is worse than leaving an
++  // empty frontend they can dismiss themselves.
++  window_ = nullptr;
++}
++
++content::WebContents* AppSwapResponsiveLabDevToolsHost::ContentsToOpenOn() {
++  const AppSwapResponsiveLabSession::Viewport* focused =
++      session_->FindViewport(session_->focused_viewport_id());
++  if (focused && focused->contents) {
++    return focused->contents;
++  }
++  for (const AppSwapResponsiveLabSession::Viewport& viewport :
++       session_->viewports()) {
++    if (viewport.contents) {
++      return viewport.contents;
++    }
++  }
++  return nullptr;
++}
++
++void AppSwapResponsiveLabDevToolsHost::PushTargets() {
++  if (!window_ || !session_) {
++    return;
++  }
++  std::vector<std::string> target_ids;
++  std::string focused_target_id;
++  for (const AppSwapResponsiveLabSession::Viewport& viewport :
++       session_->viewports()) {
++    if (!viewport.contents) {
++      continue;
++    }
++    scoped_refptr<content::DevToolsAgentHost> agent_host =
++        content::DevToolsAgentHost::GetOrCreateFor(viewport.contents);
++    if (!agent_host) {
++      continue;
++    }
++    if (viewport.preset.id == session_->focused_viewport_id()) {
++      focused_target_id = agent_host->GetId();
++    }
++    target_ids.push_back(agent_host->GetId());
++  }
++  window_->SetAppSwapLabTargets(std::move(target_ids),
++                                std::move(focused_target_id));
++}
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapResponsiveLabDevToolsHost);
+diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.h b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.h
+new file mode 100644
+index 0000000000000..60211160d9736
+--- /dev/null
++++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.h
+@@ -0,0 +1,89 @@
++// Copyright 2026 The AppSwap Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_DEVTOOLS_HOST_H_
++#define CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_DEVTOOLS_HOST_H_
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
++#include "chrome/browser/app_swap/app_swap_responsive_lab_session.h"
++#include "content/public/browser/web_contents_user_data.h"
++
++class DevToolsWindow;
++
++// Keeps one real DevTools frontend pointed at one tab's Responsive Lab.
++//
++// The lab shows N cells, each its own WebContents and therefore its own
++// page target. The frontend is attached to the *browser* target instead of
++// to any one of them, which is what lets it see targets it does not own:
++// Target.autoAttachRelated is only allowed on a browser session, and it is
++// how each cell gets attached. Focusing a cell then retargets the panels
++// through TargetManager's scope mechanism, which every panel but Sources
++// already honours -- so Elements, Console and Network follow the focused
++// cell with no per-panel work.
++//
++// Lives in the Views layer rather than next to AppSwapResponsiveLabSession
++// for the same reason the enterprise-policy check does (see
++// AppSwapResponsiveLabSession::inspection_allowed()): opening a DevTools
++// window means //chrome/browser/devtools, which //chrome/browser/app_swap
++// must not depend on. The session signals what it wants and this listens,
++// which also lets the panel -- further still from //chrome/browser/ui --
++// ask for DevTools without reaching into Views itself.
++//
++// One per tab, like AppSwapResponsiveLabGridHolder, and for the same
++// reason: the window has to survive switching tabs away and back.
++class AppSwapResponsiveLabDevToolsHost
++    : public content::WebContentsUserData<AppSwapResponsiveLabDevToolsHost>,
++      public AppSwapResponsiveLabSession::Observer {
++ public:
++  ~AppSwapResponsiveLabDevToolsHost() override;
++
++  AppSwapResponsiveLabDevToolsHost(const AppSwapResponsiveLabDevToolsHost&) =
++      delete;
++  AppSwapResponsiveLabDevToolsHost& operator=(
++      const AppSwapResponsiveLabDevToolsHost&) = delete;
++
++  // AppSwapResponsiveLabSession::Observer:
++  void OnResponsiveLabDevToolsRequested() override;
++  void OnResponsiveLabViewportsChanged() override;
++  void OnResponsiveLabViewportContentsChanged() override;
++  void OnResponsiveLabFocusedViewportChanged() override;
++  void OnResponsiveLabSessionDestroying() override;
++
++ private:
++  friend class content::WebContentsUserData<AppSwapResponsiveLabDevToolsHost>;
++  explicit AppSwapResponsiveLabDevToolsHost(content::WebContents* web_contents);
++
++  // The cell the frontend should follow: the focused one, or -- before
++  // anything has been clicked into -- the first one that has a live cell.
++  // Null when the lab has no live cells at all, which is the state between
++  // toggling it on and the grid building itself.
++  content::WebContents* ContentsToOpenOn();
++
++  // Re-sends the whole cell list and the focused cell. Cheap enough to do
++  // on every change: the list is short, and the frontend drops the ones it
++  // has already attached.
++  void PushTargets();
++
++  // Cleared in OnResponsiveLabSessionDestroying(): the session is a
++  // separate WebContentsUserData on the same tab, and the order two of
++  // those are destroyed in is unspecified, so this can outlive it.
++  raw_ptr<AppSwapResponsiveLabSession> session_;
++
++  // Null until the user asks for DevTools, and again once they close the
++  // window -- SetCloseCallback() is what clears it. Not owned: a DevTools
++  // window owns itself and outlives nothing in particular.
++  raw_ptr<DevToolsWindow> window_ = nullptr;
++
++  base::ScopedObservation<AppSwapResponsiveLabSession,
++                          AppSwapResponsiveLabSession::Observer>
++      session_observation_{this};
++
++  base::WeakPtrFactory<AppSwapResponsiveLabDevToolsHost> weak_factory_{this};
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_DEVTOOLS_HOST_H_
