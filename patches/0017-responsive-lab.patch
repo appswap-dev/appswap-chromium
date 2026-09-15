@@ -835,10 +835,10 @@ index 0000000000000..0745c287bb5d5
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_INSPECTOR_H_
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_session.cc b/chrome/browser/app_swap/app_swap_responsive_lab_session.cc
 new file mode 100644
-index 0000000000000..25139822eead0
+index 0000000000000..07d458ec3c543
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_session.cc
-@@ -0,0 +1,273 @@
+@@ -0,0 +1,305 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -998,8 +998,34 @@ index 0000000000000..25139822eead0
 +  const size_t erased = std::erase_if(viewports_, [&id](const Viewport& v) {
 +    return v.preset.id == id;
 +  });
-+  if (erased) {
-+    NotifyViewportsChanged();
++  if (!erased) {
++    return;
++  }
++  if (focused_viewport_id_ == id) {
++    // Deliberately not moved to a surviving viewport: nothing has been
++    // clicked into, so anything picked here would be a guess, and observers
++    // handle an empty focus already (it is the state a fresh lab starts in).
++    focused_viewport_id_.clear();
++    for (Observer& observer : observers_) {
++      observer.OnResponsiveLabFocusedViewportChanged();
++    }
++  }
++  NotifyViewportsChanged();
++}
++
++void AppSwapResponsiveLabSession::SetFocusedViewport(const std::string& id) {
++  if (focused_viewport_id_ == id || !FindViewport(id)) {
++    return;
++  }
++  focused_viewport_id_ = id;
++  for (Observer& observer : observers_) {
++    observer.OnResponsiveLabFocusedViewportChanged();
++  }
++}
++
++void AppSwapResponsiveLabSession::RequestDevTools() {
++  for (Observer& observer : observers_) {
++    observer.OnResponsiveLabDevToolsRequested();
 +  }
 +}
 +
@@ -1052,6 +1078,9 @@ index 0000000000000..25139822eead0
 +  // enables the protocol domains the shared tools need, and re-arms the
 +  // picker or re-resolves the selection for a viewport that just appeared.
 +  inspector_->OnViewportAttached(id);
++  for (Observer& observer : observers_) {
++    observer.OnResponsiveLabViewportContentsChanged();
++  }
 +}
 +
 +void AppSwapResponsiveLabSession::DetachViewportContents(
@@ -1068,6 +1097,9 @@ index 0000000000000..25139822eead0
 +  // being destroyed along with its cell.
 +  viewport->client.reset();
 +  viewport->contents = nullptr;
++  for (Observer& observer : observers_) {
++    observer.OnResponsiveLabViewportContentsChanged();
++  }
 +}
 +
 +void AppSwapResponsiveLabSession::SetCanvasTransform(
@@ -1114,10 +1146,10 @@ index 0000000000000..25139822eead0
 +WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapResponsiveLabSession);
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_session.h b/chrome/browser/app_swap/app_swap_responsive_lab_session.h
 new file mode 100644
-index 0000000000000..78cdfb7d3d836
+index 0000000000000..13569fbf10885
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_session.h
-@@ -0,0 +1,206 @@
+@@ -0,0 +1,241 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1206,6 +1238,27 @@ index 0000000000000..78cdfb7d3d836
 +    // needs here.
 +    virtual void OnResponsiveLabCanvasScaleChanged() {}
 +
++    // A viewport gained or lost its live cell -- the lab was toggled, or
++    // its tab was switched away from and back. Distinct from
++    // OnResponsiveLabViewportsChanged(), which is about the *list*: this
++    // fires while the list is unchanged, and, because it fires from inside
++    // cell construction, an observer of it must not rebuild the grid.
++    virtual void OnResponsiveLabViewportContentsChanged() {}
++
++    // A different viewport became the focused one. Separate from
++    // OnResponsiveLabViewportsChanged() because this fires on every click
++    // into a cell, while the viewport list changes only when the user adds
++    // or removes one.
++    virtual void OnResponsiveLabFocusedViewportChanged() {}
++
++    // The user asked for DevTools on the focused viewport. A signal rather
++    // than a call, because opening a DevTools window means reaching
++    // //chrome/browser/devtools, which this target deliberately does not
++    // depend on (see inspection_allowed()) -- the Views layer listens for
++    // this and does the opening. That is also what lets the panel, which
++    // is further from //chrome/browser/ui still, ask for it.
++    virtual void OnResponsiveLabDevToolsRequested() {}
++
 +    // This session is going away. Observers must stop observing here.
 +    //
 +    // Not merely defensive: both observers outlive this object in a real
@@ -1248,6 +1301,19 @@ index 0000000000000..78cdfb7d3d836
 +
 +  const std::vector<Viewport>& viewports() const { return viewports_; }
 +  const Viewport* FindViewport(const std::string& id) const;
++
++  // The viewport whose cell the user last clicked into, which is what a
++  // DevTools window opened on this lab follows. Empty until something takes
++  // focus, and reset to empty when the focused viewport is removed.
++  const std::string& focused_viewport_id() const {
++    return focused_viewport_id_;
++  }
++  // No-op for an unknown id, and for the id that is already focused --
++  // cells report focus on every click, not only on a change.
++  void SetFocusedViewport(const std::string& id);
++
++  // Asks whoever is listening to open DevTools on the focused viewport.
++  void RequestDevTools();
 +
 +  // The protocol client for one viewport, or null when that viewport has
 +  // no live cell or policy denied inspection. This is how
@@ -1307,6 +1373,7 @@ index 0000000000000..78cdfb7d3d836
 +  bool inspection_allowed_ = true;
 +  GURL previewed_url_;
 +  std::vector<Viewport> viewports_;
++  std::string focused_viewport_id_;
 +  int next_viewport_id_ = 0;
 +
 +  gfx::Vector2dF pan_offset_;
@@ -1630,10 +1697,10 @@ index 0000000000000..9999276a09e12
 +}
 diff --git a/chrome/browser/resources/app_swap_responsive_lab/app.css b/chrome/browser/resources/app_swap_responsive_lab/app.css
 new file mode 100644
-index 0000000000000..2ba2b7b50c17b
+index 0000000000000..2537b4bc6f8c6
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_responsive_lab/app.css
-@@ -0,0 +1,257 @@
+@@ -0,0 +1,262 @@
 +/* Copyright 2026 The AppSwap Authors
 + * Use of this source code is governed by a BSD-style license that can be
 + * found in the LICENSE file. */
@@ -1772,6 +1839,11 @@ index 0000000000000..2ba2b7b50c17b
 +  padding: 8px;
 +}
 +
++/* The cell a DevTools window opened on this lab is currently following. */
++.card.focused {
++  border-color: var(--color-sys-primary);
++}
++
 +.card-name {
 +  font-weight: 500;
 +}
@@ -1893,10 +1965,10 @@ index 0000000000000..2ba2b7b50c17b
 +}
 diff --git a/chrome/browser/resources/app_swap_responsive_lab/app.html.ts b/chrome/browser/resources/app_swap_responsive_lab/app.html.ts
 new file mode 100644
-index 0000000000000..ca094f91d3067
+index 0000000000000..c2aa22cce3bc4
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_responsive_lab/app.html.ts
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,127 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1934,7 +2006,7 @@ index 0000000000000..ca094f91d3067
 +
 +      <div class="scroller">
 +        ${this.viewports_.map(viewport => html`
-+          <div class="card">
++          <div class="card ${viewport.focused ? 'focused' : ''}">
 +            <div class="card-name">${viewport.preset.name}</div>
 +            <div class="card-detail">${this.describe_(viewport)}</div>
 +            <div class="size-row">
@@ -1952,6 +2024,8 @@ index 0000000000000..ca094f91d3067
 +                  @click="${this.onRotateClick_}">Rotate</button>
 +              <button class="chip" data-id="${viewport.preset.id}"
 +                  @click="${this.onReloadClick_}">Reload</button>
++              <button class="chip" data-id="${viewport.preset.id}"
++                  @click="${this.onDevToolsClick_}">DevTools</button>
 +              <button class="chip" data-id="${viewport.preset.id}"
 +                  @click="${this.onRemoveClick_}">Remove</button>
 +            </div>
@@ -2024,10 +2098,10 @@ index 0000000000000..ca094f91d3067
 +}
 diff --git a/chrome/browser/resources/app_swap_responsive_lab/app.ts b/chrome/browser/resources/app_swap_responsive_lab/app.ts
 new file mode 100644
-index 0000000000000..6caf53d33c072
+index 0000000000000..d099e8235303a
 --- /dev/null
 +++ b/chrome/browser/resources/app_swap_responsive_lab/app.ts
-@@ -0,0 +1,309 @@
+@@ -0,0 +1,313 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2212,6 +2286,10 @@ index 0000000000000..6caf53d33c072
 +
 +  protected onRemoveClick_(e: Event) {
 +    this.apiProxy_.handler.removeViewport(this.idFor_(e));
++  }
++
++  protected onDevToolsClick_(e: Event) {
++    this.apiProxy_.handler.openDevTools(this.idFor_(e));
 +  }
 +
 +  protected onReloadAllClick_() {
@@ -2414,10 +2492,10 @@ index 0000000000000..3921e5370983a
 +let instance: BrowserProxy|null = null;
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc
 new file mode 100644
-index 0000000000000..dc71600e59123
+index 0000000000000..2e0a1f1fa6ea2
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_button.cc
-@@ -0,0 +1,198 @@
+@@ -0,0 +1,203 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2430,6 +2508,7 @@ index 0000000000000..dc71600e59123
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_devtools_host.h"
 +#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_grid_holder.h"
 +#include "chrome/browser/ui/views/app_swap/app_swap_responsive_lab_overlay_view.h"
 +#include "chrome/browser/ui/views/frame/browser_view.h"
@@ -2601,6 +2680,10 @@ index 0000000000000..dc71600e59123
 +    // emulation) at all.
 +    session->set_inspection_allowed(
 +        DevToolsWindow::AllowDevToolsFor(profile, web_contents));
++    // Has to exist before the panel can ask for DevTools, and it listens to
++    // the session rather than being driven, so creating it is all there is
++    // to do. A no-op once this tab already has one.
++    AppSwapResponsiveLabDevToolsHost::CreateForWebContents(web_contents);
 +    overlay->ShowGridFor(web_contents, profile);
 +    container->contents_view()->SetVisible(false);
 +  } else {
@@ -3136,10 +3219,10 @@ index 0000000000000..89b505ea60255
 +#endif  // CHROME_BROWSER_UI_VIEWS_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_CANVAS_VIEW_H_
 diff --git a/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc
 new file mode 100644
-index 0000000000000..f7686b69f2fbf
+index 0000000000000..a62becabf4c7d
 --- /dev/null
 +++ b/chrome/browser/ui/views/app_swap/app_swap_responsive_lab_cell_view.cc
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,389 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3148,8 +3231,11 @@ index 0000000000000..f7686b69f2fbf
 +
 +#include <algorithm>
 +#include <memory>
++#include <string>
 +#include <utility>
 +
++#include "base/functional/bind.h"
++#include "base/functional/callback.h"
 +#include "base/numerics/safe_conversions.h"
 +#include "base/strings/strcat.h"
 +#include "base/strings/string_number_conversions.h"
@@ -3157,6 +3243,7 @@ index 0000000000000..f7686b69f2fbf
 +#include "chrome/browser/profiles/profile.h"
 +#include "components/zoom/zoom_controller.h"
 +#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/render_widget_host.h"
 +#include "content/public/browser/web_contents.h"
 +#include "cc/paint/paint_flags.h"
 +#include "ui/base/metadata/metadata_impl_macros.h"
@@ -3226,6 +3313,17 @@ index 0000000000000..f7686b69f2fbf
 +                                        const gfx::Size& native_size)
 +      : views::WebView(profile), native_size_(native_size) {}
 +
++  // Runs whenever this cell's page takes focus, which is how the lab
++  // learns which cell the user is working in -- and therefore which one a
++  // DevTools window opened on the lab should follow.
++  //
++  // Hooked on the WebContents rather than on Views focus: a cell is a
++  // native surface reparented into the Views tree, so a click lands in the
++  // renderer and never reaches this view's OnMousePressed().
++  void SetOnFocusedCallback(base::RepeatingClosure callback) {
++    on_focused_ = std::move(callback);
++  }
++
 +  // Re-pins the renderer to `native_size` while laying this view out at
 +  // `laid_out_size` (the device size times the canvas zoom). The two are
 +  // deliberately independent: NativeViewHost divides them to get the scale
@@ -3248,8 +3346,17 @@ index 0000000000000..f7686b69f2fbf
 +    holder()->SetNativeViewSize(native_size_);
 +  }
 +
++  void OnWebContentsFocused(
++      content::RenderWidgetHost* render_widget_host) override {
++    views::WebView::OnWebContentsFocused(render_widget_host);
++    if (on_focused_) {
++      on_focused_.Run();
++    }
++  }
++
 + private:
 +  gfx::Size native_size_;
++  base::RepeatingClosure on_focused_;
 +};
 +
 +BEGIN_METADATA(AppSwapResponsiveLabPinnedSizeWebView)
@@ -3284,6 +3391,14 @@ index 0000000000000..f7686b69f2fbf
 +  auto web_view = std::make_unique<AppSwapResponsiveLabPinnedSizeWebView>(
 +      profile, preset_size);
 +  web_view->SetPreferredSize(preset_size);
++  web_view->SetOnFocusedCallback(base::BindRepeating(
++      [](base::WeakPtr<AppSwapResponsiveLabSession> session,
++         const std::string& viewport_id) {
++        if (session) {
++          session->SetFocusedViewport(viewport_id);
++        }
++      },
++      session_, preset_.id));
 +  web_view->LoadInitialURL(url);
 +  web_view_ = AddChildView(std::move(web_view));
 +
@@ -5240,10 +5355,10 @@ index 0000000000000..95df3492cd387
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab.mojom b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab.mojom
 new file mode 100644
-index 0000000000000..85d6d97703d9b
+index 0000000000000..165c4660bed37
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab.mojom
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,130 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -5268,6 +5383,11 @@ index 0000000000000..85d6d97703d9b
 +
 +struct ViewportInfo {
 +  DevicePreset preset;
++
++  // True for the cell the user last clicked into, which is the one a
++  // DevTools window opened on this lab follows. False for every viewport
++  // until something has been clicked.
++  bool focused;
 +
 +  // False when this viewport has no live cell (the lab is off, or its tab
 +  // is in the background) or when enterprise policy denied developer tools:
@@ -5321,6 +5441,12 @@ index 0000000000000..85d6d97703d9b
 +  // An empty `id` reloads every viewport.
 +  ReloadViewport(string id) => ();
 +
++  // Opens a real DevTools window on the lab, following `id` -- or, for an
++  // empty `id`, whichever cell the user last clicked into. One window for
++  // the whole lab, not one per cell: it attaches to every cell at once and
++  // retargets between them as focus moves.
++  OpenDevTools(string id) => ();
++
 +  // Absolute canvas zoom, clamped by the canvas to its own range.
 +  SetCanvasScale(double scale) => ();
 +
@@ -5365,10 +5491,10 @@ index 0000000000000..85d6d97703d9b
 +};
 diff --git a/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.cc b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.cc
 new file mode 100644
-index 0000000000000..5fe3ede02a3eb
+index 0000000000000..46b1640d1e58b
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.cc
-@@ -0,0 +1,340 @@
+@@ -0,0 +1,366 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -5433,13 +5559,15 @@ index 0000000000000..5fe3ede02a3eb
 +}
 +
 +std::vector<mojom::ViewportInfoPtr> ToMojo(
-+    const std::vector<AppSwapResponsiveLabSession::Viewport>& viewports) {
++    const std::vector<AppSwapResponsiveLabSession::Viewport>& viewports,
++    const std::string& focused_viewport_id) {
 +  std::vector<mojom::ViewportInfoPtr> out;
 +  out.reserve(viewports.size());
 +  for (const AppSwapResponsiveLabSession::Viewport& viewport : viewports) {
 +    auto info = mojom::ViewportInfo::New();
 +    info->preset = ToMojo(viewport.preset);
 +    info->emulated = viewport.client && viewport.client->attached();
++    info->focused = viewport.preset.id == focused_viewport_id;
 +    out.push_back(std::move(info));
 +  }
 +  return out;
@@ -5474,8 +5602,10 @@ index 0000000000000..5fe3ede02a3eb
 +                            /*canvas_scale=*/1.0);
 +    return;
 +  }
-+  std::move(callback).Run(current->active(), current->previewed_url().spec(),
-+                          ToMojo(current->viewports()), current->scale());
++  std::move(callback).Run(
++      current->active(), current->previewed_url().spec(),
++      ToMojo(current->viewports(), current->focused_viewport_id()),
++      current->scale());
 +}
 +
 +void AppSwapResponsiveLabPageHandler::AddViewport(
@@ -5511,6 +5641,20 @@ index 0000000000000..5fe3ede02a3eb
 +    RotateViewportCallback callback) {
 +  if (AppSwapResponsiveLabSession* current = session()) {
 +    current->RotateViewport(id);
++  }
++  std::move(callback).Run();
++}
++
++void AppSwapResponsiveLabPageHandler::OpenDevTools(
++    const std::string& id,
++    OpenDevToolsCallback callback) {
++  if (AppSwapResponsiveLabSession* current = session()) {
++    // Focus first, so the window that opens is already pointed at the cell
++    // whose button was pressed rather than at whatever was focused before.
++    if (!id.empty()) {
++      current->SetFocusedViewport(id);
++    }
++    current->RequestDevTools();
 +  }
 +  std::move(callback).Run();
 +}
@@ -5595,6 +5739,12 @@ index 0000000000000..5fe3ede02a3eb
 +  // it, so nothing has been sent for it yet.
 +  console_sent_ = 0;
 +  page_->OnConsoleCleared();
++}
++
++void AppSwapResponsiveLabPageHandler::OnResponsiveLabFocusedViewportChanged() {
++  // Clicking into a cell is not something the panel initiated, so this is
++  // the only way its focus marker follows the grid.
++  PushState();
 +}
 +
 +void AppSwapResponsiveLabPageHandler::OnResponsiveLabCanvasScaleChanged() {
@@ -5706,15 +5856,17 @@ index 0000000000000..5fe3ede02a3eb
 +                          /*canvas_scale=*/1.0);
 +    return;
 +  }
-+  page_->OnStateChanged(current->active(), current->previewed_url().spec(),
-+                        ToMojo(current->viewports()), current->scale());
++  page_->OnStateChanged(
++      current->active(), current->previewed_url().spec(),
++      ToMojo(current->viewports(), current->focused_viewport_id()),
++      current->scale());
 +}
 diff --git a/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.h b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.h
 new file mode 100644
-index 0000000000000..ccb838123b4b5
+index 0000000000000..17df2c9598308
 --- /dev/null
 +++ b/chrome/browser/ui/webui/app_swap_responsive_lab/app_swap_responsive_lab_page_handler.h
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,123 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -5777,6 +5929,8 @@ index 0000000000000..ccb838123b4b5
 +                      RotateViewportCallback callback) override;
 +  void ReloadViewport(const std::string& id,
 +                      ReloadViewportCallback callback) override;
++  void OpenDevTools(const std::string& id,
++                    OpenDevToolsCallback callback) override;
 +  void SetCanvasScale(double scale, SetCanvasScaleCallback callback) override;
 +  void StartPicking(StartPickingCallback callback) override;
 +  void StopPicking(StopPickingCallback callback) override;
@@ -5794,6 +5948,7 @@ index 0000000000000..ccb838123b4b5
 +  void OnResponsiveLabActiveChanged() override;
 +  void OnResponsiveLabPreviewedUrlChanged() override;
 +  void OnResponsiveLabCanvasScaleChanged() override;
++  void OnResponsiveLabFocusedViewportChanged() override;
 +  void OnResponsiveLabSessionDestroying() override;
 +
 +  // AppSwapResponsiveLabInspector::Observer:

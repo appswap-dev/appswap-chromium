@@ -1,6 +1,8 @@
 # Plan: one reusable DevTools UI for Responsive Lab cells
 
-**Status:** proposed, not started. Research done 2026-09-15 against Chromium
+**Status:** Phases 0-3 implemented 2026-09-15, not yet built or run. See
+section 11 for what shipped, what the research below got wrong, and what the
+first build has to confirm. Research and implementation both against Chromium
 **155.0.8040.2** (`0a7a7e0199b7d1f1c455836e937363a65bf37047`), patches applied.
 
 **Goal.** Responsive Lab shows N cells, each its own `WebContents`. Focus a cell
@@ -253,6 +255,8 @@ before touching scale.
 
 ## 10. Open questions
 
+*(1 and 4 are answered in section 11. 2 and 3 are still open.)*
+
 1. Host surface for the frontend -- embedded in the lab panel, or separate
    window? (Phase 1; docking is unavailable either way.)
 2. Does a browser-target session raise security/permission concerns worth
@@ -262,3 +266,109 @@ before touching scale.
 4. Should the DevTools frontend be a stock build or a patched one? Section 2
    suggests stock may suffice for Elements/Console; Sources isolation
    (section 2 table) would need a frontend patch.
+
+---
+
+## 11. What was implemented, and what the research above got wrong
+
+Landed as two patches: `0022-devtools-frontend-lab-targets.patch` (the
+separate devtools-frontend checkout) and `0023-responsive-lab-devtools.patch`.
+Changes to files already owned by `0017-responsive-lab.patch` and
+`0009-tab-strip-profile-button.patch` were absorbed into those, per the
+convention the other patches follow.
+
+**Never built.** Everything below is reasoning against source, not observed
+behaviour.
+
+### Corrections to sections 2-4
+
+- **`maybeAttachInitialTarget()` is the real bootstrap, and section 3 missed
+  it.** `TargetManager.ts:421` already pairs with `AttachViaBrowserTarget`:
+  the `browserConnection` query param makes it create a `BROWSER`-type root
+  and call `Target.autoAttachRelated` with the id `initialTargetId()`
+  returns. But its **only** caller is `WorkerMain.ts:37`. `InspectorMain.ts`
+  -- the `devtools_app` entrypoint, the one with Elements/Console/Sources/
+  Network -- never calls it; it creates a `FRAME`/`TAB` root unconditionally
+  and then awaits `waitForPrimaryPageTarget()`, which over a browser
+  connection never resolves sensibly. **This answers open question 4: a
+  frontend patch is required, not optional.** It is small -- an early return
+  in `run()`.
+- **Risk 2 ("`outermostTarget()` must resolve per cell") was already safe.**
+  `Target.ts:163` skips `TAB` and `BROWSER`, so a cell's page target is its
+  own outermost target. No shared ancestor gets in the way.
+- **Risk 1 was real.** `primaryPageTarget()` falls through to `rootTarget()`,
+  which under a browser connection is the browser target. In practice the
+  seeding turned out harmless for a different reason: `MainImpl`'s
+  `setScopeTarget(primaryPageTarget())` runs inside `#createAppUI()`, before
+  `#initializeTarget()` runs the early-initialization runnable that creates
+  the browser target -- so it seeds `null`, and the first focus push is what
+  sets a real scope.
+- **Attach the *page* target, not the tab target.** `autoAttachRelated`
+  attaches the named host itself plus whatever its auto-attacher reports.
+  Naming the WebContents' tab host
+  (`DevToolsAgentHost::GetOrCreateForTab`) would attach two targets per cell,
+  and `ChildTargetManager.ts:149` has no case for `targetInfo.type === 'tab'`
+  so the extra one would be mistyped `BROWSER`. `GetOrCreateFor` gives the
+  page host directly and sidesteps both.
+- **N cells is supported at the protocol layer.**
+  `TargetHandler::AutoAttachRelated` keeps `auto_attach_related_targets_` as
+  a map, so repeated calls with different ids accumulate, and a repeat for an
+  already-attached id lands in the `UpdateWaitForDebuggerOnStart` branch
+  rather than failing -- which is what lets the browser re-send the whole
+  cell list instead of tracking a delta.
+- **Pushes race the frontend, and losing that race is the default.** The
+  browser pushes from `FrontendLoaded()` (document onload); the frontend's
+  listener is registered several async hops later, in an early-initialization
+  runnable. `loadCompleted` is no better -- `MainImpl.ts:555` sends it
+  *before* `#initializeTarget()`. So the state is buffered in
+  `devtools_compatibility.js` and read back through a new
+  `appSwapLabState()`, exactly as `initialTargetId()` buffers through a
+  promise.
+- **Section 3's file path was wrong.** The lab's Mojo page handler is in
+  `chrome/browser/ui/webui/app_swap_responsive_lab/`, not
+  `chrome/browser/app_swap/`.
+
+### Shape of what landed
+
+- **Host surface (answers open question 1): a separate undocked window.**
+  `DevToolsWindow::OpenDevToolsWindowForAppSwapLab()` passes no inspected
+  WebContents at all, which states the no-docking conclusion of section 3
+  directly rather than relying on `FindBrowserWithTab` failing.
+- **Layering.** `AppSwapResponsiveLabDevToolsHost` lives in
+  `chrome/browser/ui/BUILD.gn`'s own sources, beside
+  `AppSwapResponsiveLabButton` and for a related reason: it needs
+  `//chrome/browser/devtools`, which is part of that target, so the
+  `views/app_swap` source_set cannot depend on it. The session stays
+  Views-agnostic and only signals -- `RequestDevTools()` fires an observer
+  callback -- which is also how the panel, further from `//chrome/browser/ui`
+  still, asks for DevTools without reaching into Views.
+- **Focus** is read from `views::WebView::OnWebContentsFocused`, not from
+  Views mouse events: a cell is a native surface reparented into the Views
+  tree, so clicks land in the renderer and never reach `OnMousePressed()`.
+- **Entry point:** a per-viewport "DevTools" chip in the lab panel, which
+  focuses that cell and then opens (or raises) the window. The focused cell's
+  card is outlined in the panel.
+
+### What the first build has to confirm
+
+This is section 4's exit criteria, on the real code path rather than a
+throwaway spike:
+
+1. The window opens and its Elements tree shows the focused cell's DOM.
+2. Clicking into another cell retargets Elements **and** Console.
+3. Adding and removing a viewport while the window is open attaches and
+   detaches that cell.
+
+If 1 and 2 hold, Phases 1-3 are done. If they do not, the failure is in the
+same place a throwaway spike would have failed, and section 4's advice to
+stop and reassess still applies.
+
+### Not done
+
+- **Phase 4** -- the bespoke inspector is untouched, per section 6's
+  recommendation to keep both.
+- **Phase 5** -- no `EmulatedDevices.ts` port.
+- **Sources isolation** -- still the gap in section 2's table.
+- **Open questions 2 and 3** -- the browser-target session's reach, and
+  per-cell CDP session cost, are neither answered nor measured.
+
