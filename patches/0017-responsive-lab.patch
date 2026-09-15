@@ -846,10 +846,10 @@ index 0000000000000..0745c287bb5d5
 +#endif  // CHROME_BROWSER_APP_SWAP_APP_SWAP_RESPONSIVE_LAB_INSPECTOR_H_
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_session.cc b/chrome/browser/app_swap/app_swap_responsive_lab_session.cc
 new file mode 100644
-index 0000000000000..07d458ec3c543
+index 0000000000000..fa01854f42ed7
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_session.cc
-@@ -0,0 +1,305 @@
+@@ -0,0 +1,338 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -859,8 +859,11 @@ index 0000000000000..07d458ec3c543
 +#include <algorithm>
 +#include <utility>
 +
++#include "base/functional/bind.h"
++#include "base/location.h"
 +#include "base/strings/strcat.h"
 +#include "base/strings/string_number_conversions.h"
++#include "base/task/sequenced_task_runner.h"
 +#include "base/version_info/version_info.h"
 +#include "chrome/browser/app_swap/app_swap_responsive_lab_inspector.h"
 +#include "content/public/browser/navigation_controller.h"
@@ -1017,9 +1020,7 @@ index 0000000000000..07d458ec3c543
 +    // clicked into, so anything picked here would be a guess, and observers
 +    // handle an empty focus already (it is the state a fresh lab starts in).
 +    focused_viewport_id_.clear();
-+    for (Observer& observer : observers_) {
-+      observer.OnResponsiveLabFocusedViewportChanged();
-+    }
++    ScheduleFocusedViewportChanged();
 +  }
 +  NotifyViewportsChanged();
 +}
@@ -1029,9 +1030,7 @@ index 0000000000000..07d458ec3c543
 +    return;
 +  }
 +  focused_viewport_id_ = id;
-+  for (Observer& observer : observers_) {
-+    observer.OnResponsiveLabFocusedViewportChanged();
-+  }
++  ScheduleFocusedViewportChanged();
 +}
 +
 +void AppSwapResponsiveLabSession::RequestDevTools() {
@@ -1089,9 +1088,7 @@ index 0000000000000..07d458ec3c543
 +  // enables the protocol domains the shared tools need, and re-arms the
 +  // picker or re-resolves the selection for a viewport that just appeared.
 +  inspector_->OnViewportAttached(id);
-+  for (Observer& observer : observers_) {
-+    observer.OnResponsiveLabViewportContentsChanged();
-+  }
++  ScheduleViewportContentsChanged();
 +}
 +
 +void AppSwapResponsiveLabSession::DetachViewportContents(
@@ -1108,9 +1105,7 @@ index 0000000000000..07d458ec3c543
 +  // being destroyed along with its cell.
 +  viewport->client.reset();
 +  viewport->contents = nullptr;
-+  for (Observer& observer : observers_) {
-+    observer.OnResponsiveLabViewportContentsChanged();
-+  }
++  ScheduleViewportContentsChanged();
 +}
 +
 +void AppSwapResponsiveLabSession::SetCanvasTransform(
@@ -1142,6 +1137,44 @@ index 0000000000000..07d458ec3c543
 +  return weak_factory_.GetWeakPtr();
 +}
 +
++void AppSwapResponsiveLabSession::ScheduleViewportContentsChanged() {
++  if (viewport_contents_changed_scheduled_) {
++    return;
++  }
++  viewport_contents_changed_scheduled_ = true;
++  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          &AppSwapResponsiveLabSession::NotifyViewportContentsChanged,
++          weak_factory_.GetWeakPtr()));
++}
++
++void AppSwapResponsiveLabSession::NotifyViewportContentsChanged() {
++  viewport_contents_changed_scheduled_ = false;
++  for (Observer& observer : observers_) {
++    observer.OnResponsiveLabViewportContentsChanged();
++  }
++}
++
++void AppSwapResponsiveLabSession::ScheduleFocusedViewportChanged() {
++  if (focused_viewport_changed_scheduled_) {
++    return;
++  }
++  focused_viewport_changed_scheduled_ = true;
++  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          &AppSwapResponsiveLabSession::NotifyFocusedViewportChanged,
++          weak_factory_.GetWeakPtr()));
++}
++
++void AppSwapResponsiveLabSession::NotifyFocusedViewportChanged() {
++  focused_viewport_changed_scheduled_ = false;
++  for (Observer& observer : observers_) {
++    observer.OnResponsiveLabFocusedViewportChanged();
++  }
++}
++
 +void AppSwapResponsiveLabSession::NotifyViewportsChanged() {
 +  for (Observer& observer : observers_) {
 +    observer.OnResponsiveLabViewportsChanged();
@@ -1157,10 +1190,10 @@ index 0000000000000..07d458ec3c543
 +WEB_CONTENTS_USER_DATA_KEY_IMPL(AppSwapResponsiveLabSession);
 diff --git a/chrome/browser/app_swap/app_swap_responsive_lab_session.h b/chrome/browser/app_swap/app_swap_responsive_lab_session.h
 new file mode 100644
-index 0000000000000..13569fbf10885
+index 0000000000000..fb0f93e92a242
 --- /dev/null
 +++ b/chrome/browser/app_swap/app_swap_responsive_lab_session.h
-@@ -0,0 +1,241 @@
+@@ -0,0 +1,261 @@
 +// Copyright 2026 The AppSwap Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1377,6 +1410,24 @@ index 0000000000000..13569fbf10885
 +  Viewport* FindViewportMutable(const std::string& id);
 +  void NotifyViewportsChanged();
 +
++  // Both of these are raised from places that can already be inside an
++  // observer callback: a cell registers and unregisters its WebContents
++  // from its own constructor and destructor, and reports focus from
++  // OnWebContentsFocused, and the grid builds and destroys cells from
++  // inside OnResponsiveLabViewportsChanged(). Notifying synchronously from
++  // there would iterate observers_ while it is already being iterated,
++  // which base::ObserverList rejects outright -- it defaults to
++  // kDisallowReentrancy, and the check is fatal, so adding a viewport took
++  // the browser down with it.
++  //
++  // Posting also coalesces: a grid rebuild attaches every cell in turn, and
++  // both observers of these re-read the whole viewport list anyway, so one
++  // notification afterwards says everything N would have.
++  void ScheduleViewportContentsChanged();
++  void NotifyViewportContentsChanged();
++  void ScheduleFocusedViewportChanged();
++  void NotifyFocusedViewportChanged();
++
 +  // Applies `viewport`'s preset to its client, if it currently has one.
 +  void ApplyEmulation(Viewport& viewport);
 +
@@ -1385,6 +1436,8 @@ index 0000000000000..13569fbf10885
 +  GURL previewed_url_;
 +  std::vector<Viewport> viewports_;
 +  std::string focused_viewport_id_;
++  bool viewport_contents_changed_scheduled_ = false;
++  bool focused_viewport_changed_scheduled_ = false;
 +  int next_viewport_id_ = 0;
 +
 +  gfx::Vector2dF pan_offset_;
