@@ -4128,6 +4128,31 @@ index 154a93064247c..a69e5de2ad81c 100644
          </message>
        </if>
      </messages>
+diff --git a/components/os_crypt/common/keychain_password_mac.mm b/components/os_crypt/common/keychain_password_mac.mm
+index f240dc22ee391..3636093ca5a91 100644
+--- a/components/os_crypt/common/keychain_password_mac.mm
++++ b/components/os_crypt/common/keychain_password_mac.mm
+@@ -38,8 +38,18 @@ namespace {
+ const char kDefaultServiceName[] = "Chrome Safe Storage";
+ const char kDefaultAccountName[] = "Chrome";
+ #else
+-const char kDefaultServiceName[] = "Chromium Safe Storage";
+-const char kDefaultAccountName[] = "Chromium";
++// AppSwap's own item, not the "Chromium Safe Storage" one this build would
++// otherwise inherit. That item belongs to whichever app created it -- a real
++// Chromium install, most likely -- so reaching for it makes macOS prompt for
++// the login keychain password on every launch, an app asking for another
++// app's secret. Naming it after this product means AppSwap creates and owns
++// it on first run instead.
++//
++// NOT localized, and not to be changed lightly: this is the lookup key for
++// the secret that encrypts cookies and saved passwords, so a profile
++// encrypted under one name cannot be read back under another.
++const char kDefaultServiceName[] = "AppSwap Safe Storage";
++const char kDefaultAccountName[] = "AppSwap";
+ #endif
+ 
+ // These values are persisted to logs. Entries should not be renumbered and
 diff --git a/components/strings/components_chromium_strings_af.xtb b/components/strings/components_chromium_strings_af.xtb
 index 4477ec064adf6..19737da5768cd 100644
 --- a/components/strings/components_chromium_strings_af.xtb

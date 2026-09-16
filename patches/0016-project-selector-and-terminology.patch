@@ -747,7 +747,7 @@ index 90dd03863bbbe..13189c7dc3d79 100644
        base::BindRepeating(&ProfileMenuView::OnManageProfilesButtonClicked,
                            base::Unretained(this)));
 diff --git a/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.cc b/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.cc
-index ffb1fdda20d8f..986ba304fb7f6 100644
+index ffb1fdda20d8f..1d10e478a9cb3 100644
 --- a/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.cc
 +++ b/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.cc
 @@ -4,6 +4,11 @@
@@ -773,7 +773,7 @@ index ffb1fdda20d8f..986ba304fb7f6 100644
    if (start_button_) {
      start_button_->SetExpansionOrientation(orientation_);
    }
-@@ -220,39 +229,84 @@ TabStripComboButton::CreateFlatEdgeButtonFor(actions::ActionId action_id,
+@@ -220,39 +229,100 @@ TabStripComboButton::CreateFlatEdgeButtonFor(actions::ActionId action_id,
  }
  
  void TabStripComboButton::UpdateStyles() {
@@ -849,10 +849,26 @@ index ffb1fdda20d8f..986ba304fb7f6 100644
 +  UpdateStyles();
 +}
 +
++int TabStripComboButton::GetMinimumWidthForOrientation(
++    views::LayoutOrientation orientation) {
++  const int preferred_width =
++      GetPreferredSizeForOrientation(orientation).width();
++  if (!leading_button_ || !leading_button_->GetVisible()) {
++    return preferred_width;
++  }
++  // What the leading segment would give up by falling back to its icon: the
++  // square every segment asks for is TabStripFlatEdgeButton's floor, so the
++  // difference is exactly the room its label is taking.
++  const int square = GetLayoutConstant(
++      LayoutConstant::kVerticalTabStripTopContainerButtonSize);
++  return preferred_width -
++         std::max(0, leading_button_->GetPreferredSize().width() - square);
++}
++
 +void TabStripComboButton::FitLeadingButtonTo(int available_width) {
 +  if (available_width_ == available_width) {
 +    return;
-+  }
+   }
 +  available_width_ = available_width;
 +  ApplyLeadingButtonWidthMode();
 +}
@@ -860,7 +876,7 @@ index ffb1fdda20d8f..986ba304fb7f6 100644
 +void TabStripComboButton::ApplyLeadingButtonWidthMode() {
 +  if (!leading_button_) {
 +    return;
-   }
++  }
 +
 +  // The leading segment carries a label, so it wants the width its text
 +  // needs -- except in two cases, where it falls back to the same square its
@@ -887,7 +903,7 @@ index ffb1fdda20d8f..986ba304fb7f6 100644
  
  void TabStripComboButton::ShowContextMenuForViewImpl(
 diff --git a/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h b/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h
-index 9849f665562e7..578fd0423ff17 100644
+index 9849f665562e7..97a3d7eee5cd3 100644
 --- a/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h
 +++ b/chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h
 @@ -5,6 +5,9 @@
@@ -933,7 +949,22 @@ index 9849f665562e7..578fd0423ff17 100644
  
    // views::ContextMenuController:
    void ShowContextMenuForViewImpl(
-@@ -104,6 +122,13 @@ class TabStripComboButton : public views::View,
+@@ -87,6 +105,14 @@ class TabStripComboButton : public views::View,
+   gfx::Size GetPreferredSizeForOrientation(
+       views::LayoutOrientation orientation);
+ 
++  // The width this group needs with its leading segment reduced to its icon:
++  // the narrowest it can be made while still laying out as one row. Callers
++  // deciding whether the row fits should ask this rather than the preferred
++  // width, so that a group too wide to fit drops its label -- which is what
++  // FitLeadingButtonTo() will do to it -- instead of being wrapped or
++  // stacked while it still had that to give up.
++  int GetMinimumWidthForOrientation(views::LayoutOrientation orientation);
++
+  protected:
+   // views::View:
+   void ChildVisibilityChanged(views::View* child) override;
+@@ -104,6 +130,13 @@ class TabStripComboButton : public views::View,
  
    void UpdateStyles();
  
@@ -947,7 +978,7 @@ index 9849f665562e7..578fd0423ff17 100644
    void OnMenuClosed();
  
    void MaybeHideTabSearchButton();
-@@ -115,6 +140,7 @@ class TabStripComboButton : public views::View,
+@@ -115,6 +148,7 @@ class TabStripComboButton : public views::View,
  
    const raw_ptr<BrowserWindowInterface> browser_;
    const Context context_;
@@ -1092,10 +1123,10 @@ index 125f2eed7c3a2..12f13770dd666 100644
    int icon_size_ = 0;
    float expansion_factor_ = 1.0f;
 diff --git a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
-index d69e4dd30f732..3259723463ac3 100644
+index d69e4dd30f732..22dc522df90ed 100644
 --- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
 +++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.cc
-@@ -70,6 +70,19 @@ VerticalTabStripTopContainer::~VerticalTabStripTopContainer() = default;
+@@ -70,6 +70,29 @@ VerticalTabStripTopContainer::~VerticalTabStripTopContainer() = default;
  void VerticalTabStripTopContainer::Layout(PassKey) {
    LayoutSuperclass<views::View>(this);
    combo_button_->SetOrientation(combo_button_orientation_);
@@ -1111,11 +1142,39 @@ index d69e4dd30f732..3259723463ac3 100644
 +  // re-enters it, which LayoutManagerBase forbids outright. The cost is that
 +  // the decision lands one pass late, exactly like combo_button_orientation_
 +  // above, and the preferred-size change it causes drives that next pass.
-+  combo_button_->FitLeadingButtonTo(width() - GetNonComboPreferredWidth());
++  //
++  // The caption buttons are subtracted only while they share this row: once
++  // the row has wrapped below them, CalculateProposedLayout() lays it out
++  // from x=0 (see `left_alignment`) and their width is this row's to use.
++  // Subtracting it unconditionally dropped the name with the room to show it
++  // sitting unused to the left.
++  const bool shares_row_with_caption_buttons =
++      !WillWrapDueToOverflow(width()) && !is_exiting_expand_on_hover_;
++  combo_button_->FitLeadingButtonTo(
++      width() - GetNonComboPreferredWidth() -
++      (shares_row_with_caption_buttons ? caption_button_width_ : 0));
  }
  
  views::ProposedLayout VerticalTabStripTopContainer::CalculateProposedLayout(
-@@ -426,16 +439,19 @@ void VerticalTabStripTopContainer::OnCollapseButtonContextMenuClosed() {
+@@ -417,8 +440,16 @@ void VerticalTabStripTopContainer::SetIsExitingExpandOnHoverForLayout(
+ 
+ bool VerticalTabStripTopContainer::WillWrapDueToOverflow(
+     int available_width) const {
++  // Measured against what the row costs once the combo button's leading
++  // segment has dropped its label, not its labelled width: dropping the
++  // project name is the cheaper concession, so a row that fits either way
++  // should take it rather than wrap below the caption buttons.
+   return caption_button_width_ > 0 &&
+-         GetPreferredWidth() + caption_button_width_ >= available_width;
++         GetNonComboPreferredWidth() +
++                 combo_button_->GetMinimumWidthForOrientation(
++                     views::LayoutOrientation::kHorizontal) +
++                 caption_button_width_ >=
++             available_width;
+ }
+ 
+ void VerticalTabStripTopContainer::OnCollapseButtonContextMenuClosed() {
+@@ -426,16 +457,19 @@ void VerticalTabStripTopContainer::OnCollapseButtonContextMenuClosed() {
  }
  
  int VerticalTabStripTopContainer::GetPreferredWidth() const {
@@ -1142,16 +1201,6 @@ index d69e4dd30f732..3259723463ac3 100644
    // Collapse Button
    if (collapse_button_ && collapse_button_->GetVisible()) {
      total_width += collapse_button_->GetPreferredSize().width() + padding;
-@@ -446,6 +462,9 @@ int VerticalTabStripTopContainer::GetPreferredWidth() const {
-     total_width += unfocus_button_->GetPreferredSize().width() + padding;
-   }
- 
-+  // Caption buttons share this row when they are leading.
-+  total_width += caption_button_width_;
-+
-   return total_width;
- }
- 
 diff --git a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h
 index 27763751c72b7..7f40dd895d146 100644
 --- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h

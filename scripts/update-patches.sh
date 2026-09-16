@@ -147,7 +147,8 @@ gen 0001-branding.patch \
   chrome/app/theme/chromium/BRANDING \
   chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/Contents.json \
   chrome/app/theme/chromium/mac/Assets.xcassets/Contents.json \
-  chrome/app/theme/chromium/product_logo.svg
+  chrome/app/theme/chromium/product_logo.svg \
+  components/os_crypt/common/keychain_password_mac.mm
 
 gen 0002-binary-rename.patch \
   build/win/reorder-imports.py \
